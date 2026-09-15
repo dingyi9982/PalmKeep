@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "app_name", "value": "掌心密匣" },
+    { "name": "module_desc", "value": "纯本地加密的个人信息保险箱" },
+    { "name": "entry_desc", "value": "安全保存账号、文字、图片和视频" }
+  ]
+}

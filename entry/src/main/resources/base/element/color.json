@@ -1,0 +1,14 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#08110F" },
+    { "name": "app_background", "value": "#08110F" },
+    { "name": "app_surface", "value": "#0F1D19" },
+    { "name": "app_surface_secondary", "value": "#162823" },
+    { "name": "app_primary", "value": "#67E8C5" },
+    { "name": "app_text_primary", "value": "#EDF8F4" },
+    { "name": "app_text_secondary", "value": "#91A9A0" },
+    { "name": "app_border", "value": "#243A33" },
+    { "name": "app_danger", "value": "#FF7B86" },
+    { "name": "app_warning", "value": "#F3C969" }
+  ]
+}

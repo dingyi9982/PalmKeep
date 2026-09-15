@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "PalmVault HarmonyOS application",
+  "main": "",
+  "author": "PalmVault",
+  "license": "MIT",
+  "dependencies": {}
+}

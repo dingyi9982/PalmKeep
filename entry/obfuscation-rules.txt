@@ -1,0 +1,2 @@
+# Obfuscation rules for release builds.
+# Keep this file present because entry/build-profile.json5 references it.

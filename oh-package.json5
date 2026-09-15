@@ -1,0 +1,11 @@
+{
+  "modelVersion": "6.0.1",
+  "name": "palmvault",
+  "version": "1.0.0",
+  "description": "掌心密匣：纯本地加密的个人信息保险箱",
+  "main": "",
+  "author": "PalmVault",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}
