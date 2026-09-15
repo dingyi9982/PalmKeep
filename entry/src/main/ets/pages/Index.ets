@@ -41,6 +41,7 @@ struct Index {
   @State private loginCount: number = 0;
   @State private noteCount: number = 0;
   @State private mediaCount: number = 0;
+  @State private fileCount: number = 0;
   @State private searchText: string = '';
   @State private selectedGroupId: number = -1;
   @State private showNewItem: boolean = false;
@@ -175,6 +176,7 @@ struct Index {
     this.loginCount = 0;
     this.noteCount = 0;
     this.mediaCount = 0;
+    this.fileCount = 0;
     this.groups = [];
     this.sessionKey.fill(0);
     this.sessionKey = new Uint8Array(0);
@@ -347,6 +349,7 @@ struct Index {
     this.loginCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.Login).length;
     this.noteCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.Note).length;
     this.mediaCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.Image || item.type === VaultItemType.Video).length;
+    this.fileCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.File).length;
     if (this.groups.length > 0 && this.newGroupId === 0) {
       this.newGroupId = this.groups[0].id;
     }
@@ -391,7 +394,8 @@ struct Index {
 
   private async chooseMedia(fromFile: boolean = false): Promise<void> {
     try {
-      const media = fromFile ? await mediaPickerService.pickFile(this.newType) : await mediaPickerService.pickOne(this.newType);
+      const media = fromFile || this.newType === VaultItemType.File ?
+        await mediaPickerService.pickFile(this.newType) : await mediaPickerService.pickOne(this.newType);
       if (!media) {
         return;
       }
@@ -400,7 +404,7 @@ struct Index {
       this.pendingAttachment = media.data;
       this.newType = media.type;
       if (this.newTitle.length === 0) {
-        this.newTitle = media.type === VaultItemType.Video ? '私密视频' : '私密图片';
+        this.newTitle = media.name;
       }
     } catch (error) {
       promptAction.showToast({ message: this.describeError(error) });
@@ -423,7 +427,7 @@ struct Index {
       this.resetNewItem();
       this.showNewItem = false;
       await this.reloadVault();
-      promptAction.showToast({ message: '项目已加密保存' });
+      promptAction.showToast({ message: '项目已保存' });
     } catch (error) {
       promptAction.showToast({ message: this.describeError(error) });
     }
@@ -476,6 +480,21 @@ struct Index {
     this.selectedItem = undefined;
     await this.reloadVault();
     promptAction.showToast({ message: '项目已移入回收站' });
+  }
+
+  private async downloadAttachment(item: VaultItem): Promise<void> {
+    let data = new Uint8Array(0);
+    try {
+      data = await vaultRepository.readAttachment(item.id);
+      if (data.length === 0) { throw new Error('此项目没有可导出的附件'); }
+      const fileName = mediaPickerService.downloadName(item.title, item.attachmentUri, item.type);
+      const saved = await mediaPickerService.saveCopy(data, fileName);
+      if (saved) { promptAction.showToast({ message: '已导出解密副本' }); }
+    } catch (error) {
+      promptAction.showToast({ message: this.describeError(error) });
+    } finally {
+      data.fill(0);
+    }
   }
 
   private resetNewItem(): void {
@@ -596,7 +615,7 @@ struct Index {
               .fontColor(COLOR_DANGER)
               .width('100%')
           }
-          Button(this.busy ? '正在创建…' : '创建加密保险库')
+          Button(this.busy ? '正在创建…' : '创建本地保险库')
             .width('100%')
             .height(52)
             .fontSize(16)
@@ -615,7 +634,7 @@ struct Index {
 
         Row({ space: 9 }) {
           Text('✓').fontColor(COLOR_PRIMARY)
-          Text('PBKDF2 · AES-256-GCM · 本机存储')
+          Text('登录验证 · 明文本机存储（开发模式）')
             .fontSize(12)
             .fontColor(COLOR_MUTED)
         }
@@ -863,7 +882,7 @@ struct Index {
               .fontSize(28)
               .fontWeight(FontWeight.Bold)
               .fontColor(COLOR_TEXT)
-            Text('全部数据均已在本机加密')
+            Text('开发模式 · 数据明文保存在本机')
               .fontSize(13)
               .fontColor(COLOR_MUTED)
           }
@@ -880,10 +899,10 @@ struct Index {
         .width('100%')
 
         Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-          this.statCard('账号密码', `${this.loginCount}`, '⌘', '本地加密保存')
+          this.statCard('账号密码', `${this.loginCount}`, '⌘', '本机保存')
           this.statCard('私密笔记', `${this.noteCount}`, '✎', '支持全文搜索')
-          this.statCard('照片与视频', `${this.mediaCount}`, '▧', '媒体保持在本机')
-          this.statCard('安全状态', '已保护', '✓', 'AES-256-GCM')
+          this.statCard('照片与视频', `${this.mediaCount}`, '▧', '支持预览与导出')
+          this.statCard('文件', `${this.fileCount}`, '▤', '支持任意文件')
         }
         .width('100%')
 
@@ -898,7 +917,7 @@ struct Index {
           }
           .width('100%')
           if (this.allItems.length === 0) {
-            this.emptyState('保险库还是空的', '新建一个账号、笔记或导入私密媒体')
+            this.emptyState('保险库还是空的', '新建账号、笔记，或导入文件与媒体')
           } else {
             ForEach(this.allItems.slice(0, 4), (item: VaultItem): void => {
               this.itemRow(item)
@@ -920,7 +939,7 @@ struct Index {
       Row() {
         Column({ space: 4 }) {
           Text('全部项目').fontSize(27).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-          Text(`${this.items.length} 个加密项目`).fontSize(13).fontColor(COLOR_MUTED)
+          Text(`${this.items.length} 个本地项目`).fontSize(13).fontColor(COLOR_MUTED)
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
@@ -1083,8 +1102,8 @@ struct Index {
           '自动锁定｜后台超过 10 分钟'
         ])
         this.settingSection('本地数据', [
-          '加密数据库｜AES-256-GCM',
-          '媒体附件｜写入加密数据库',
+          '开发数据库｜明文存储',
+          '文件与媒体｜写入本地数据库',
           '云端同步｜未启用'
         ])
         Button('立即锁定保险库')
@@ -1282,6 +1301,7 @@ struct Index {
             this.typeChip(VaultItemType.Note)
             this.typeChip(VaultItemType.Image)
             this.typeChip(VaultItemType.Video)
+            this.typeChip(VaultItemType.File)
             this.typeChip(VaultItemType.Identity)
           }
           .width('100%')
@@ -1307,6 +1327,11 @@ struct Index {
             Button('从文件选择')
               .width('100%').height(44).fontColor(COLOR_PRIMARY).backgroundColor(COLOR_SURFACE_2)
               .onClick((): void => { this.chooseMedia(true); })
+          } else if (this.newType === VaultItemType.File) {
+            Button(this.newAttachmentUri.length > 0 ? '✓ 已选择文件' : '选择要保存的文件')
+              .width('100%').height(48).fontColor(COLOR_PRIMARY)
+              .backgroundColor('#173128').borderRadius(12)
+              .onClick((): void => { this.chooseMedia(true); })
           }
           TextArea({ placeholder: '私密内容或备注', text: this.newNotes })
             .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
@@ -1327,7 +1352,7 @@ struct Index {
             }
           }
           .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
-          Button('加密保存')
+          Button('保存')
             .width('100%').height(50).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
             .backgroundColor(COLOR_PRIMARY).borderRadius(13)
             .onClick((): void => { this.createItem(); })
@@ -1411,6 +1436,21 @@ struct Index {
             .onChange((value: string): void => { this.detailNotes = value; })
           if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
             VaultMedia({ itemId: item.id, mediaType: item.type })
+          }
+          if (item.type === VaultItemType.File) {
+            Row({ space: 12 }) {
+              Text('▤').fontSize(28).fontColor(COLOR_PRIMARY)
+              Column({ space: 3 }) {
+                Text(item.title).fontSize(14).fontColor(COLOR_TEXT).maxLines(1)
+                Text('文件保存在应用本地数据库中').fontSize(11).fontColor(COLOR_MUTED)
+              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            }.width('100%').padding(14).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+          }
+          if (item.type === VaultItemType.Image || item.type === VaultItemType.Video || item.type === VaultItemType.File) {
+            Button('下载到本地')
+              .width('100%').height(48).fontColor(COLOR_PRIMARY)
+              .backgroundColor('#173128').borderRadius(13)
+              .onClick((): void => { this.downloadAttachment(item); })
           }
           Button('保存修改')
             .width('100%').height(50).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)

@@ -3,6 +3,7 @@ export enum VaultItemType {
   Note = 'note',
   Image = 'image',
   Video = 'video',
+  File = 'file',
   Identity = 'identity'
 }
 
@@ -53,6 +54,8 @@ export function itemTypeLabel(type: VaultItemType): string {
       return '图片';
     case VaultItemType.Video:
       return '视频';
+    case VaultItemType.File:
+      return '文件';
     case VaultItemType.Identity:
       return '身份信息';
     default:
@@ -70,6 +73,8 @@ export function itemTypeGlyph(type: VaultItemType): string {
       return '▧';
     case VaultItemType.Video:
       return '▶';
+    case VaultItemType.File:
+      return '▤';
     case VaultItemType.Identity:
       return '◇';
     default:

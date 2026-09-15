@@ -8,7 +8,7 @@ import {
   VaultItemType
 } from '../models/VaultModels';
 
-const DATABASE_NAME: string = 'palmvault.db';
+const DEVELOPMENT_DATABASE_NAME: string = 'palmvault-development-plain.db';
 
 class VaultRepositoryImpl {
   private store?: relationalStore.RdbStore;
@@ -18,23 +18,13 @@ class VaultRepositoryImpl {
       databaseKey.fill(0);
       return;
     }
-    const keyForStore = databaseKey.slice();
     databaseKey.fill(0);
     const config: relationalStore.StoreConfig = {
-      name: DATABASE_NAME,
+      name: DEVELOPMENT_DATABASE_NAME,
       securityLevel: relationalStore.SecurityLevel.S4,
-      encrypt: true,
-      cryptoParam: {
-        encryptionKey: keyForStore,
-        iterationCount: 0,
-        encryptionAlgo: relationalStore.EncryptionAlgo.AES_256_GCM
-      }
+      encrypt: false
     };
-    try {
-      this.store = await relationalStore.getRdbStore(context, config);
-    } finally {
-      keyForStore.fill(0);
-    }
+    this.store = await relationalStore.getRdbStore(context, config);
     await this.createSchema();
     await this.seedGroups();
   }
@@ -127,8 +117,9 @@ class VaultRepositoryImpl {
     if (input.title.trim().length === 0) {
       throw new Error('项目名称不能为空');
     }
-    if ((input.type === VaultItemType.Image || input.type === VaultItemType.Video) && input.attachmentData.length === 0) {
-      throw new Error('请先选择图片或视频');
+    if ((input.type === VaultItemType.Image || input.type === VaultItemType.Video || input.type === VaultItemType.File) &&
+      input.attachmentData.length === 0) {
+      throw new Error('请先选择要保存的文件');
     }
     const now = Date.now();
     const id = createVaultId();
@@ -201,14 +192,14 @@ class VaultRepositoryImpl {
       for (let offset = 0; offset < size; offset += 512 * 1024) {
         const chunk = await store.querySql('SELECT substr(attachment_data, ?, ?) FROM vault_items WHERE id = ? AND deleted_at = 0', [offset + 1, 512 * 1024, id]);
         try {
-          if (!chunk.goToFirstRow()) { throw new Error('媒体已不可用'); }
+          if (!chunk.goToFirstRow()) { throw new Error('附件已不可用'); }
           const bytes = chunk.getBlob(0);
           data.set(bytes, offset);
           bytes.fill(0);
         } finally { chunk.close(); }
       }
       return data;
-    } catch (error) { data.fill(0); throw new Error('媒体读取失败，请重新解锁后再试'); }
+    } catch (error) { data.fill(0); throw new Error('附件读取失败，请重新解锁后再试'); }
   }
 
   private async createSchema(): Promise<void> {
