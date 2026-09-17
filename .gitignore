@@ -12,3 +12,4 @@ local.properties
 build-profile.json5
 *.hap
 *.app
+*.tmp*

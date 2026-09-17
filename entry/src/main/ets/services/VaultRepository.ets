@@ -115,7 +115,7 @@ class VaultRepositoryImpl {
 
   async createItem(input: VaultItemInput): Promise<string> {
     if (input.title.trim().length === 0) {
-      throw new Error('项目名称不能为空');
+      throw new Error('资料名称不能为空');
     }
     if ((input.type === VaultItemType.Image || input.type === VaultItemType.Video || input.type === VaultItemType.File) &&
       input.attachmentData.length === 0) {
@@ -143,7 +143,7 @@ class VaultRepositoryImpl {
   }
 
   async updateItem(item: VaultItem): Promise<void> {
-    if (item.title.trim().length === 0) { throw new Error('项目名称不能为空'); }
+    if (item.title.trim().length === 0) { throw new Error('资料名称不能为空'); }
     await this.saveHistory(item.id);
     const values: relationalStore.ValuesBucket = {
       type: item.type,

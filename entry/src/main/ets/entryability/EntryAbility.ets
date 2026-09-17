@@ -15,9 +15,8 @@ export default class EntryAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
     AbilityContextHolder.setContext(this.context);
     windowStage.getMainWindow().then((mainWindow: window.Window): void => {
-      mainWindow.setWindowPrivacyMode(true).catch((error: Error): void => {
-        console.warn(`PalmVault privacy mode warning: ${error.message}`);
-      });
+      AbilityContextHolder.setMainWindow(mainWindow);
+      AbilityContextHolder.setPrivacyMode(true);
     });
     windowStage.loadContent('pages/Index').catch((error: Error): void => {
       console.error(`Failed to load PalmVault: ${error.message}`);

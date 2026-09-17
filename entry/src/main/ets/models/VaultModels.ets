@@ -3,8 +3,7 @@ export enum VaultItemType {
   Note = 'note',
   Image = 'image',
   Video = 'video',
-  File = 'file',
-  Identity = 'identity'
+  File = 'file'
 }
 
 export interface VaultGroup {
@@ -47,19 +46,17 @@ export function createVaultId(): string {
 export function itemTypeLabel(type: VaultItemType): string {
   switch (type) {
     case VaultItemType.Login:
-      return '账号密码';
+      return '账号';
     case VaultItemType.Note:
-      return '私密笔记';
+      return '笔记';
     case VaultItemType.Image:
       return '图片';
     case VaultItemType.Video:
       return '视频';
     case VaultItemType.File:
       return '文件';
-    case VaultItemType.Identity:
-      return '身份信息';
     default:
-      return '项目';
+      return '资料';
   }
 }
 
@@ -75,8 +72,6 @@ export function itemTypeGlyph(type: VaultItemType): string {
       return '▶';
     case VaultItemType.File:
       return '▤';
-    case VaultItemType.Identity:
-      return '◇';
     default:
       return '◆';
   }

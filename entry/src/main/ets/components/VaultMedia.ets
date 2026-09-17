@@ -89,7 +89,7 @@ export struct VaultMedia {
     try {
       data = await vaultRepository.readAttachment(this.itemId);
       if (this.disposed) { return; }
-      if (data.length === 0) { throw new Error('此项目没有媒体附件'); }
+      if (data.length === 0) { throw new Error('此资料没有媒体附件'); }
       if (this.mediaType === VaultItemType.Image) {
         const source = image.createImageSource(data.buffer as ArrayBuffer);
         try {
