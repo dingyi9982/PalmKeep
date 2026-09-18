@@ -7,12 +7,14 @@ import { VaultAttachmentInput, VaultAttachmentSummary, VaultItemType } from '../
 import { vaultRepository } from '../services/VaultRepository';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { mediaCompressionService } from '../services/MediaCompressionService';
+import { mediaOcrService } from '../services/MediaOcrService';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 
 @Component
 export struct VaultAttachmentGallery {
   itemId: string = '';
   fallbackType: VaultItemType = VaultItemType.Image;
+  initialAttachmentIndex: number = -1;
   @State private attachments: VaultAttachmentSummary[] = [];
   @State private currentIndex: number = 0;
   @State private overlayMode: string = 'none';
@@ -36,7 +38,10 @@ export struct VaultAttachmentGallery {
     const previousIndex = this.currentIndex;
     this.attachments = await vaultRepository.listItemAttachments(this.itemId);
     this.attachmentRevision += 1;
-    this.currentIndex = keepIndex ? Math.min(previousIndex, Math.max(0, this.attachments.length - 1)) : 0;
+    const initialIndex = this.attachments.findIndex((attachment: VaultAttachmentSummary): boolean =>
+      attachment.index === this.initialAttachmentIndex);
+    this.currentIndex = keepIndex ? Math.min(previousIndex, Math.max(0, this.attachments.length - 1)) :
+      Math.max(0, initialIndex);
     this.switchingMedia = false;
     this.selectedIndexes = this.selectedIndexes.filter((index: number): boolean =>
       this.attachments.some((attachment: VaultAttachmentSummary): boolean => attachment.index === index));
@@ -142,23 +147,36 @@ export struct VaultAttachmentGallery {
           this.attachments.every((attachment: VaultAttachmentSummary): boolean =>
             attachment.sourceUri !== mediaItem.uri));
         const duplicateCount = picked.length - newMedia.length;
+        const imageCount = newMedia.filter((mediaItem: PickedMedia): boolean =>
+          mediaItem.type === VaultItemType.Image).length;
+        if (imageCount > 0) {
+          this.progressText = `正在识别图片文字 0/${imageCount}`;
+          const ocrResults = await mediaOcrService.recognizeBatch(newMedia,
+            (completed: number, total: number): void => {
+              this.progressText = `正在识别图片文字 ${completed}/${total}`;
+              this.progress = Math.round((completed / total) * 25);
+            });
+          for (let index = 0; index < newMedia.length; index += 1) {
+            newMedia[index].ocrText = ocrResults[index];
+          }
+        }
         const attachments: VaultAttachmentInput[] = [];
         for (let index = 0; index < newMedia.length; index += 1) {
           const mediaItem = newMedia[index];
           this.progressText = `正在压缩 ${index + 1}/${newMedia.length}`;
           const path = await mediaCompressionService.compress(mediaItem.uri, mediaItem.type,
             (value: number): void => {
-              this.progress = Math.round(((index + value / 100) / newMedia.length) * 70);
+              this.progress = 25 + Math.round(((index + value / 100) / newMedia.length) * 50);
             });
           temporaryPaths.push(path);
           attachments.push({ type: mediaItem.type, uri: path, sourceUri: mediaItem.uri,
-            name: mediaItem.name, data: new Uint8Array(0) });
+            name: mediaItem.name, ocrText: mediaItem.ocrText, data: new Uint8Array(0) });
         }
         if (attachments.length > 0) {
           this.progressText = '正在写入本地数据';
           await vaultRepository.appendItemAttachments(this.itemId, attachments,
             (completed: number, total: number): void => {
-              this.progress = 70 + Math.round((completed / total) * 30);
+              this.progress = 75 + Math.round((completed / total) * 25);
             });
           await this.load(true);
         }
@@ -314,6 +332,23 @@ export struct VaultAttachmentGallery {
         }.width('100%')
         Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
           .width('100%').height(4).color('#2DD6A6')
+      }.width('100%')
+    }
+  }
+
+  @Builder
+  private currentImageOcrText(): void {
+    if (this.attachments.length > this.currentIndex &&
+      this.attachments[this.currentIndex].type === VaultItemType.Image) {
+      Column({ space: 6 }) {
+        Text('图片文字（自动识别）').fontSize(11).fontColor('#91A09A').width('100%')
+        Scroll() {
+          Text(this.attachments[this.currentIndex].ocrText)
+            .fontSize(12).fontColor('#DCE9E4').width('100%').textAlign(TextAlign.Start)
+        }
+        .width('100%')
+        .height(this.attachments[this.currentIndex].ocrText.length > 0 ? 96 : 40)
+        .padding(9).backgroundColor('#101E1A').borderRadius(12).scrollBar(BarState.Auto)
       }.width('100%')
     }
   }
@@ -529,6 +564,7 @@ export struct VaultAttachmentGallery {
             if (event.offsetX > 60) { this.move(-1); }
           }))
         this.thumbnailStrip()
+        this.currentImageOcrText()
         this.progressRow()
       } else if (this.attachments.length === 0) {
         VaultMedia({ itemId: this.itemId, mediaType: this.fallbackType })

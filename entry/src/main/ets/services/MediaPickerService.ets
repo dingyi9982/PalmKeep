@@ -11,6 +11,7 @@ export interface PickedMedia {
   type: VaultItemType;
   data: Uint8Array;
   name: string;
+  ocrText: string;
 }
 
 export class MediaPickerService {
@@ -26,7 +27,7 @@ export class MediaPickerService {
     }
     const uris = await new picker.DocumentViewPicker().select(options);
     if (uris.length === 0) { return undefined; }
-    return { uri: uris[0], type: type, data: this.readMedia(uris[0]), name: this.fileName(uris[0], type) };
+    return { uri: uris[0], type: type, data: this.readMedia(uris[0]), name: this.fileName(uris[0], type), ocrText: '' };
   }
 
   async pickFiles(): Promise<PickedMedia[]> {
@@ -41,7 +42,8 @@ export class MediaPickerService {
           uri: uri,
           type: VaultItemType.File,
           data: new Uint8Array(0),
-          name: this.fileName(uri, VaultItemType.File)
+          name: this.fileName(uri, VaultItemType.File),
+          ocrText: ''
         });
       }
       return picked;
@@ -69,7 +71,8 @@ export class MediaPickerService {
       uri: uri,
       type: isVideo ? VaultItemType.Video : VaultItemType.Image,
       data: this.readMedia(uri),
-      name: this.fileName(uri, isVideo ? VaultItemType.Video : VaultItemType.Image)
+      name: this.fileName(uri, isVideo ? VaultItemType.Video : VaultItemType.Image),
+      ocrText: ''
     };
   }
 
@@ -84,7 +87,7 @@ export class MediaPickerService {
       for (let index = 0; index < result.photoUris.length; index += 1) {
         const uri = result.photoUris[index];
         const type = await this.detectMediaType(uri);
-        picked.push({ uri: uri, type: type, data: new Uint8Array(0), name: this.fileName(uri, type) });
+        picked.push({ uri: uri, type: type, data: new Uint8Array(0), name: this.fileName(uri, type), ocrText: '' });
       }
       return picked;
     } catch (error) {

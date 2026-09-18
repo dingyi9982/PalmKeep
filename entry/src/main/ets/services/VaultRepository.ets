@@ -8,6 +8,7 @@ import {
   VaultGroup,
   VaultItem,
   VaultItemInput,
+  VaultSearchHit,
   VaultItemType
 } from '../models/VaultModels';
 
@@ -128,9 +129,11 @@ class VaultRepositoryImpl {
     }
     const cleanSearch = search.trim();
     if (cleanSearch.length > 0) {
-      sql += ' AND (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ?)';
+      sql += ' AND (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ? OR EXISTS (' +
+        'SELECT 1 FROM vault_item_attachments search_attachment ' +
+        'WHERE search_attachment.item_id = vault_items.id AND search_attachment.ocr_text LIKE ?))';
       const pattern = `%${cleanSearch}%`;
-      args.push(pattern, pattern, pattern, pattern);
+      args.push(pattern, pattern, pattern, pattern, pattern);
     }
     sql += ' ORDER BY updated_at DESC';
     const result = await this.requireStore().querySql(sql, args);
@@ -143,6 +146,50 @@ class VaultRepositoryImpl {
       result.close();
     }
     return items;
+  }
+
+  async searchItems(search: string): Promise<VaultSearchHit[]> {
+    const cleanSearch = search.trim();
+    if (cleanSearch.length === 0) { return []; }
+    const pattern = `%${cleanSearch}%`;
+    const fields = 'vault_items.id AS id, vault_items.type AS type, vault_items.group_id AS group_id, ' +
+      'vault_items.title AS title, vault_items.username AS username, vault_items.password AS password, ' +
+      'vault_items.notes AS notes, vault_items.attachment_uri AS attachment_uri, vault_items.ocr_text AS ocr_text, ' +
+      'vault_items.created_at AS created_at, vault_items.updated_at AS updated_at, vault_items.deleted_at AS deleted_at';
+    const sql = 'SELECT ' + fields + ', search_attachment.attachment_index AS matched_attachment_index, ' +
+      'search_attachment.ocr_text AS matched_ocr_text ' +
+      'FROM vault_items JOIN vault_item_attachments search_attachment ON search_attachment.item_id = vault_items.id ' +
+      'WHERE vault_items.deleted_at = 0 AND search_attachment.type = ? AND search_attachment.ocr_text LIKE ? ' +
+      'UNION ALL SELECT ' + fields + ', -1 AS matched_attachment_index, \'\' AS matched_ocr_text FROM vault_items ' +
+      'WHERE vault_items.deleted_at = 0 AND (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ?) ' +
+      'AND NOT EXISTS (SELECT 1 FROM vault_item_attachments search_attachment ' +
+      'WHERE search_attachment.item_id = vault_items.id AND search_attachment.type = ? ' +
+      'AND search_attachment.ocr_text LIKE ?) ORDER BY updated_at DESC, matched_attachment_index ASC';
+    const result = await this.requireStore().querySql(sql,
+      [VaultItemType.Image, pattern, pattern, pattern, pattern, pattern, VaultItemType.Image, pattern]);
+    const hits: VaultSearchHit[] = [];
+    try {
+      while (result.goToNextRow()) {
+        const matchedOcrText = result.getString(result.getColumnIndex('matched_ocr_text'));
+        hits.push({
+          item: this.readItem(result),
+          attachmentIndex: result.getLong(result.getColumnIndex('matched_attachment_index')),
+          matchedTextLine: this.findMatchingTextLine(matchedOcrText, cleanSearch)
+        });
+      }
+    } finally { result.close(); }
+    return hits;
+  }
+
+  private findMatchingTextLine(text: string, search: string): string {
+    if (text.length === 0) { return ''; }
+    const normalizedSearch = search.toLowerCase();
+    const lines = text.split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index].trim();
+      if (line.toLowerCase().indexOf(normalizedSearch) >= 0) { return line; }
+    }
+    return text.trim();
   }
 
   async createItem(input: VaultItemInput): Promise<string> {
@@ -225,11 +272,13 @@ class VaultRepositoryImpl {
           attachment_index: index,
           type: attachment.type,
           name: attachment.name,
-          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri
+          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri,
+          ocr_text: attachment.ocrText
         });
         await this.importAttachmentParts(id, index, attachment.uri);
         if (onProgress) { onProgress(index + 1, attachments.length); }
       }
+      await this.refreshItemOcrText(id);
       store.commit();
     } catch (error) {
       store.rollBack();
@@ -239,7 +288,7 @@ class VaultRepositoryImpl {
 
   async listItemAttachments(itemId: string): Promise<VaultAttachmentSummary[]> {
     const result = await this.requireStore().querySql(
-      'SELECT attachment_index, type, name, source_uri FROM vault_item_attachments WHERE item_id = ? ORDER BY attachment_index ASC',
+      'SELECT attachment_index, type, name, source_uri, ocr_text FROM vault_item_attachments WHERE item_id = ? ORDER BY attachment_index ASC',
       [itemId]
     );
     const attachments: VaultAttachmentSummary[] = [];
@@ -249,7 +298,8 @@ class VaultRepositoryImpl {
           index: result.getLong(0),
           type: result.getString(1) as VaultItemType,
           name: result.getString(2),
-          sourceUri: result.getString(3)
+          sourceUri: result.getString(3),
+          ocrText: result.getString(4)
         });
       }
     } finally { result.close(); }
@@ -272,7 +322,8 @@ class VaultRepositoryImpl {
           attachment_index: index,
           type: attachment.type,
           name: attachment.name,
-          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri
+          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri,
+          ocr_text: attachment.ocrText
         });
         await this.importAttachmentParts(itemId, index, attachment.uri);
         if (onProgress) { onProgress(index + 1, attachments.length); }
@@ -281,6 +332,7 @@ class VaultRepositoryImpl {
         'UPDATE vault_items SET type = ?, attachment_uri = ?, attachment_data = ?, updated_at = ? WHERE id = ?',
         [VaultItemType.Image, '', new Uint8Array(0), Date.now(), itemId]
       );
+      await this.refreshItemOcrText(itemId);
       store.commit();
     } catch (error) {
       store.rollBack();
@@ -304,12 +356,14 @@ class VaultRepositoryImpl {
           attachment_index: attachmentIndex,
           type: attachment.type,
           name: attachment.name,
-          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri
+          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri,
+          ocr_text: attachment.ocrText
         });
         await this.importAttachmentParts(itemId, attachmentIndex, attachment.uri);
         if (onProgress) { onProgress(index + 1, attachments.length); }
       }
       await store.executeSql('UPDATE vault_items SET updated_at = ? WHERE id = ?', [Date.now(), itemId]);
+      await this.refreshItemOcrText(itemId);
       store.commit();
     } catch (error) {
       store.rollBack();
@@ -362,6 +416,7 @@ class VaultRepositoryImpl {
         );
       }
       await store.executeSql('UPDATE vault_items SET updated_at = ? WHERE id = ?', [Date.now(), itemId]);
+      await this.refreshItemOcrText(itemId);
       store.commit();
     } catch (error) {
       store.rollBack();
@@ -382,7 +437,6 @@ class VaultRepositoryImpl {
       password: item.password,
       notes: item.notes,
       attachment_uri: item.attachmentUri,
-      ocr_text: item.ocrText,
       updated_at: Date.now()
     };
     const predicates = new relationalStore.RdbPredicates('vault_items');
@@ -572,9 +626,42 @@ class VaultRepositoryImpl {
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_history (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, snapshot TEXT NOT NULL, created_at INTEGER NOT NULL)');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_group_tombstones (group_id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT NOT NULL, created_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL)');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_attachment_chunks (item_id TEXT NOT NULL, chunk_index INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (item_id, chunk_index))');
-    await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_attachments (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL, source_uri TEXT NOT NULL, PRIMARY KEY (item_id, attachment_index))');
+    await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_attachments (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL, source_uri TEXT NOT NULL, ocr_text TEXT NOT NULL DEFAULT \'\', PRIMARY KEY (item_id, attachment_index))');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_attachment_parts (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, chunk_index INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (item_id, attachment_index, chunk_index))');
+    await this.ensureAttachmentOcrColumn();
     await store.executeSql('CREATE INDEX IF NOT EXISTS idx_vault_items_group ON vault_items(group_id, deleted_at, updated_at)');
+  }
+
+  private async ensureAttachmentOcrColumn(): Promise<void> {
+    const columns = await this.requireStore().querySql('PRAGMA table_info(vault_item_attachments)');
+    let hasOcrText = false;
+    try {
+      const nameIndex = columns.getColumnIndex('name');
+      while (columns.goToNextRow()) {
+        if (columns.getString(nameIndex) === 'ocr_text') { hasOcrText = true; break; }
+      }
+    } finally { columns.close(); }
+    if (!hasOcrText) {
+      await this.requireStore().executeSql(
+        'ALTER TABLE vault_item_attachments ADD COLUMN ocr_text TEXT NOT NULL DEFAULT \'\''
+      );
+    }
+  }
+
+  private async refreshItemOcrText(itemId: string): Promise<void> {
+    const result = await this.requireStore().querySql(
+      'SELECT ocr_text FROM vault_item_attachments WHERE item_id = ? AND type = ? ORDER BY attachment_index ASC',
+      [itemId, VaultItemType.Image]
+    );
+    const values: string[] = [];
+    try {
+      while (result.goToNextRow()) {
+        const value = result.getString(0).trim();
+        if (value.length > 0) { values.push(value); }
+      }
+    } finally { result.close(); }
+    await this.requireStore().executeSql('UPDATE vault_items SET ocr_text = ? WHERE id = ?',
+      [values.join('\n'), itemId]);
   }
 
   private async importAttachmentChunks(itemId: string, uri: string): Promise<void> {

@@ -8,6 +8,7 @@ import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { QuickUnlockStatus, VaultSecurityService } from '../services/VaultSecurityService';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { mediaCompressionService } from '../services/MediaCompressionService';
+import { mediaOcrService } from '../services/MediaOcrService';
 import { vaultRepository } from '../services/VaultRepository';
 import {
   itemTypeGlyph,
@@ -16,6 +17,7 @@ import {
   VaultGroup,
   VaultItem,
   VaultItemInput,
+  VaultSearchHit,
   VaultItemType
 } from '../models/VaultModels';
 
@@ -47,6 +49,7 @@ struct Index {
   @State private mediaCount: number = 0;
   @State private fileCount: number = 0;
   @State private searchText: string = '';
+  @State private searchHits: VaultSearchHit[] = [];
   @State private searchActive: boolean = false;
   @State private showNewItem: boolean = false;
   @State private showNewGroup: boolean = false;
@@ -64,6 +67,7 @@ struct Index {
   @State private gestureCooldownUntil: number = 0;
   @State private trashItems: VaultItem[] = [];
   @State private selectedItem?: VaultItem = undefined;
+  @State private selectedAttachmentIndex: number = -1;
   @State private revealPassword: boolean = false;
   @State private newType: VaultItemType = VaultItemType.Login;
   @State private newTitle: string = '';
@@ -73,6 +77,10 @@ struct Index {
   @State private newNotes: string = '';
   @State private newAttachmentUri: string = '';
   @State private selectedMediaCount: number = 0;
+  @State private selectedMediaPreviewIndex: number = 0;
+  @State private currentPendingMediaOcrText: string = '';
+  @State private recognizingMedia: boolean = false;
+  @State private recognitionProgressText: string = '';
   @State private selectedFileCount: number = 0;
   @State private savingNewItem: boolean = false;
   @State private saveProgress: number = 0;
@@ -91,13 +99,23 @@ struct Index {
   @State private detailNotes: string = '';
   @State private detailGroupId: number = 0;
   private pendingAttachment: Uint8Array = new Uint8Array(0);
-  private pendingMedia: PickedMedia[] = [];
+  @State private pendingMedia: PickedMedia[] = [];
   private pendingFiles: PickedMedia[] = [];
+  private mediaRecognitionVersion: number = 0;
+  private searchVersion: number = 0;
   private sessionKey: Uint8Array = new Uint8Array(0);
   private firstGesture: number[] = [];
 
   aboutToAppear(): void {
     this.initialize();
+  }
+
+  onBackPress(): boolean {
+    if (this.showNewItem) {
+      this.requestCloseNewItem();
+      return true;
+    }
+    return false;
   }
 
   private async initialize(): Promise<void> {
@@ -184,6 +202,8 @@ struct Index {
     this.trashItems = [];
     this.activeTab = 0;
     this.searchText = '';
+    this.searchHits = [];
+    this.searchVersion += 1;
     this.searchActive = false;
     this.expandedGroupId = -1;
     this.showCategoryItems = false;
@@ -196,6 +216,7 @@ struct Index {
     this.detailGroupId = 0;
     this.resetNewItem();
     this.selectedItem = undefined;
+    this.selectedAttachmentIndex = -1;
     this.showNewItem = false;
     this.showNewGroup = false;
     this.groupPendingRename = undefined;
@@ -290,13 +311,36 @@ struct Index {
   }
 
   private closeNewItem(): void {
-    if (this.savingNewItem) { return; }
     this.showNewItem = false;
     this.revealNewPassword = false;
     AbilityContextHolder.setPrivacyMode(false);
   }
 
-  private selectNewItemType(type: VaultItemType): void {
+  private hasUnsavedNewItem(): boolean {
+    return this.newTitle.length > 0 || this.newUsername.length > 0 || this.newPassword.length > 0 ||
+      this.newNotes.length > 0 || this.pendingAttachment.length > 0 || this.pendingMedia.length > 0 ||
+      this.pendingFiles.length > 0;
+  }
+
+  private async requestCloseNewItem(): Promise<void> {
+    if (this.savingNewItem) { return; }
+    if (this.hasUnsavedNewItem()) {
+      try {
+        const choice = await promptAction.showDialog({
+          title: '放弃未保存的资料？',
+          message: '已填写的内容和已选择的素材将被清空。',
+          buttons: [{ text: '继续编辑', color: COLOR_MUTED }, { text: '放弃', color: COLOR_DANGER }]
+        });
+        if (choice.index !== 1) { return; }
+      } catch (error) {
+        return;
+      }
+    }
+    this.resetNewItem();
+    this.closeNewItem();
+  }
+
+  private applyNewItemType(type: VaultItemType): void {
     try {
       this.getUIContext().getFocusController().requestFocus(this.newItemTitleInputId());
     } catch (error) {
@@ -316,6 +360,24 @@ struct Index {
     this.requestNewItemTitleFocus(120);
   }
 
+  private async requestSelectNewItemType(type: VaultItemType): Promise<void> {
+    if (type === this.newType || this.savingNewItem) { return; }
+    if (this.hasUnsavedNewItem()) {
+      try {
+        const choice = await promptAction.showDialog({
+          title: '切换资料类型？',
+          message: '当前未保存的内容将被清空。',
+          buttons: [{ text: '继续编辑', color: COLOR_MUTED }, { text: '切换', color: COLOR_DANGER }]
+        });
+        if (choice.index !== 1) { return; }
+      } catch (error) {
+        return;
+      }
+      this.resetNewItem();
+    }
+    this.applyNewItemType(type);
+  }
+
   private toggleNewPasswordVisibility(): void {
     this.revealNewPassword = !this.revealNewPassword;
     AbilityContextHolder.setPrivacyMode(this.revealNewPassword);
@@ -323,6 +385,7 @@ struct Index {
 
   private async closeSelectedItem(): Promise<void> {
     this.selectedItem = undefined;
+    this.selectedAttachmentIndex = -1;
     this.detailGroupId = 0;
     this.detailPassword = '';
     this.revealPassword = false;
@@ -494,7 +557,13 @@ struct Index {
     if (this.groups.length > 0 && this.newGroupId === 0) {
       this.newGroupId = this.groups[0].id;
     }
-    this.items = await vaultRepository.listItems(this.searchText, -1);
+    if (this.searchText.trim().length > 0) {
+      this.searchHits = await vaultRepository.searchItems(this.searchText);
+      this.items = [];
+    } else {
+      this.searchHits = [];
+      this.items = await vaultRepository.listItems('', -1);
+    }
   }
 
   private async refreshTrash(): Promise<void> {
@@ -517,7 +586,18 @@ struct Index {
   private async applySearch(text: string): Promise<void> {
     this.searchText = text;
     this.activeTab = 0;
-    this.items = await vaultRepository.listItems(text, -1);
+    const version = ++this.searchVersion;
+    if (text.trim().length === 0) {
+      this.searchHits = [];
+      const items = await vaultRepository.listItems('', -1);
+      if (version === this.searchVersion) { this.items = items; }
+      return;
+    }
+    const hits = await vaultRepository.searchItems(text);
+    if (version === this.searchVersion) {
+      this.searchHits = hits;
+      this.items = [];
+    }
   }
 
   private async createGroup(): Promise<void> {
@@ -646,6 +726,9 @@ struct Index {
         this.clearPendingMedia();
         this.pendingMedia = mediaItems;
         this.selectedMediaCount = mediaItems.length;
+        this.selectedMediaPreviewIndex = 0;
+        this.currentPendingMediaOcrText = '';
+        await this.recognizePendingMedia();
         return;
       }
       const files = await mediaPickerService.pickFiles();
@@ -662,6 +745,70 @@ struct Index {
     } catch (error) {
       promptAction.showToast({ message: this.describeError(error) });
     }
+  }
+
+  private async recognizePendingMedia(): Promise<void> {
+    if (this.pendingMedia.length === 0) { return; }
+    const imageCount = this.pendingMedia.filter((media: PickedMedia): boolean =>
+      media.type === VaultItemType.Image).length;
+    if (imageCount === 0) { return; }
+    const recognitionVersion = ++this.mediaRecognitionVersion;
+    this.recognizingMedia = true;
+    this.recognitionProgressText = `正在识别图片文字 0/${imageCount}`;
+    try {
+      const results = await mediaOcrService.recognizeBatch(this.pendingMedia,
+        (completed: number, total: number): void => {
+          if (recognitionVersion === this.mediaRecognitionVersion) {
+            this.recognitionProgressText = `正在识别图片文字 ${completed}/${total}`;
+          }
+        });
+      if (recognitionVersion !== this.mediaRecognitionVersion) { return; }
+      for (let index = 0; index < this.pendingMedia.length; index += 1) {
+        this.pendingMedia[index].ocrText = results[index];
+      }
+      this.pendingMedia = this.pendingMedia.slice();
+      if (this.selectedMediaPreviewIndex < this.pendingMedia.length &&
+        this.pendingMedia[this.selectedMediaPreviewIndex].type === VaultItemType.Image) {
+        this.currentPendingMediaOcrText = this.pendingMedia[this.selectedMediaPreviewIndex].ocrText;
+      } else {
+        this.currentPendingMediaOcrText = '';
+      }
+    } finally {
+      if (recognitionVersion === this.mediaRecognitionVersion) {
+        this.recognizingMedia = false;
+        this.recognitionProgressText = '';
+      }
+    }
+  }
+
+  private removePendingMedia(index: number): void {
+    if (this.recognizingMedia || this.savingNewItem || index < 0 || index >= this.pendingMedia.length) {
+      return;
+    }
+    this.pendingMedia[index].data.fill(0);
+    this.pendingMedia = this.pendingMedia.filter((media: PickedMedia, mediaIndex: number): boolean =>
+      mediaIndex !== index);
+    this.selectedMediaCount = this.pendingMedia.length;
+    if (this.pendingMedia.length === 0) {
+      this.selectedMediaPreviewIndex = 0;
+    } else if (index < this.selectedMediaPreviewIndex) {
+      this.selectedMediaPreviewIndex -= 1;
+    } else if (this.selectedMediaPreviewIndex >= this.pendingMedia.length) {
+      this.selectedMediaPreviewIndex = this.pendingMedia.length - 1;
+    }
+    if (this.pendingMedia.length > 0 &&
+      this.pendingMedia[this.selectedMediaPreviewIndex].type === VaultItemType.Image) {
+      this.currentPendingMediaOcrText = this.pendingMedia[this.selectedMediaPreviewIndex].ocrText;
+    } else {
+      this.currentPendingMediaOcrText = '';
+    }
+  }
+
+  private selectPendingMedia(index: number): void {
+    if (index < 0 || index >= this.pendingMedia.length) { return; }
+    this.selectedMediaPreviewIndex = index;
+    this.currentPendingMediaOcrText = this.pendingMedia[index].type === VaultItemType.Image ?
+      this.pendingMedia[index].ocrText : '';
   }
 
   private async createItem(): Promise<void> {
@@ -689,6 +836,7 @@ struct Index {
               uri: compressedPath,
               sourceUri: picked.uri,
               name: picked.name,
+              ocrText: picked.ocrText,
               data: new Uint8Array(0)
             });
           }
@@ -727,6 +875,7 @@ struct Index {
             type: VaultItemType.File,
             uri: file.uri,
             name: file.name,
+            ocrText: '',
             data: new Uint8Array(0)
           });
         }
@@ -773,7 +922,8 @@ struct Index {
     }
   }
 
-  private openItem(item: VaultItem): void {
+  private openItem(item: VaultItem, attachmentIndex: number = -1): void {
+    this.selectedAttachmentIndex = attachmentIndex;
     this.selectedItem = item;
     this.detailGroupId = item.groupId;
     this.detailTitle = item.title;
@@ -853,9 +1003,14 @@ struct Index {
   }
 
   private clearPendingMedia(): void {
+    this.mediaRecognitionVersion += 1;
     this.pendingMedia.forEach((media: PickedMedia): void => { media.data.fill(0); });
     this.pendingMedia = [];
     this.selectedMediaCount = 0;
+    this.selectedMediaPreviewIndex = 0;
+    this.currentPendingMediaOcrText = '';
+    this.recognizingMedia = false;
+    this.recognitionProgressText = '';
   }
 
   private clearPendingFiles(): void {
@@ -1165,28 +1320,55 @@ struct Index {
   private topBar(): void {
     Row({ space: 12 }) {
       Row({ space: 10 }) {
-        Text('⌕').fontSize(21).fontColor(COLOR_MUTED)
+        Stack() {
+          Circle({ width: 12, height: 12 })
+            .fill(Color.Transparent).stroke(COLOR_MUTED).strokeWidth(2)
+            .position({ left: 2, top: 2 })
+          Divider()
+            .width(7).strokeWidth(2).color(COLOR_MUTED).borderRadius(1)
+            .rotate({ angle: 45 })
+            .position({ left: 11, top: 14 })
+        }
+        .width(20).height(20)
+        .alignSelf(ItemAlign.Center)
         if (this.searchActive) {
-          TextInput({ placeholder: '搜索账号、笔记、媒体、文件…', text: this.searchText })
+          TextInput({ placeholder: '搜索名称、内容、图片文字…', text: this.searchText })
             .id('homeSearchInput')
             .layoutWeight(1)
-            .height(40)
+            .height(44)
             .defaultFocus(true)
             .fontSize(14)
+            .fontWeight(FontWeight.Normal)
+            .placeholderFont({ size: 14, weight: FontWeight.Normal })
+            .padding(0)
             .fontColor(COLOR_TEXT)
             .placeholderColor('#9AA2B1')
             .backgroundColor(Color.Transparent)
             .onChange((value: string): void => { this.applySearch(value); })
         } else {
-          Text(this.searchText.length > 0 ? this.searchText : '搜索账号、笔记、媒体、文件…')
+          Text(this.searchText.length > 0 ? this.searchText : '搜索名称、内容、图片文字…')
             .layoutWeight(1)
             .fontSize(14)
+            .fontWeight(FontWeight.Normal)
             .fontColor(this.searchText.length > 0 ? COLOR_TEXT : '#9AA2B1')
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
+        if (this.searchText.length > 0) {
+          Stack({ alignContent: Alignment.Center }) {
+            Circle({ width: 22, height: 22 }).fill(COLOR_SURFACE_2)
+            Divider().width(9).strokeWidth(1.6).color(COLOR_MUTED).borderRadius(1)
+              .rotate({ angle: 45 })
+            Divider().width(9).strokeWidth(1.6).color(COLOR_MUTED).borderRadius(1)
+              .rotate({ angle: -45 })
+          }
+          .width(28).height(44)
+          .alignSelf(ItemAlign.Center)
+          .onClick((): void => { this.applySearch(''); })
+        }
       }
       .height(44)
+      .alignItems(VerticalAlign.Center)
       .layoutWeight(1)
       .padding({ left: 12, right: 8 })
       .backgroundColor(COLOR_SURFACE)
@@ -1209,10 +1391,14 @@ struct Index {
   }
 
   @Builder
-  private itemRow(item: VaultItem, showThumbnail: boolean = false): void {
+  private itemRow(item: VaultItem, showThumbnail: boolean = false, highlightedAttachmentIndex: number = -1): void {
     Row({ space: 8 }) {
       if (showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video || item.type === VaultItemType.File)) {
-        VaultAttachmentPreview({ itemId: item.id, fallbackType: item.type })
+        VaultAttachmentPreview({
+          itemId: item.id,
+          fallbackType: item.type,
+          highlightAttachmentIndex: highlightedAttachmentIndex
+        })
       }
       Column({ space: 0 }) {
         if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
@@ -1246,11 +1432,40 @@ struct Index {
       Text('›').fontSize(20).fontColor('#B2B8C2')
     }
     .width('100%')
-    .height(showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video || item.type === VaultItemType.File) ? 48 : 42)
+    .height(showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video || item.type === VaultItemType.File) ?
+      (highlightedAttachmentIndex >= 0 ? 52 : 48) : 42)
     .padding({ left: 12, right: 10 })
     .backgroundColor(COLOR_SURFACE)
     .borderRadius(15)
-    .onClick((): void => { this.openItem(item); })
+    .onClick((): void => { this.openItem(item, highlightedAttachmentIndex); })
+  }
+
+  @Builder
+  private ocrSearchHitRow(hit: VaultSearchHit): void {
+    Column({ space: 4 }) {
+      if (hit.item.title.length > 0) {
+        Text(hit.item.title)
+          .fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+      }
+      VaultAttachmentPreview({
+        itemId: hit.item.id,
+        fallbackType: hit.item.type,
+        highlightAttachmentIndex: hit.attachmentIndex,
+        maxVisibleCount: 6
+      })
+      if (hit.matchedTextLine.length > 0) {
+        Text(hit.matchedTextLine)
+          .fontSize(12).lineHeight(18).fontColor(COLOR_MUTED)
+          .width('100%').textAlign(TextAlign.Start)
+      }
+    }
+    .width('100%')
+    .padding({ left: 12, right: 10, top: 6, bottom: 6 })
+    .backgroundColor(COLOR_SURFACE)
+    .borderRadius(15)
+    .onClick((): void => { this.openItem(hit.item, hit.attachmentIndex); })
   }
 
   @Builder
@@ -1391,7 +1606,7 @@ struct Index {
             Text(this.searchText.length > 0 ? '搜索结果' : '我的分组')
               .fontSize(20).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
             if (this.searchText.length > 0) {
-              Text(`找到 ${this.items.length} 条资料`)
+              Text(`找到 ${this.searchHits.length} 项结果`)
                 .fontSize(12).fontColor(COLOR_MUTED)
             }
           }
@@ -1407,13 +1622,18 @@ struct Index {
         .width('100%')
 
         if (this.searchText.length > 0) {
-          Column({ space: 7 }) {
-            if (this.items.length === 0) {
+          Column({ space: 4 }) {
+            if (this.searchHits.length === 0) {
               this.emptyState('没有找到资料', '换个关键词搜索标题、内容或图片文字')
             } else {
-              ForEach(this.items, (item: VaultItem): void => {
-                this.itemRow(item, true)
-              }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
+              ForEach(this.searchHits, (hit: VaultSearchHit): void => {
+                if (hit.attachmentIndex >= 0) {
+                  this.ocrSearchHitRow(hit)
+                } else {
+                  this.itemRow(hit.item, true)
+                }
+              }, (hit: VaultSearchHit): string =>
+                `${hit.item.id}-${hit.attachmentIndex}-${hit.item.updatedAt}`)
             }
           }
           .width('100%')
@@ -2028,7 +2248,8 @@ struct Index {
       .borderRadius(16)
       .layoutWeight(1)
       .focusable(false)
-      .onClick((): void => { this.selectNewItemType(type); })
+      .enabled(!this.savingNewItem)
+      .onClick((): void => { this.requestSelectNewItemType(type); })
   }
 
   @Builder
@@ -2036,7 +2257,7 @@ struct Index {
     Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
       ForEach(this.pendingMedia, (media: PickedMedia, index: number): void => {
         Column({ space: 4 }) {
-          Stack({ alignContent: Alignment.BottomEnd }) {
+          Stack() {
             VaultThumbnail({
               itemId: '',
               mediaType: media.type,
@@ -2046,16 +2267,64 @@ struct Index {
             if (media.type === VaultItemType.Video) {
               Text('视频').fontSize(9).fontColor('#FFFFFF')
                 .padding({ left: 5, right: 5, top: 2, bottom: 2 })
-                .margin(5).backgroundColor('#99000000').borderRadius(7)
+                .backgroundColor('#99000000').borderRadius(7)
+                .position({ right: 5, bottom: 5 })
               }
+            Text('×')
+              .fontSize(17).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+              .textAlign(TextAlign.Center)
+              .width(24).height(24).backgroundColor('#B3000000').borderRadius(12)
+              .position({ right: 4, top: 4 }).zIndex(2)
+              .hitTestBehavior(HitTestMode.Block)
+              .enabled(!this.recognizingMedia && !this.savingNewItem)
+              .opacity(this.recognizingMedia || this.savingNewItem ? 0.45 : 1)
+              .onClick((): void => { this.removePendingMedia(index); })
           }
+          .width(72).height(72)
           Text(`${index + 1}`)
             .fontSize(10).fontColor(COLOR_MUTED).textAlign(TextAlign.Center).width(72)
         }
         .margin({ right: 8, bottom: 8 })
+        .padding(2)
+        .borderRadius(13)
+        .border({ width: index === this.selectedMediaPreviewIndex ? 2 : 0,
+          color: index === this.selectedMediaPreviewIndex ? COLOR_PRIMARY : Color.Transparent })
+        .onClick((): void => { this.selectPendingMedia(index); })
       }, (media: PickedMedia): string => media.uri)
     }
     .width('100%')
+  }
+
+  @Builder
+  private pendingMediaOcrText(): void {
+    if (this.pendingMedia.length > this.selectedMediaPreviewIndex &&
+      this.pendingMedia[this.selectedMediaPreviewIndex].type === VaultItemType.Image) {
+      Column({ space: 9 }) {
+        Row({ space: 8 }) {
+          Text('图片文字').fontSize(13).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+          Blank()
+          Text('自动识别 · 只读')
+            .fontSize(10).fontColor(COLOR_PRIMARY)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor('#E5F7F1').borderRadius(10)
+        }.width('100%')
+        Scroll() {
+          Text(this.currentPendingMediaOcrText.length > 0 ? this.currentPendingMediaOcrText : '未识别到文字')
+            .fontSize(13)
+            .fontColor(this.currentPendingMediaOcrText.length > 0 ? COLOR_TEXT : COLOR_MUTED)
+            .width('100%')
+            .textAlign(TextAlign.Start)
+        }
+        .width('100%')
+        .height(this.currentPendingMediaOcrText.length > 0 ? 92 : 24)
+        .scrollBar(BarState.Auto)
+      }
+      .width('100%')
+      .padding(12)
+      .backgroundColor('#F5FBF9')
+      .border({ width: 1, color: '#D8EEE7' })
+      .borderRadius(12)
+    }
   }
 
   @Builder
@@ -2115,7 +2384,7 @@ struct Index {
     Column() {
       Scroll() {
         Column({ space: 10 }) {
-          this.modalHeader('新建资料', (): void => { this.closeNewItem(); })
+          this.modalHeader('新建资料', (): void => { this.requestCloseNewItem(); })
           Text('保存到分组').fontSize(12).fontColor(COLOR_MUTED).width('100%')
           Scroll() {
             Row({ space: 6 }) {
@@ -2166,12 +2435,19 @@ struct Index {
             }
           }
           if (this.newType === VaultItemType.Image) {
-            Button(this.selectedMediaCount > 0 ? `✓ 已选择 ${this.selectedMediaCount} 项媒体` : '从系统相册中选择')
+            Button('从系统相册中添加')
               .width('100%').height(48).fontColor(COLOR_PRIMARY)
               .backgroundColor('#173128').borderRadius(12)
+              .enabled(!this.recognizingMedia && !this.savingNewItem)
               .onClick((): void => { this.chooseMedia(); })
             if (this.selectedMediaCount > 0) {
               this.selectedMediaPreview()
+            }
+            if (this.recognizingMedia) {
+              Row({ space: 8 }) {
+                LoadingProgress().width(18).height(18).color(COLOR_PRIMARY)
+                Text(this.recognitionProgressText).fontSize(12).fontColor(COLOR_MUTED)
+              }.width('100%')
             }
           } else if (this.newType === VaultItemType.File) {
             Button(this.selectedFileCount > 0 ? `✓ 已选择 ${this.selectedFileCount} 个文件` : '选择多个要保存的文件')
@@ -2183,6 +2459,9 @@ struct Index {
             .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
             .height(92).borderRadius(12)
             .onChange((value: string): void => { this.newNotes = value; })
+          if (this.newType === VaultItemType.Image && this.selectedMediaCount > 0) {
+            this.pendingMediaOcrText()
+          }
           if (this.savingNewItem) {
             Column({ space: 5 }) {
               Row() {
@@ -2194,10 +2473,10 @@ struct Index {
                 .width('100%').color(COLOR_PRIMARY).backgroundColor(COLOR_SURFACE_2)
             }.width('100%')
           }
-          Button(this.savingNewItem ? '正在保存…' : '保存')
+          Button(this.savingNewItem ? '正在保存…' : (this.recognizingMedia ? '正在识别图片文字…' : '保存'))
             .width('100%').height(50).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
             .backgroundColor(COLOR_PRIMARY).borderRadius(13)
-            .enabled(!this.savingNewItem)
+            .enabled(!this.savingNewItem && !this.recognizingMedia)
             .onClick((): void => { this.createItem(); })
         }
         .width('100%')
@@ -2207,7 +2486,7 @@ struct Index {
       .constraintSize({ minHeight: 420, maxHeight: '88%' })
       .backgroundColor(COLOR_SURFACE)
       .borderRadius({ bottomLeft: 24, bottomRight: 24 })
-      Blank().onClick((): void => { this.closeNewItem(); })
+      Blank().onClick((): void => { this.requestCloseNewItem(); })
     }
     .width('100%')
     .height('100%')
@@ -2318,7 +2597,11 @@ struct Index {
           Column({ space: 8 }) {
             this.modalHeader(this.detailTitle.trim().length > 0 ? this.detailTitle : '媒体',
               (): void => { this.closeSelectedItem(); })
-            VaultAttachmentGallery({ itemId: item.id, fallbackType: item.type })
+            VaultAttachmentGallery({
+              itemId: item.id,
+              fallbackType: item.type,
+              initialAttachmentIndex: this.selectedAttachmentIndex
+            })
             Column() {
               this.detailGroupPicker()
             }

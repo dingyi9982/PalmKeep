@@ -44,6 +44,7 @@ export interface VaultAttachmentInput {
   uri: string;
   sourceUri?: string;
   name: string;
+  ocrText: string;
   data: Uint8Array;
 }
 
@@ -52,6 +53,13 @@ export interface VaultAttachmentSummary {
   type: VaultItemType;
   name: string;
   sourceUri: string;
+  ocrText: string;
+}
+
+export interface VaultSearchHit {
+  item: VaultItem;
+  attachmentIndex: number;
+  matchedTextLine: string;
 }
 
 export function createVaultId(): string {
