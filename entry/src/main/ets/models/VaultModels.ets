@@ -42,6 +42,7 @@ export interface VaultItemInput {
 export interface VaultAttachmentInput {
   type: VaultItemType;
   uri: string;
+  sourceUri?: string;
   name: string;
   data: Uint8Array;
 }
@@ -50,6 +51,7 @@ export interface VaultAttachmentSummary {
   index: number;
   type: VaultItemType;
   name: string;
+  sourceUri: string;
 }
 
 export function createVaultId(): string {

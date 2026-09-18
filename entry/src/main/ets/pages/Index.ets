@@ -131,7 +131,7 @@ struct Index {
   private async createVault(): Promise<void> {
     this.errorMessage = '';
     if (this.masterPassword.length < 8) {
-      this.errorMessage = '主密码至少需要 8 个字符';
+      this.errorMessage = '密码至少需要 8 个字符';
       return;
     }
     if (this.masterPassword !== this.confirmPassword) {
@@ -146,7 +146,7 @@ struct Index {
       this.masterPassword = '';
       this.confirmPassword = '';
       await this.reloadVault();
-      this.showVaultScreen();
+      await this.showVaultScreen();
     } catch (error) {
       this.errorMessage = this.describeError(error);
     } finally {
@@ -157,7 +157,7 @@ struct Index {
   private async unlockVault(): Promise<void> {
     this.errorMessage = '';
     if (this.masterPassword.length === 0) {
-      this.errorMessage = '请输入主密码';
+      this.errorMessage = '请输入密码';
       return;
     }
     this.busy = true;
@@ -165,13 +165,13 @@ struct Index {
       const security = new VaultSecurityService(AbilityContextHolder.getContext());
       const key = await security.unlock(this.masterPassword);
       if (!key) {
-        this.errorMessage = '主密码不正确';
+        this.errorMessage = '密码不正确';
         return;
       }
       await this.openWithKey(key);
       this.masterPassword = '';
       await this.reloadVault();
-      this.showVaultScreen();
+      await this.showVaultScreen();
     } catch (error) {
       this.errorMessage = this.describeError(error);
     } finally {
@@ -234,9 +234,9 @@ struct Index {
     }
   }
 
-  private showVaultScreen(): void {
+  private async showVaultScreen(): Promise<void> {
+    await AbilityContextHolder.setPrivacyMode(false);
     this.screen = 'vault';
-    AbilityContextHolder.setPrivacyMode(false);
   }
 
   private clearHomeFocus(): void {
@@ -321,12 +321,13 @@ struct Index {
     AbilityContextHolder.setPrivacyMode(this.revealNewPassword);
   }
 
-  private closeSelectedItem(): void {
+  private async closeSelectedItem(): Promise<void> {
     this.selectedItem = undefined;
     this.detailGroupId = 0;
     this.detailPassword = '';
     this.revealPassword = false;
-    AbilityContextHolder.setPrivacyMode(false);
+    await AbilityContextHolder.setPrivacyMode(false);
+    await this.reloadVault();
   }
 
   private toggleDetailPasswordVisibility(): void {
@@ -412,7 +413,7 @@ struct Index {
 
   private async unlockWithGesture(pattern: number[]): Promise<void> {
     if (Date.now() < this.gestureCooldownUntil) {
-      this.errorMessage = '尝试次数过多，请稍后使用主密码';
+      this.errorMessage = '尝试次数过多，请稍后使用密码';
       return;
     }
     this.busy = true;
@@ -435,7 +436,7 @@ struct Index {
       await this.openWithKey(key);
       this.gestureFailures = 0;
       await this.reloadVault();
-      this.showVaultScreen();
+      await this.showVaultScreen();
     } catch (error) {
       this.errorMessage = this.describeError(error);
     } finally {
@@ -451,7 +452,7 @@ struct Index {
       const key = await security.unlockWithFingerprint();
       await this.openWithKey(key);
       await this.reloadVault();
-      this.showVaultScreen();
+      await this.showVaultScreen();
     } catch (error) {
       this.errorMessage = this.describeError(error);
     } finally {
@@ -686,6 +687,7 @@ struct Index {
             attachments.push({
               type: picked.type,
               uri: compressedPath,
+              sourceUri: picked.uri,
               name: picked.name,
               data: new Uint8Array(0)
             });
@@ -804,8 +806,7 @@ struct Index {
     };
     try {
       await vaultRepository.updateItem(updated);
-      this.closeSelectedItem();
-      await this.reloadVault();
+      await this.closeSelectedItem();
       promptAction.showToast({ message: moved ? '资料已移动并保存' : '修改已保存，旧版本已归档' });
     } catch (error) {
       promptAction.showToast({ message: this.describeError(error) });
@@ -818,8 +819,7 @@ struct Index {
       return;
     }
     await vaultRepository.moveToTrash(item.id);
-    this.closeSelectedItem();
-    await this.reloadVault();
+    await this.closeSelectedItem();
     promptAction.showToast({ message: '资料已移入回收站' });
   }
 
@@ -989,7 +989,7 @@ struct Index {
             .fontSize(28)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_TEXT)
-          Text('主密码不会离开这台设备，也无法由我们找回。')
+          Text('密码不会离开这台设备，也无法由我们找回。')
             .fontSize(14)
             .fontColor(COLOR_MUTED)
             .textAlign(TextAlign.Center)
@@ -1004,7 +1004,7 @@ struct Index {
             .backgroundColor(COLOR_SURFACE_2)
             .borderRadius(14)
             .onChange((value: string): void => { this.masterPassword = value; })
-          TextInput({ placeholder: '再次输入主密码', text: this.confirmPassword })
+          TextInput({ placeholder: '再次输入密码', text: this.confirmPassword })
             .type(InputType.Password)
             .height(52)
             .fontColor(COLOR_TEXT)
@@ -1075,24 +1075,26 @@ struct Index {
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_TEXT)
           Text(this.unlockMode === 'gesture' ? '绘制手势解锁本地保险库' :
-            (this.unlockMode === 'fingerprint' ? '使用指纹验证身份' : '输入主密码解锁本地保险库'))
+            (this.unlockMode === 'fingerprint' ? '使用指纹验证身份' : '输入密码解锁本地保险库'))
             .fontSize(14)
             .fontColor(COLOR_MUTED)
         }
         Column({ space: 12 }) {
-          Row({ space: 4 }) {
-            if (this.fingerprintEnabled) {
-              this.unlockModeButton('fingerprint', '指纹')
+          if (this.fingerprintEnabled || this.gestureEnabled) {
+            Row({ space: 4 }) {
+              if (this.fingerprintEnabled) {
+                this.unlockModeButton('fingerprint', '指纹')
+              }
+              if (this.gestureEnabled) {
+                this.unlockModeButton('gesture', '手势')
+              }
+              this.unlockModeButton('password', '密码')
             }
-            this.unlockModeButton('password', '密码')
-            if (this.gestureEnabled) {
-              this.unlockModeButton('gesture', '手势')
-            }
+            .width('100%')
+            .padding(4)
+            .backgroundColor(COLOR_SURFACE_2)
+            .borderRadius(14)
           }
-          .width('100%')
-          .padding(4)
-          .backgroundColor(COLOR_SURFACE_2)
-          .borderRadius(14)
 
           if (this.unlockMode === 'gesture' && this.gestureEnabled) {
             GestureGrid({
@@ -1121,7 +1123,7 @@ struct Index {
             .width('100%')
             .padding({ top: 18, bottom: 8 })
           } else {
-            TextInput({ placeholder: '主密码', text: this.masterPassword })
+            TextInput({ placeholder: '密码', text: this.masterPassword })
               .type(InputType.Password)
               .height(52)
               .fontColor(COLOR_TEXT)
@@ -1130,7 +1132,7 @@ struct Index {
               .borderRadius(14)
               .onChange((value: string): void => { this.masterPassword = value; })
               .onSubmit((): void => { this.unlockVault(); })
-            Button(this.busy ? '正在验证…' : '使用主密码解锁')
+            Button(this.busy ? '正在验证…' : '使用密码解锁')
               .width('100%')
               .height(52)
               .fontWeight(FontWeight.Bold)
@@ -1213,19 +1215,31 @@ struct Index {
         VaultAttachmentPreview({ itemId: item.id, fallbackType: item.type })
       }
       Column({ space: 0 }) {
-        Text(item.title)
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(COLOR_TEXT)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-        Text(item.username.length > 0 ? item.username : (item.notes.length > 0 ? item.notes : itemTypeLabel(item.type)))
-          .fontSize(11)
-          .fontColor(COLOR_MUTED)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
+        if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
+          if (item.title.length > 0) {
+            Text(item.title)
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(COLOR_TEXT)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
+        } else {
+          Text(item.title)
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(COLOR_TEXT)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+          Text(item.username.length > 0 ? item.username : (item.notes.length > 0 ? item.notes : itemTypeLabel(item.type)))
+            .fontSize(11)
+            .fontColor(COLOR_MUTED)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+        }
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -1330,7 +1344,7 @@ struct Index {
         if (this.homeSectionColumn(group.id) === column) {
           this.groupSection(group, true)
         }
-      }, (group: VaultGroup): string => `${group.id}`)
+      }, (group: VaultGroup): string => `${group.id}-${group.name}`)
       if (this.countGroup(0) > 0 && this.homeSectionColumn(0) === column) {
         this.ungroupedSection(true)
       }
@@ -1542,11 +1556,42 @@ struct Index {
   }
 
   @Builder
+  private categoryTypeIcon(type: VaultItemType): void {
+    if (type === VaultItemType.Image || type === VaultItemType.Video) {
+      Stack({ alignContent: Alignment.Center }) {
+        Stack() {
+          Circle({ width: 4, height: 4 }).fill(this.typeColor(type)).position({ left: 5, top: 4 })
+          Text('▶').fontSize(9).fontColor(this.typeColor(type))
+            .width(11).height(11).textAlign(TextAlign.Center).position({ right: 3, bottom: 2 })
+        }
+        .width(26).height(20).border({ width: 2, color: this.typeColor(type) }).borderRadius(5)
+      }.width(40).height(40)
+    } else if (type === VaultItemType.File) {
+      Stack({ alignContent: Alignment.Center }) {
+        Stack() {
+          Column({ space: 3 }) {
+            Divider().width(11).strokeWidth(2).color(this.typeColor(type)).borderRadius(1)
+            Divider().width(11).strokeWidth(2).color(this.typeColor(type)).borderRadius(1)
+            Divider().width(8).strokeWidth(2).color(this.typeColor(type)).borderRadius(1)
+          }
+          .alignItems(HorizontalAlign.Start).position({ left: 5, top: 8 })
+          Stack().width(7).height(7)
+            .border({ width: { left: 2, bottom: 2 }, color: this.typeColor(type) })
+            .position({ right: 0, top: 0 })
+        }
+        .width(22).height(26).border({ width: 2, color: this.typeColor(type) }).borderRadius(4)
+      }.width(40).height(40)
+    } else {
+      Text(itemTypeGlyph(type)).fontSize(22).fontColor(this.typeColor(type))
+    }
+  }
+
+  @Builder
   private categoryCard(type: VaultItemType, description: string): void {
     Column({ space: 8 }) {
       Row() {
         Stack() {
-          Text(itemTypeGlyph(type)).fontSize(22).fontColor(this.typeColor(type))
+          this.categoryTypeIcon(type)
         }
         .width(40).height(40).borderRadius(13).backgroundColor(this.typeBackground(type))
         Blank()
@@ -1618,7 +1663,7 @@ struct Index {
               if (this.countGroupByType(group.id, this.selectedCategoryType) > 0) {
                 this.categoryGroupSection(group, this.selectedCategoryType)
               }
-            }, (group: VaultGroup): string => `${group.id}`)
+            }, (group: VaultGroup): string => `${group.id}-${group.name}`)
             if (this.countGroupByType(0, this.selectedCategoryType) > 0) {
               Column() {
                 Row() {
@@ -1722,7 +1767,7 @@ struct Index {
             .width('100%').padding(14).backgroundColor(COLOR_SURFACE).borderRadius(17)
             .border({ width: 1, color: COLOR_BORDER })
           }
-        }, (group: VaultGroup): string => `${group.id}`)
+        }, (group: VaultGroup): string => `${group.id}-${group.name}`)
       }
       .layoutWeight(1).width('100%').scrollBar(BarState.Off)
     }
@@ -1755,14 +1800,22 @@ struct Index {
           }
           .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
           Row({ space: 12 }) {
-            Stack() { Text('⌁').fontSize(22).fontColor(COLOR_PRIMARY) }
-              .width(44).height(44).borderRadius(14).backgroundColor('#183029')
+            Stack() {
+              Grid() {
+                ForEach([0, 1, 2, 3, 4, 5, 6, 7, 8], (): void => {
+                  GridItem() { Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY) }
+                })
+              }
+              .columnsTemplate('1fr 1fr 1fr').columnsGap(3).rowsGap(3)
+              .width(18).height(18)
+            }
+            .width(44).height(44).borderRadius(14).backgroundColor('#183029')
             Column({ space: 3 }) {
               Text('手势登录').fontSize(14).fontColor(COLOR_TEXT)
               Text(this.gestureEnabled ? '已启用 · 九宫格快捷解锁' : '未启用 · 至少连接 4 个点')
                 .fontSize(12).fontColor(COLOR_MUTED)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Button(this.gestureEnabled ? '关闭' : '设置')
+            Button(this.gestureEnabled ? '关闭' : '启用')
               .height(38).fontColor(this.gestureEnabled ? COLOR_DANGER : COLOR_PRIMARY)
               .backgroundColor(COLOR_SURFACE_2)
               .onClick((): void => {
@@ -1774,8 +1827,23 @@ struct Index {
         .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
         .border({ width: 1, color: COLOR_BORDER })
         Row({ space: 12 }) {
-          Stack() { Text('◆').fontSize(15).fontColor(COLOR_PRIMARY) }
-            .width(42).height(42).borderRadius(13).backgroundColor('#E7F7F2')
+          Stack() {
+            Column({ space: 3 }) {
+              Row({ space: 4 }) {
+                Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY)
+                Divider().width(13).strokeWidth(3).color(COLOR_PRIMARY).borderRadius(2)
+              }
+              Row({ space: 4 }) {
+                Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY)
+                Divider().width(13).strokeWidth(3).color(COLOR_PRIMARY).borderRadius(2)
+              }
+              Row({ space: 4 }) {
+                Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY)
+                Divider().width(13).strokeWidth(3).color(COLOR_PRIMARY).borderRadius(2)
+              }
+            }
+          }
+          .width(44).height(44).borderRadius(14).backgroundColor('#183029')
           Column({ space: 3 }) {
             Text('分组管理').fontSize(15).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
             Text('查看和删除自定义分组').fontSize(11).fontColor(COLOR_MUTED)
@@ -1921,7 +1989,7 @@ struct Index {
           hint: this.gestureSetupHint,
           onComplete: (pattern: number[]): void => { this.handleGestureSetup(pattern); }
         })
-        Text('手势只用于快捷登录，主密码仍可随时解锁。')
+        Text('手势只用于快捷登录，密码仍可随时解锁。')
           .fontSize(12).fontColor(COLOR_MUTED).textAlign(TextAlign.Center).width('100%')
       }
       .padding(20).width('100%').backgroundColor(COLOR_SURFACE)
@@ -2032,7 +2100,7 @@ struct Index {
           this.detailGroupChip(0, '未分组')
           ForEach(this.groups, (group: VaultGroup): void => {
             this.detailGroupChip(group.id, group.name)
-          }, (group: VaultGroup): string => `${group.id}`)
+          }, (group: VaultGroup): string => `${group.id}-${group.name}`)
         }
       }
       .scrollable(ScrollDirection.Horizontal)
@@ -2059,7 +2127,7 @@ struct Index {
                   .backgroundColor(this.newGroupId === group.id ? COLOR_PRIMARY : COLOR_SURFACE_2)
                   .borderRadius(16)
                   .onClick((): void => { this.newGroupId = group.id; })
-              }, (group: VaultGroup): string => `${group.id}`)
+              }, (group: VaultGroup): string => `${group.id}-${group.name}`)
             }
           }
           .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
@@ -2166,7 +2234,8 @@ struct Index {
       .width('90%')
       .padding({ left: 20, right: 20, top: 12, bottom: 16 })
       .backgroundColor(COLOR_SURFACE)
-      .borderRadius({ topLeft: 24, topRight: 24 })
+      .borderRadius(24)
+      Blank().onClick((): void => { this.closeRenameGroup(); })
     }
     .width('100%')
     .height('100%')

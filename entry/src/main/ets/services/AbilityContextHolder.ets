@@ -21,12 +21,12 @@ export class AbilityContextHolder {
     AbilityContextHolder.mainWindow = mainWindow;
   }
 
-  static setPrivacyMode(enabled: boolean): void {
+  static setPrivacyMode(enabled: boolean): Promise<void> {
     const mainWindow = AbilityContextHolder.mainWindow;
     if (!mainWindow) {
-      return;
+      return Promise.resolve();
     }
-    mainWindow.setWindowPrivacyMode(enabled).catch((error: Error): void => {
+    return mainWindow.setWindowPrivacyMode(enabled).catch((error: Error): void => {
       console.warn(`PalmVault privacy mode warning: ${error.message}`);
     });
   }

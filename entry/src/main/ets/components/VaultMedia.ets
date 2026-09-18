@@ -5,6 +5,7 @@ import media from '@ohos.multimedia.media';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { vaultRepository } from '../services/VaultRepository';
 import { VaultItemType } from '../models/VaultModels';
+import { VaultThumbnail } from './VaultThumbnail';
 
 @Component
 export struct VaultMedia {
@@ -12,7 +13,10 @@ export struct VaultMedia {
   mediaType: VaultItemType = VaultItemType.Image;
   attachmentIndex: number = 0;
   fullScreenMode: boolean = false;
-  requestFullScreen?: () => void = undefined;
+  initialPlaybackTime: number = 0;
+  autoPlay: boolean = false;
+  requestFullScreen?: (playbackTime: number, playing: boolean) => void = undefined;
+  onPlaybackStateChange?: (playbackTime: number, playing: boolean) => void = undefined;
   @State private bitmap?: image.PixelMap = undefined;
   @State private videoSource: string = '';
   @State private message: string = '';
@@ -72,7 +76,10 @@ export struct VaultMedia {
       this.player = player;
       player.on('error', async (): Promise<void> => { await this.handlePlayerError(player); });
       player.on('timeUpdate', (time: number): void => {
-        if (this.player === player && !this.disposed) { this.playbackTime = time; }
+        if (this.player === player && !this.disposed) {
+          this.playbackTime = time;
+          if (this.onPlaybackStateChange) { this.onPlaybackStateChange(time, this.playing); }
+        }
       });
       player.on('stateChange', async (state: string): Promise<void> => {
         if (this.disposed || this.player !== player) { return; }
@@ -86,12 +93,27 @@ export struct VaultMedia {
             this.ready = true;
             this.starting = false;
             this.message = '';
+            if (this.initialPlaybackTime > 0) {
+              player.seek(Math.min(this.initialPlaybackTime, Math.max(0, player.duration - 250)));
+              this.playbackTime = this.initialPlaybackTime;
+            }
+            if (this.autoPlay) {
+              setTimeout((): void => {
+                if (!this.disposed && this.player === player) { player.play(); }
+              }, 100);
+            }
           } else if (state === 'playing') {
             this.playing = true;
             this.message = '';
+            if (this.onPlaybackStateChange) {
+              this.onPlaybackStateChange(this.playbackTime, true);
+            }
           } else if (state === 'paused' || state === 'completed') {
             this.playing = false;
             this.message = '';
+            if (this.onPlaybackStateChange) {
+              this.onPlaybackStateChange(this.playbackTime, false);
+            }
           }
         } catch (error) { await this.handlePlayerError(player); }
       });
@@ -134,6 +156,18 @@ export struct VaultMedia {
     try {
       if (this.playing) { await this.player?.pause(); } else { await this.player?.play(); }
     } catch (error) { this.message = '播放失败，请重新打开'; }
+  }
+
+  private async openVideoFullScreen(): Promise<void> {
+    if (!this.ready || !this.requestFullScreen) { return; }
+    const resumePlaying = this.playing;
+    const resumeTime = this.playbackTime;
+    try {
+      if (resumePlaying) { await this.player?.pause(); }
+    } catch (error) {
+      // Fullscreen can still resume from the last reported position.
+    }
+    this.requestFullScreen(resumeTime, resumePlaying);
   }
 
   private formatTime(milliseconds: number): string {
@@ -238,7 +272,7 @@ export struct VaultMedia {
         .backgroundColor(this.fullScreenMode ? '#000000' : '#0A1210')
         .onClick((): void => {
           if (this.bitmap) {
-            if (this.requestFullScreen) { this.requestFullScreen(); } else { this.showFullScreen = true; }
+            if (this.requestFullScreen) { this.requestFullScreen(0, false); } else { this.showFullScreen = true; }
           }
         })
       } else if (this.mediaType === VaultItemType.Video) {
@@ -250,6 +284,11 @@ export struct VaultMedia {
           })
             .width('100%').height('100%')
             .onLoad((): void => { this.surfaceId = this.surface.getXComponentSurfaceId(); this.prepareVideo(); })
+          if (!this.playing && this.playbackTime === 0) {
+            VaultThumbnail({ itemId: this.itemId, mediaType: VaultItemType.Video,
+              attachmentIndex: this.attachmentIndex, fillContainer: true })
+              .hitTestBehavior(HitTestMode.None)
+          }
           if (!this.ready && this.message.length === 0) {
             Progress({ value: 35, total: 100, type: ProgressType.Ring })
               .width(34).height(34).color('#2DD6A6')
@@ -281,7 +320,7 @@ export struct VaultMedia {
             Text('⛶').fontSize(19).fontColor('#FFFFFF').textAlign(TextAlign.Center)
               .width(36).height(36).backgroundColor('#1D2D28').borderRadius(18).opacity(this.ready ? 1 : 0.4)
               .onClick((): void => {
-                if (this.ready && this.requestFullScreen) { this.requestFullScreen(); }
+                this.openVideoFullScreen();
               })
           }
         }.width('100%').padding({ left: 3, right: 3 })

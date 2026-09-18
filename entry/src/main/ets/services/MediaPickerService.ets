@@ -115,15 +115,54 @@ export class MediaPickerService {
     }
   }
 
-  async saveMediaToGallery(path: string, type: VaultItemType, title: string): Promise<boolean> {
+  async saveMediaToGallery(path: string, type: VaultItemType, title: string): Promise<string> {
+    const saved = await this.saveMediaBatchToGallery([path], [type], [title]);
+    return saved.length > 0 ? saved[0] : '';
+  }
+
+  async saveMediaBatchToGallery(paths: string[], types: VaultItemType[], titles: string[]): Promise<string[]> {
+    if (paths.length === 0 || paths.length !== types.length || paths.length !== titles.length) { return []; }
     const helper = photoAccessHelper.getPhotoAccessHelper(AbilityContextHolder.getContext());
-    const configs: photoAccessHelper.PhotoCreationConfig[] = [{
-      title: title,
-      fileNameExtension: type === VaultItemType.Video ? 'mp4' : 'jpg',
-      photoType: type === VaultItemType.Video ? photoAccessHelper.PhotoType.VIDEO : photoAccessHelper.PhotoType.IMAGE
-    }];
-    const saved = await helper.showAssetsCreationDialog([fileUri.getUriFromPath(path)], configs);
-    return saved.length > 0;
+    const configs: photoAccessHelper.PhotoCreationConfig[] = [];
+    const uris: string[] = [];
+    for (let index = 0; index < paths.length; index += 1) {
+      const type = types[index];
+      uris.push(fileUri.getUriFromPath(paths[index]));
+      configs.push({
+        title: this.albumTitle(titles[index]),
+        fileNameExtension: type === VaultItemType.Video ? 'mp4' : 'jpg',
+        photoType: type === VaultItemType.Video ? photoAccessHelper.PhotoType.VIDEO : photoAccessHelper.PhotoType.IMAGE
+      });
+    }
+    const albumUris = await helper.showAssetsCreationDialog(uris, configs);
+    if (albumUris.length !== paths.length) { return albumUris; }
+    for (let index = 0; index < paths.length; index += 1) {
+      let source: fs.File | undefined = undefined;
+      let target: fs.File | undefined = undefined;
+      try {
+        source = fs.openSync(paths[index], fs.OpenMode.READ_ONLY);
+        target = fs.openSync(albumUris[index], fs.OpenMode.READ_WRITE);
+        await fs.copyFile(source.fd, target.fd);
+        fs.fsyncSync(target.fd);
+      } finally {
+        if (target) { fs.closeSync(target); }
+        if (source) { fs.closeSync(source); }
+      }
+    }
+    return albumUris;
+  }
+
+  isMediaInGallery(uri: string): boolean {
+    if (uri.length === 0) { return false; }
+    let file: fs.File | undefined = undefined;
+    try {
+      file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+      return fs.statSync(file.fd).size > 0;
+    } catch (error) {
+      return false;
+    } finally {
+      if (file) { fs.closeSync(file); }
+    }
   }
 
   downloadName(title: string, sourceUri: string, type: VaultItemType): string {
@@ -165,6 +204,12 @@ export class MediaPickerService {
   private safeFileName(name: string): string {
     const cleaned = name.replace(/[\\/:*?"<>|]/g, '_').trim();
     return cleaned.length > 0 ? cleaned : 'PalmVault文件';
+  }
+
+  private albumTitle(name: string): string {
+    const safe = this.safeFileName(name);
+    const dot = safe.lastIndexOf('.');
+    return dot > 0 ? safe.substring(0, dot) : safe;
   }
 
   private readMedia(uri: string): Uint8Array {

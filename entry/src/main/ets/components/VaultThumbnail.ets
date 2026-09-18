@@ -14,6 +14,7 @@ export struct VaultThumbnail {
   sourceData?: Uint8Array = undefined;
   sourceUri: string = '';
   thumbnailSize: number = 40;
+  fillContainer: boolean = false;
   @State private bitmap?: image.PixelMap = undefined;
   private disposed: boolean = false;
 
@@ -164,7 +165,8 @@ export struct VaultThumbnail {
         .width(22).height(22).borderRadius(11).backgroundColor('#99000000')
       }
     }
-    .width(this.thumbnailSize).height(this.thumbnailSize)
+    .width(this.fillContainer ? '100%' : this.thumbnailSize)
+    .height(this.fillContainer ? '100%' : this.thumbnailSize)
     .borderRadius(10).clip(true).backgroundColor('#E8F7F2')
   }
 }

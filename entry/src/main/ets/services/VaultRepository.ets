@@ -225,7 +225,7 @@ class VaultRepositoryImpl {
           attachment_index: index,
           type: attachment.type,
           name: attachment.name,
-          source_uri: attachment.uri
+          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri
         });
         await this.importAttachmentParts(id, index, attachment.uri);
         if (onProgress) { onProgress(index + 1, attachments.length); }
@@ -239,7 +239,7 @@ class VaultRepositoryImpl {
 
   async listItemAttachments(itemId: string): Promise<VaultAttachmentSummary[]> {
     const result = await this.requireStore().querySql(
-      'SELECT attachment_index, type, name FROM vault_item_attachments WHERE item_id = ? ORDER BY attachment_index ASC',
+      'SELECT attachment_index, type, name, source_uri FROM vault_item_attachments WHERE item_id = ? ORDER BY attachment_index ASC',
       [itemId]
     );
     const attachments: VaultAttachmentSummary[] = [];
@@ -248,7 +248,8 @@ class VaultRepositoryImpl {
         attachments.push({
           index: result.getLong(0),
           type: result.getString(1) as VaultItemType,
-          name: result.getString(2)
+          name: result.getString(2),
+          sourceUri: result.getString(3)
         });
       }
     } finally { result.close(); }
@@ -271,7 +272,7 @@ class VaultRepositoryImpl {
           attachment_index: index,
           type: attachment.type,
           name: attachment.name,
-          source_uri: attachment.uri
+          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri
         });
         await this.importAttachmentParts(itemId, index, attachment.uri);
         if (onProgress) { onProgress(index + 1, attachments.length); }
@@ -284,6 +285,87 @@ class VaultRepositoryImpl {
     } catch (error) {
       store.rollBack();
       throw new Error('媒体修改失败，原有媒体未更改');
+    }
+  }
+
+  async appendItemAttachments(itemId: string, attachments: VaultAttachmentInput[],
+    onProgress?: (completed: number, total: number) => void): Promise<void> {
+    if (attachments.length === 0) { return; }
+    const existing = await this.listItemAttachments(itemId);
+    const startIndex = existing.length > 0 ? existing[existing.length - 1].index + 1 : 0;
+    const store = this.requireStore();
+    store.beginTransaction();
+    try {
+      for (let index = 0; index < attachments.length; index += 1) {
+        const attachment = attachments[index];
+        const attachmentIndex = startIndex + index;
+        await store.insert('vault_item_attachments', {
+          item_id: itemId,
+          attachment_index: attachmentIndex,
+          type: attachment.type,
+          name: attachment.name,
+          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri
+        });
+        await this.importAttachmentParts(itemId, attachmentIndex, attachment.uri);
+        if (onProgress) { onProgress(index + 1, attachments.length); }
+      }
+      await store.executeSql('UPDATE vault_items SET updated_at = ? WHERE id = ?', [Date.now(), itemId]);
+      store.commit();
+    } catch (error) {
+      store.rollBack();
+      throw new Error('媒体导入失败，原有媒体未更改');
+    }
+  }
+
+  async updateAttachmentSourceUri(itemId: string, attachmentIndex: number, sourceUri: string): Promise<void> {
+    await this.requireStore().executeSql(
+      'UPDATE vault_item_attachments SET source_uri = ? WHERE item_id = ? AND attachment_index = ?',
+      [sourceUri, itemId, attachmentIndex]
+    );
+  }
+
+  async deleteItemAttachments(itemId: string, attachmentIndexes: number[]): Promise<void> {
+    if (attachmentIndexes.length === 0) { return; }
+    const existing = await this.listItemAttachments(itemId);
+    const selected = new Set<number>(attachmentIndexes);
+    const remaining = existing.filter((attachment: VaultAttachmentSummary): boolean => !selected.has(attachment.index));
+    if (remaining.length === 0) { throw new Error('至少需要保留一个媒体'); }
+    const store = this.requireStore();
+    store.beginTransaction();
+    try {
+      for (let index = 0; index < attachmentIndexes.length; index += 1) {
+        const attachmentIndex = attachmentIndexes[index];
+        await store.executeSql(
+          'DELETE FROM vault_attachment_parts WHERE item_id = ? AND attachment_index = ?',
+          [itemId, attachmentIndex]
+        );
+        await store.executeSql(
+          'DELETE FROM vault_item_attachments WHERE item_id = ? AND attachment_index = ?',
+          [itemId, attachmentIndex]
+        );
+      }
+      await store.executeSql(
+        'UPDATE vault_item_attachments SET attachment_index = -attachment_index - 1 WHERE item_id = ?', [itemId]
+      );
+      await store.executeSql(
+        'UPDATE vault_attachment_parts SET attachment_index = -attachment_index - 1 WHERE item_id = ?', [itemId]
+      );
+      for (let index = 0; index < remaining.length; index += 1) {
+        const temporaryIndex = -remaining[index].index - 1;
+        await store.executeSql(
+          'UPDATE vault_item_attachments SET attachment_index = ? WHERE item_id = ? AND attachment_index = ?',
+          [index, itemId, temporaryIndex]
+        );
+        await store.executeSql(
+          'UPDATE vault_attachment_parts SET attachment_index = ? WHERE item_id = ? AND attachment_index = ?',
+          [index, itemId, temporaryIndex]
+        );
+      }
+      await store.executeSql('UPDATE vault_items SET updated_at = ? WHERE id = ?', [Date.now(), itemId]);
+      store.commit();
+    } catch (error) {
+      store.rollBack();
+      throw new Error('删除媒体失败，数据未更改');
     }
   }
 

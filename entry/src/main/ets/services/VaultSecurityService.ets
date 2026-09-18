@@ -50,7 +50,7 @@ export class VaultSecurityService {
 
   async createMasterPassword(password: string): Promise<Uint8Array> {
     if (password.length < 8) {
-      throw new Error('主密码至少需要 8 个字符');
+      throw new Error('密码至少需要 8 个字符');
     }
     const salt = cryptoFramework.createRandom().generateRandomSync(16).data;
     const material = this.derive(password, salt);
@@ -212,14 +212,17 @@ export class VaultSecurityService {
         skipLockedBiometricAuth: true
       }, {
         title: title,
-        navigationButtonText: '使用主密码'
+        navigationButtonText: '使用密码'
       });
       const callback: userAuth.IAuthCallback = {
         onResult: (result: userAuth.UserAuthResult): void => {
           instance.off('result', callback);
           challenge.fill(0);
           if (result.result === userAuth.UserAuthResultCode.SUCCESS && result.token) {
-            resolve(result.token);
+            const token = result.token;
+            // The system authentication window disappears asynchronously after the success callback.
+            // Resolve after its touch-intercepting layer has had time to leave the window.
+            setTimeout((): void => resolve(token), 1500);
           } else if (result.result === userAuth.UserAuthResultCode.CANCELED) {
             reject(new Error('已取消指纹认证'));
           } else {
@@ -266,7 +269,7 @@ export class VaultSecurityService {
   private async huksCrypt(input: Uint8Array, nonce: Uint8Array, encrypt: boolean): Promise<Uint8Array> {
     const authenticationTagLength = 16;
     if (!encrypt && input.length <= authenticationTagLength) {
-      throw new Error('指纹凭据已损坏，请使用主密码登录后重新启用指纹');
+      throw new Error('指纹凭据已损坏，请使用密码登录后重新启用指纹');
     }
     const operationInput = encrypt ? input : input.slice(0, input.length - authenticationTagLength);
     const authenticationTag = encrypt ? new Uint8Array(0) : input.slice(input.length - authenticationTagLength);
