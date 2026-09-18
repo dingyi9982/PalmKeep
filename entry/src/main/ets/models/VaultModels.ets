@@ -39,6 +39,19 @@ export interface VaultItemInput {
   attachmentData: Uint8Array;
 }
 
+export interface VaultAttachmentInput {
+  type: VaultItemType;
+  uri: string;
+  name: string;
+  data: Uint8Array;
+}
+
+export interface VaultAttachmentSummary {
+  index: number;
+  type: VaultItemType;
+  name: string;
+}
+
 export function createVaultId(): string {
   return `${Date.now()}-${Math.floor(Math.random() * 1000000000)}`;
 }
@@ -50,9 +63,9 @@ export function itemTypeLabel(type: VaultItemType): string {
     case VaultItemType.Note:
       return '笔记';
     case VaultItemType.Image:
-      return '图片';
+      return '媒体';
     case VaultItemType.Video:
-      return '视频';
+      return '媒体';
     case VaultItemType.File:
       return '文件';
     default:

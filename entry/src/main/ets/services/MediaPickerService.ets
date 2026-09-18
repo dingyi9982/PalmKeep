@@ -1,6 +1,9 @@
 import photoAccessHelper from '@ohos.file.photoAccessHelper';
 import fs from '@ohos.file.fs';
 import picker from '@ohos.file.picker';
+import image from '@ohos.multimedia.image';
+import fileUri from '@ohos.file.fileuri';
+import { AbilityContextHolder } from './AbilityContextHolder';
 import { VaultItemType } from '../models/VaultModels';
 
 export interface PickedMedia {
@@ -26,6 +29,28 @@ export class MediaPickerService {
     return { uri: uris[0], type: type, data: this.readMedia(uris[0]), name: this.fileName(uris[0], type) };
   }
 
+  async pickFiles(): Promise<PickedMedia[]> {
+    const options = new picker.DocumentSelectOptions();
+    options.maxSelectNumber = 50;
+    const uris = await new picker.DocumentViewPicker().select(options);
+    const picked: PickedMedia[] = [];
+    try {
+      for (let index = 0; index < uris.length; index += 1) {
+        const uri = uris[index];
+        picked.push({
+          uri: uri,
+          type: VaultItemType.File,
+          data: new Uint8Array(0),
+          name: this.fileName(uri, VaultItemType.File)
+        });
+      }
+      return picked;
+    } catch (error) {
+      picked.forEach((file: PickedMedia): void => { file.data.fill(0); });
+      throw new Error('文件导入失败，请确认所选文件完整且大小受支持');
+    }
+  }
+
   async pickOne(preferredType: VaultItemType = VaultItemType.Image): Promise<PickedMedia | undefined> {
     const options = new photoAccessHelper.PhotoSelectOptions();
     options.MIMEType = preferredType === VaultItemType.Video ?
@@ -46,6 +71,26 @@ export class MediaPickerService {
       data: this.readMedia(uri),
       name: this.fileName(uri, isVideo ? VaultItemType.Video : VaultItemType.Image)
     };
+  }
+
+  async pickMany(preselectedUris: string[] = []): Promise<PickedMedia[]> {
+    const options = new photoAccessHelper.PhotoSelectOptions();
+    options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_VIDEO_TYPE;
+    options.maxSelectNumber = 50;
+    options.preselectedUris = preselectedUris;
+    const result = await new photoAccessHelper.PhotoViewPicker().select(options);
+    const picked: PickedMedia[] = [];
+    try {
+      for (let index = 0; index < result.photoUris.length; index += 1) {
+        const uri = result.photoUris[index];
+        const type = await this.detectMediaType(uri);
+        picked.push({ uri: uri, type: type, data: new Uint8Array(0), name: this.fileName(uri, type) });
+      }
+      return picked;
+    } catch (error) {
+      picked.forEach((media: PickedMedia): void => { media.data.fill(0); });
+      throw new Error('媒体导入失败，请确认所选文件完整且受支持');
+    }
   }
 
   async saveCopy(data: Uint8Array, suggestedName: string): Promise<boolean> {
@@ -70,6 +115,17 @@ export class MediaPickerService {
     }
   }
 
+  async saveMediaToGallery(path: string, type: VaultItemType, title: string): Promise<boolean> {
+    const helper = photoAccessHelper.getPhotoAccessHelper(AbilityContextHolder.getContext());
+    const configs: photoAccessHelper.PhotoCreationConfig[] = [{
+      title: title,
+      fileNameExtension: type === VaultItemType.Video ? 'mp4' : 'jpg',
+      photoType: type === VaultItemType.Video ? photoAccessHelper.PhotoType.VIDEO : photoAccessHelper.PhotoType.IMAGE
+    }];
+    const saved = await helper.showAssetsCreationDialog([fileUri.getUriFromPath(path)], configs);
+    return saved.length > 0;
+  }
+
   downloadName(title: string, sourceUri: string, type: VaultItemType): string {
     const sourceName = this.fileName(sourceUri, type);
     const dot = sourceName.lastIndexOf('.');
@@ -88,6 +144,22 @@ export class MediaPickerService {
     if (type === VaultItemType.Image) { return '私密图片.jpg'; }
     if (type === VaultItemType.Video) { return '私密视频.mp4'; }
     return '私密文件';
+  }
+
+  private async detectMediaType(uri: string): Promise<VaultItemType> {
+    let file: fs.File | undefined = undefined;
+    let source: image.ImageSource | undefined = undefined;
+    try {
+      file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+      source = image.createImageSource(file.fd);
+      await source.getImageInfo();
+      return VaultItemType.Image;
+    } catch (error) {
+      return VaultItemType.Video;
+    } finally {
+      if (source) { await source.release(); }
+      if (file) { fs.closeSync(file); }
+    }
   }
 
   private safeFileName(name: string): string {

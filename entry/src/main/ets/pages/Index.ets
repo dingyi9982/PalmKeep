@@ -1,14 +1,18 @@
 import promptAction from '@ohos.promptAction';
 import { BusinessError } from '@ohos.base';
 import { GestureGrid } from '../components/GestureGrid';
-import { VaultMedia } from '../components/VaultMedia';
+import { VaultThumbnail } from '../components/VaultThumbnail';
+import { VaultAttachmentPreview } from '../components/VaultAttachmentPreview';
+import { VaultAttachmentGallery } from '../components/VaultAttachmentGallery';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { QuickUnlockStatus, VaultSecurityService } from '../services/VaultSecurityService';
-import { mediaPickerService } from '../services/MediaPickerService';
+import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
+import { mediaCompressionService } from '../services/MediaCompressionService';
 import { vaultRepository } from '../services/VaultRepository';
 import {
   itemTypeGlyph,
   itemTypeLabel,
+  VaultAttachmentInput,
   VaultGroup,
   VaultItem,
   VaultItemInput,
@@ -68,6 +72,11 @@ struct Index {
   @State private revealNewPassword: boolean = false;
   @State private newNotes: string = '';
   @State private newAttachmentUri: string = '';
+  @State private selectedMediaCount: number = 0;
+  @State private selectedFileCount: number = 0;
+  @State private savingNewItem: boolean = false;
+  @State private saveProgress: number = 0;
+  @State private saveProgressText: string = '';
   @State private newGroupId: number = 0;
   @State private newGroupName: string = '';
   @State private groupPendingRename?: VaultGroup = undefined;
@@ -80,7 +89,10 @@ struct Index {
   @State private detailUsername: string = '';
   @State private detailPassword: string = '';
   @State private detailNotes: string = '';
+  @State private detailGroupId: number = 0;
   private pendingAttachment: Uint8Array = new Uint8Array(0);
+  private pendingMedia: PickedMedia[] = [];
+  private pendingFiles: PickedMedia[] = [];
   private sessionKey: Uint8Array = new Uint8Array(0);
   private firstGesture: number[] = [];
 
@@ -181,6 +193,7 @@ struct Index {
     this.detailUsername = '';
     this.detailNotes = '';
     this.detailTitle = '';
+    this.detailGroupId = 0;
     this.resetNewItem();
     this.selectedItem = undefined;
     this.showNewItem = false;
@@ -277,6 +290,7 @@ struct Index {
   }
 
   private closeNewItem(): void {
+    if (this.savingNewItem) { return; }
     this.showNewItem = false;
     this.revealNewPassword = false;
     AbilityContextHolder.setPrivacyMode(false);
@@ -289,6 +303,12 @@ struct Index {
       // The title input may still be mounting during the first interaction.
     }
     this.newType = type;
+    if (type !== VaultItemType.Image && this.pendingMedia.length > 0) {
+      this.clearPendingMedia();
+    }
+    if (type !== VaultItemType.File && this.pendingFiles.length > 0) {
+      this.clearPendingFiles();
+    }
     if (type !== VaultItemType.Login && this.revealNewPassword) {
       this.revealNewPassword = false;
       AbilityContextHolder.setPrivacyMode(false);
@@ -303,6 +323,7 @@ struct Index {
 
   private closeSelectedItem(): void {
     this.selectedItem = undefined;
+    this.detailGroupId = 0;
     this.detailPassword = '';
     this.revealPassword = false;
     AbilityContextHolder.setPrivacyMode(false);
@@ -466,7 +487,8 @@ struct Index {
     this.allItems = await vaultRepository.listItems();
     this.loginCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.Login).length;
     this.noteCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.Note).length;
-    this.mediaCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.Image || item.type === VaultItemType.Video).length;
+    this.mediaCount = this.allItems.filter((item: VaultItem): boolean =>
+      item.type === VaultItemType.Image || item.type === VaultItemType.Video).length;
     this.fileCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.File).length;
     if (this.groups.length > 0 && this.newGroupId === 0) {
       this.newGroupId = this.groups[0].id;
@@ -509,6 +531,23 @@ struct Index {
     }
   }
 
+  private openNewGroup(): void {
+    this.newGroupName = '';
+    this.showNewGroup = true;
+    setTimeout((): void => {
+      try {
+        this.getUIContext().getFocusController().requestFocus('newGroupInput');
+      } catch (error) {
+        // The overlay may have been closed before the input finishes mounting.
+      }
+    }, 80);
+  }
+
+  private closeNewGroup(): void {
+    this.showNewGroup = false;
+    this.newGroupName = '';
+  }
+
   private requestRenameGroup(group: VaultGroup): void {
     this.groupPendingRename = group;
     this.groupRenameName = group.name;
@@ -536,7 +575,7 @@ struct Index {
       await vaultRepository.updateGroup(group.id, name, group.color);
       this.closeRenameGroup();
       await this.reloadVault();
-      promptAction.showToast({ message: '分组名称已修改' });
+      promptAction.showToast({ message: '分组已重命名' });
     } catch (error) {
       promptAction.showToast({ message: this.describeError(error) });
     }
@@ -544,7 +583,7 @@ struct Index {
 
   private async requestDeleteGroup(group: VaultGroup): Promise<void> {
     try {
-      const groupItems = await vaultRepository.listItems('', group.id, true);
+      const groupItems = await vaultRepository.listItems('', group.id, false);
       if (groupItems.length > 0) {
         this.groupPendingDelete = group;
         this.groupPendingDeleteCount = groupItems.length;
@@ -553,7 +592,7 @@ struct Index {
       }
       const choice = await promptAction.showDialog({
         title: `删除“${group.name}”？`,
-        message: '这是一个空分组，删除后无法恢复。',
+        message: '确定删除该分组吗？',
         buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '删除', color: COLOR_DANGER }]
       });
       if (choice.index === 1) {
@@ -584,7 +623,7 @@ struct Index {
         this.newGroupId = 0;
       }
       await this.reloadVault();
-      promptAction.showToast({ message: hadItems ? '分组已删除，原有资料已移至未分组' : '分组已删除' });
+      promptAction.showToast({ message: hadItems ? '分组及其当前资料已永久删除' : '分组已删除' });
     } catch (error) {
       promptAction.showToast({ message: this.describeError(error) });
     }
@@ -592,25 +631,123 @@ struct Index {
 
   private async chooseMedia(fromFile: boolean = false): Promise<void> {
     try {
-      const media = fromFile || this.newType === VaultItemType.File ?
-        await mediaPickerService.pickFile(this.newType) : await mediaPickerService.pickOne(this.newType);
-      if (!media) {
+      if (!fromFile && this.newType === VaultItemType.Image) {
+        const preselectedUris: string[] = [];
+        this.pendingMedia.forEach((media: PickedMedia): void => { preselectedUris.push(media.uri); });
+        const mediaItems = await mediaPickerService.pickMany(preselectedUris);
+        if (mediaItems.length === 0) {
+          return;
+        }
+        if (this.screen !== 'vault') {
+          mediaItems.forEach((media: PickedMedia): void => { media.data.fill(0); });
+          return;
+        }
+        this.clearPendingMedia();
+        this.pendingMedia = mediaItems;
+        this.selectedMediaCount = mediaItems.length;
         return;
       }
-      if (this.screen !== 'vault') { media.data.fill(0); return; }
-      this.newAttachmentUri = media.uri;
-      this.pendingAttachment = media.data;
-      this.newType = media.type;
-      if (this.newTitle.length === 0) {
-        this.newTitle = media.name;
+      const files = await mediaPickerService.pickFiles();
+      if (files.length === 0) {
+        return;
       }
+      if (this.screen !== 'vault') {
+        files.forEach((file: PickedMedia): void => { file.data.fill(0); });
+        return;
+      }
+      this.clearPendingFiles();
+      this.pendingFiles = files;
+      this.selectedFileCount = files.length;
     } catch (error) {
       promptAction.showToast({ message: this.describeError(error) });
     }
   }
 
   private async createItem(): Promise<void> {
+    if (this.savingNewItem) { return; }
+    this.savingNewItem = true;
+    this.saveProgress = 0;
     try {
+      if (this.newType === VaultItemType.Image) {
+        if (this.pendingMedia.length === 0) {
+          throw new Error('请先选择要导入的图片或视频');
+        }
+        const attachments: VaultAttachmentInput[] = [];
+        const compressedPaths: string[] = [];
+        try {
+          for (let index = 0; index < this.pendingMedia.length; index += 1) {
+            const picked = this.pendingMedia[index];
+            this.saveProgressText = `正在压缩 ${index + 1}/${this.pendingMedia.length}`;
+            const compressedPath = await mediaCompressionService.compress(picked.uri, picked.type,
+              (progress: number): void => {
+                this.saveProgress = Math.round(((index + progress / 100) / this.pendingMedia.length) * 70);
+              });
+            compressedPaths.push(compressedPath);
+            attachments.push({
+              type: picked.type,
+              uri: compressedPath,
+              name: picked.name,
+              data: new Uint8Array(0)
+            });
+          }
+          this.saveProgressText = '正在写入本地数据';
+          await vaultRepository.createItemWithAttachments({
+            type: VaultItemType.Image,
+            groupId: this.newGroupId,
+            title: this.newTitle,
+            username: '',
+            password: '',
+            notes: this.newNotes,
+            attachmentUri: '',
+            attachmentData: new Uint8Array(0)
+          }, attachments, (completed: number, total: number): void => {
+            this.saveProgress = 70 + Math.round(completed / total * 30);
+          });
+        } finally {
+          compressedPaths.forEach((path: string): void => { mediaCompressionService.removeTemporary(path); });
+        }
+        const importedCount = this.pendingMedia.length;
+        this.resetNewItem();
+        this.closeNewItem();
+        await this.reloadVault();
+        promptAction.showToast({ message: `已导入 ${importedCount} 项媒体` });
+        return;
+      }
+      if (this.newType === VaultItemType.File) {
+        if (this.pendingFiles.length === 0) {
+          throw new Error('请先选择要导入的文件');
+        }
+        const attachments: VaultAttachmentInput[] = [];
+        const baseTitle = this.newTitle.trim();
+        for (let index = 0; index < this.pendingFiles.length; index += 1) {
+          const file = this.pendingFiles[index];
+          attachments.push({
+            type: VaultItemType.File,
+            uri: file.uri,
+            name: file.name,
+            data: new Uint8Array(0)
+          });
+        }
+        this.saveProgressText = '正在写入本地数据';
+        await vaultRepository.createItemWithAttachments({
+          type: VaultItemType.File,
+          groupId: this.newGroupId,
+          title: baseTitle.length > 0 ? baseTitle : (this.pendingFiles.length === 1 ? this.pendingFiles[0].name : `${this.pendingFiles.length} 个文件`),
+          username: '',
+          password: '',
+          notes: this.newNotes,
+          attachmentUri: '',
+          attachmentData: new Uint8Array(0)
+        }, attachments, (completed: number, total: number): void => {
+          this.saveProgress = Math.round(completed / total * 100);
+        });
+        const importedCount = this.pendingFiles.length;
+        this.resetNewItem();
+        this.closeNewItem();
+        await this.reloadVault();
+        promptAction.showToast({ message: `已导入 ${importedCount} 个文件` });
+        return;
+      }
       const input: VaultItemInput = {
         type: this.newType,
         groupId: this.newGroupId,
@@ -628,11 +765,15 @@ struct Index {
       promptAction.showToast({ message: '资料已保存' });
     } catch (error) {
       promptAction.showToast({ message: this.describeError(error) });
+    } finally {
+      this.savingNewItem = false;
+      this.saveProgressText = '';
     }
   }
 
   private openItem(item: VaultItem): void {
     this.selectedItem = item;
+    this.detailGroupId = item.groupId;
     this.detailTitle = item.title;
     this.detailUsername = item.username;
     this.detailPassword = item.password;
@@ -646,10 +787,11 @@ struct Index {
     if (!item) {
       return;
     }
+    const moved = item.groupId !== this.detailGroupId;
     const updated: VaultItem = {
       id: item.id,
       type: item.type,
-      groupId: item.groupId,
+      groupId: this.detailGroupId,
       title: this.detailTitle,
       username: this.detailUsername,
       password: this.detailPassword,
@@ -664,7 +806,7 @@ struct Index {
       await vaultRepository.updateItem(updated);
       this.closeSelectedItem();
       await this.reloadVault();
-      promptAction.showToast({ message: '修改已保存，旧版本已归档' });
+      promptAction.showToast({ message: moved ? '资料已移动并保存' : '修改已保存，旧版本已归档' });
     } catch (error) {
       promptAction.showToast({ message: this.describeError(error) });
     }
@@ -704,8 +846,22 @@ struct Index {
     this.revealNewPassword = false;
     this.newNotes = '';
     this.newAttachmentUri = '';
+    this.clearPendingMedia();
+    this.clearPendingFiles();
     this.pendingAttachment.fill(0);
     this.pendingAttachment = new Uint8Array(0);
+  }
+
+  private clearPendingMedia(): void {
+    this.pendingMedia.forEach((media: PickedMedia): void => { media.data.fill(0); });
+    this.pendingMedia = [];
+    this.selectedMediaCount = 0;
+  }
+
+  private clearPendingFiles(): void {
+    this.pendingFiles.forEach((file: PickedMedia): void => { file.data.fill(0); });
+    this.pendingFiles = [];
+    this.selectedFileCount = 0;
   }
 
   private describeError(error: Object): string {
@@ -730,7 +886,14 @@ struct Index {
   }
 
   private countType(type: VaultItemType): number {
-    return this.allItems.filter((item: VaultItem): boolean => item.type === type).length;
+    return this.allItems.filter((item: VaultItem): boolean => this.matchesCategory(item, type)).length;
+  }
+
+  private matchesCategory(item: VaultItem, type: VaultItemType): boolean {
+    if (type === VaultItemType.Image) {
+      return item.type === VaultItemType.Image || item.type === VaultItemType.Video;
+    }
+    return item.type === type;
   }
 
   private itemsInGroup(groupId: number): VaultItem[] {
@@ -738,7 +901,7 @@ struct Index {
   }
 
   private itemsInGroupByType(groupId: number, type: VaultItemType): VaultItem[] {
-    return this.allItems.filter((item: VaultItem): boolean => item.groupId === groupId && item.type === type);
+    return this.allItems.filter((item: VaultItem): boolean => item.groupId === groupId && this.matchesCategory(item, type));
   }
 
   private countGroupByType(groupId: number, type: VaultItemType): number {
@@ -1002,7 +1165,7 @@ struct Index {
       Row({ space: 10 }) {
         Text('⌕').fontSize(21).fontColor(COLOR_MUTED)
         if (this.searchActive) {
-          TextInput({ placeholder: '搜索账号、笔记、图片文字…', text: this.searchText })
+          TextInput({ placeholder: '搜索账号、笔记、媒体、文件…', text: this.searchText })
             .id('homeSearchInput')
             .layoutWeight(1)
             .height(40)
@@ -1013,7 +1176,7 @@ struct Index {
             .backgroundColor(Color.Transparent)
             .onChange((value: string): void => { this.applySearch(value); })
         } else {
-          Text(this.searchText.length > 0 ? this.searchText : '搜索账号、笔记、图片文字…')
+          Text(this.searchText.length > 0 ? this.searchText : '搜索账号、笔记、媒体、文件…')
             .layoutWeight(1)
             .fontSize(14)
             .fontColor(this.searchText.length > 0 ? COLOR_TEXT : '#9AA2B1')
@@ -1044,8 +1207,11 @@ struct Index {
   }
 
   @Builder
-  private itemRow(item: VaultItem): void {
+  private itemRow(item: VaultItem, showThumbnail: boolean = false): void {
     Row({ space: 8 }) {
+      if (showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video || item.type === VaultItemType.File)) {
+        VaultAttachmentPreview({ itemId: item.id, fallbackType: item.type })
+      }
       Column({ space: 0 }) {
         Text(item.title)
           .fontSize(14)
@@ -1066,7 +1232,7 @@ struct Index {
       Text('›').fontSize(20).fontColor('#B2B8C2')
     }
     .width('100%')
-    .height(42)
+    .height(showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video || item.type === VaultItemType.File) ? 48 : 42)
     .padding({ left: 12, right: 10 })
     .backgroundColor(COLOR_SURFACE)
     .borderRadius(15)
@@ -1082,6 +1248,94 @@ struct Index {
     }
     .width('100%')
     .padding({ top: 48, bottom: 48 })
+  }
+
+  private homeGroupCardHeight(groupId: number, showAll: boolean): number {
+    const items = this.itemsInGroup(groupId);
+    if (items.length === 0) {
+      return 92;
+    }
+    const visibleItems = showAll ? items : items.slice(0, 3);
+    let height = 58;
+    for (let index = 0; index < visibleItems.length; index += 1) {
+      const type = visibleItems[index].type;
+      height += type === VaultItemType.Image || type === VaultItemType.Video ? 48 : 42;
+    }
+    if (!showAll && items.length > 3) {
+      height += 34;
+    }
+    return height + 12;
+  }
+
+  private canShowAllHomeItems(): boolean {
+    let leftHeight = 0;
+    let rightHeight = 0;
+    for (let index = 0; index < this.groups.length; index += 1) {
+      const height = this.homeGroupCardHeight(this.groups[index].id, true);
+      if (leftHeight <= rightHeight) {
+        leftHeight += height;
+      } else {
+        rightHeight += height;
+      }
+    }
+    if (this.countGroup(0) > 0) {
+      const height = this.homeGroupCardHeight(0, true);
+      if (leftHeight <= rightHeight) {
+        leftHeight += height;
+      } else {
+        rightHeight += height;
+      }
+    }
+    // 首页上方还有搜索和安全存储区域，分组双列实际可见高度约为 420vp。
+    // 使用可见区域而不是整屏高度判断，避免卡片已经超出首屏却仍被当成“可全部显示”。
+    return Math.max(leftHeight, rightHeight) <= 420;
+  }
+
+  private homeItemsInGroup(groupId: number): VaultItem[] {
+    const items = this.itemsInGroup(groupId);
+    return this.canShowAllHomeItems() || this.expandedGroupId === groupId ? items : items.slice(0, 3);
+  }
+
+  private shouldShowHomeMoreRow(groupId: number): boolean {
+    const total = this.countGroup(groupId);
+    if (total <= 3) {
+      return false;
+    }
+    return this.expandedGroupId === groupId || this.homeItemsInGroup(groupId).length < total;
+  }
+
+  private homeSectionColumn(sectionId: number): number {
+    let leftHeight = 0;
+    let rightHeight = 0;
+    const showAll = this.canShowAllHomeItems();
+    for (let index = 0; index < this.groups.length; index += 1) {
+      const group = this.groups[index];
+      const column = leftHeight <= rightHeight ? 0 : 1;
+      if (group.id === sectionId) {
+        return column;
+      }
+      if (column === 0) {
+        leftHeight += this.homeGroupCardHeight(group.id, showAll);
+      } else {
+        rightHeight += this.homeGroupCardHeight(group.id, showAll);
+      }
+    }
+    return leftHeight <= rightHeight ? 0 : 1;
+  }
+
+  @Builder
+  private homeGroupColumn(column: number): void {
+    Column() {
+      ForEach(this.groups, (group: VaultGroup): void => {
+        if (this.homeSectionColumn(group.id) === column) {
+          this.groupSection(group, true)
+        }
+      }, (group: VaultGroup): string => `${group.id}`)
+      if (this.countGroup(0) > 0 && this.homeSectionColumn(0) === column) {
+        this.ungroupedSection(true)
+      }
+    }
+    .width('48.5%')
   }
 
   @Builder
@@ -1105,7 +1359,7 @@ struct Index {
             }
           }
           .width('100%')
-          Row({ space: 6 }) {
+          Row({ space: 5 }) {
             this.summaryPill('账号', this.loginCount)
             this.summaryPill('笔记', this.noteCount)
             this.summaryPill('媒体', this.mediaCount)
@@ -1133,7 +1387,7 @@ struct Index {
             Button('+ 新建分组')
               .height(38).fontSize(13).fontColor(COLOR_PRIMARY)
               .backgroundColor('#E5F6F0').borderRadius(12)
-              .onClick((): void => { this.showNewGroup = true; })
+              .onClick((): void => { this.openNewGroup(); })
           }
         }
         .width('100%')
@@ -1144,7 +1398,7 @@ struct Index {
               this.emptyState('没有找到资料', '换个关键词搜索标题、内容或图片文字')
             } else {
               ForEach(this.items, (item: VaultItem): void => {
-                this.itemRow(item)
+                this.itemRow(item, true)
               }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
             }
           }
@@ -1152,15 +1406,11 @@ struct Index {
         } else if (this.groups.length === 0 && this.countGroup(0) === 0) {
           this.emptyState('还没有分组', '创建分组后，即可分类保存各种资料')
         } else {
-          Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-            ForEach(this.groups, (group: VaultGroup, index: number): void => {
-              this.groupSection(group,
-                this.countGroup(0) === 0 && this.groups.length % 2 === 1 && index === this.groups.length - 1)
-            }, (group: VaultGroup): string => `${group.id}`)
-            if (this.countGroup(0) > 0) {
-              this.ungroupedSection((this.groups.length + 1) % 2 === 1)
-            }
+          Row({ space: 12 }) {
+            this.homeGroupColumn(0)
+            this.homeGroupColumn(1)
           }
+          .alignItems(VerticalAlign.Top)
           .width('100%')
         }
       }
@@ -1221,7 +1471,7 @@ struct Index {
         }
         .layoutWeight(1)
         .onClick((): void => {
-          if (this.countGroup(group.id) > 3) {
+          if (this.shouldShowHomeMoreRow(group.id)) {
             this.expandedGroupId = this.expandedGroupId === group.id ? -1 : group.id;
           }
         })
@@ -1242,15 +1492,14 @@ struct Index {
           .border({ width: { top: 1 }, color: COLOR_BORDER })
       } else {
         Column({ space: 0 }) {
-          ForEach(this.expandedGroupId === group.id ? this.itemsInGroup(group.id) :
-            this.itemsInGroup(group.id).slice(0, 3), (item: VaultItem): void => {
-            this.itemRow(item)
+          ForEach(this.homeItemsInGroup(group.id), (item: VaultItem): void => {
+            this.itemRow(item, true)
           }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
         }
         .width('100%')
         .padding({ left: 3, right: 3, bottom: 3 })
         .border({ width: { top: 1 }, color: COLOR_BORDER })
-        if (this.countGroup(group.id) > 3) {
+        if (this.shouldShowHomeMoreRow(group.id)) {
           this.moreItemsRow(group.id, this.countGroup(group.id))
         }
       }
@@ -1272,19 +1521,18 @@ struct Index {
       }
       .width('100%').padding({ left: 12, right: 12, top: 9, bottom: 8 })
       .onClick((): void => {
-        if (this.countGroup(0) > 3) {
+        if (this.shouldShowHomeMoreRow(0)) {
           this.expandedGroupId = this.expandedGroupId === 0 ? -1 : 0;
         }
       })
       Column({ space: 0 }) {
-        ForEach(this.expandedGroupId === 0 ? this.itemsInGroup(0) : this.itemsInGroup(0).slice(0, 3),
-          (item: VaultItem): void => {
-          this.itemRow(item)
+        ForEach(this.homeItemsInGroup(0), (item: VaultItem): void => {
+          this.itemRow(item, true)
         }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
       }
       .width('100%').padding({ left: 3, right: 3, bottom: 3 })
       .border({ width: { top: 1 }, color: COLOR_BORDER })
-      if (this.countGroup(0) > 3) {
+      if (this.shouldShowHomeMoreRow(0)) {
         this.moreItemsRow(0, this.countGroup(0))
       }
     }
@@ -1393,8 +1641,7 @@ struct Index {
           Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
             this.categoryCard(VaultItemType.Login, '网站账号与密码')
             this.categoryCard(VaultItemType.Note, '文字与私密记录')
-            this.categoryCard(VaultItemType.Image, '本地保存的图片')
-            this.categoryCard(VaultItemType.Video, '可直接播放的视频')
+            this.categoryCard(VaultItemType.Image, '图片与可直接播放的视频')
             this.categoryCard(VaultItemType.File, '文档与任意文件')
           }
           .width('100%')
@@ -1451,23 +1698,18 @@ struct Index {
           .width(40).height(40).fontSize(26).fontColor(COLOR_TEXT)
           .backgroundColor(COLOR_SURFACE).borderRadius(12)
           .onClick((): void => { this.showGroupManager = false; })
-        Column({ space: 3 }) {
-          Text('分组管理').fontSize(25).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-          Text('删除分组不会删除其中的资料').fontSize(12).fontColor(COLOR_MUTED)
-        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Text('分组管理').fontSize(25).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT).layoutWeight(1)
       }.width('100%')
       List({ space: 10 }) {
         ForEach(this.groups, (group: VaultGroup): void => {
           ListItem() {
             Row({ space: 12 }) {
-              Stack() { Text('◆').fontSize(14).fontColor(group.color) }
-                .width(44).height(44).borderRadius(14).backgroundColor(COLOR_SURFACE_2)
               Column({ space: 3 }) {
                 Text(group.name).fontSize(15).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
                 Text(`${this.countGroup(group.id)} 条资料`).fontSize(11).fontColor(COLOR_MUTED)
               }.alignItems(HorizontalAlign.Start).layoutWeight(1)
               Row({ space: 6 }) {
-                Button('修改')
+                Button('重命名')
                   .height(36).fontSize(11).fontColor(COLOR_PRIMARY)
                   .backgroundColor(COLOR_SURFACE_2).borderRadius(10)
                   .onClick((): void => { this.requestRenameGroup(group); })
@@ -1722,6 +1964,33 @@ struct Index {
   }
 
   @Builder
+  private selectedMediaPreview(): void {
+    Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+      ForEach(this.pendingMedia, (media: PickedMedia, index: number): void => {
+        Column({ space: 4 }) {
+          Stack({ alignContent: Alignment.BottomEnd }) {
+            VaultThumbnail({
+              itemId: '',
+              mediaType: media.type,
+              sourceUri: media.uri,
+              thumbnailSize: 72
+            })
+            if (media.type === VaultItemType.Video) {
+              Text('视频').fontSize(9).fontColor('#FFFFFF')
+                .padding({ left: 5, right: 5, top: 2, bottom: 2 })
+                .margin(5).backgroundColor('#99000000').borderRadius(7)
+              }
+          }
+          Text(`${index + 1}`)
+            .fontSize(10).fontColor(COLOR_MUTED).textAlign(TextAlign.Center).width(72)
+        }
+        .margin({ right: 8, bottom: 8 })
+      }, (media: PickedMedia): string => media.uri)
+    }
+    .width('100%')
+  }
+
+  @Builder
   private screenshotProtectionHint(): void {
     Row({ space: 5 }) {
       Text('✓').fontSize(11).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY)
@@ -1734,9 +2003,48 @@ struct Index {
   }
 
   @Builder
+  private detailNotesEditor(type: VaultItemType): void {
+    TextArea({ placeholder: type === VaultItemType.Note ? '内容' : '备注', text: this.detailNotes })
+      .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
+      .height(type === VaultItemType.Note || this.detailNotes.trim().length > 0 ? 84 : 44)
+      .borderRadius(11)
+      .onChange((value: string): void => { this.detailNotes = value; })
+  }
+
+  @Builder
+  private detailGroupChip(groupId: number, name: string): void {
+    Text(name)
+      .fontSize(12)
+      .fontColor(this.detailGroupId === groupId ? COLOR_BG : COLOR_MUTED)
+      .maxLines(1)
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .backgroundColor(this.detailGroupId === groupId ? COLOR_PRIMARY : COLOR_SURFACE_2)
+      .borderRadius(16)
+      .onClick((): void => { this.detailGroupId = groupId; })
+  }
+
+  @Builder
+  private detailGroupPicker(): void {
+    Column({ space: 6 }) {
+      Text('移动到分组').fontSize(12).fontColor(COLOR_MUTED).width('100%')
+      Scroll() {
+        Row({ space: 6 }) {
+          this.detailGroupChip(0, '未分组')
+          ForEach(this.groups, (group: VaultGroup): void => {
+            this.detailGroupChip(group.id, group.name)
+          }, (group: VaultGroup): string => `${group.id}`)
+        }
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
+      .width('100%')
+    }
+    .width('100%')
+  }
+
+  @Builder
   private newItemOverlay(): void {
     Column() {
-      Blank().onClick((): void => { this.closeNewItem(); })
       Scroll() {
         Column({ space: 10 }) {
           this.modalHeader('新建资料', (): void => { this.closeNewItem(); })
@@ -1759,11 +2067,10 @@ struct Index {
             this.typeChip(VaultItemType.Login)
             this.typeChip(VaultItemType.Note)
             this.typeChip(VaultItemType.Image)
-            this.typeChip(VaultItemType.Video)
             this.typeChip(VaultItemType.File)
           }
           .width('100%')
-          TextInput({ placeholder: '资料名称', text: this.newTitle })
+          TextInput({ placeholder: '名称', text: this.newTitle })
             .id(this.newItemTitleInputId())
             .defaultFocus(true)
             .onAppear((): void => { this.requestNewItemTitleFocus(60); })
@@ -1790,24 +2097,39 @@ struct Index {
               this.screenshotProtectionHint()
             }
           }
-          if (this.newType === VaultItemType.Image || this.newType === VaultItemType.Video) {
-            Button(this.newAttachmentUri.length > 0 ? '✓ 已选择本机媒体' : '从系统相册选择')
+          if (this.newType === VaultItemType.Image) {
+            Button(this.selectedMediaCount > 0 ? `✓ 已选择 ${this.selectedMediaCount} 项媒体` : '从系统相册中选择')
               .width('100%').height(48).fontColor(COLOR_PRIMARY)
               .backgroundColor('#173128').borderRadius(12)
               .onClick((): void => { this.chooseMedia(); })
+            if (this.selectedMediaCount > 0) {
+              this.selectedMediaPreview()
+            }
           } else if (this.newType === VaultItemType.File) {
-            Button(this.newAttachmentUri.length > 0 ? '✓ 已选择文件' : '选择要保存的文件')
+            Button(this.selectedFileCount > 0 ? `✓ 已选择 ${this.selectedFileCount} 个文件` : '选择多个要保存的文件')
               .width('100%').height(48).fontColor(COLOR_PRIMARY)
               .backgroundColor('#173128').borderRadius(12)
               .onClick((): void => { this.chooseMedia(true); })
           }
-          TextArea({ placeholder: '备注', text: this.newNotes })
+          TextArea({ placeholder: this.newType === VaultItemType.Note ? '内容' : '备注', text: this.newNotes })
             .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
             .height(92).borderRadius(12)
             .onChange((value: string): void => { this.newNotes = value; })
-          Button('保存')
+          if (this.savingNewItem) {
+            Column({ space: 5 }) {
+              Row() {
+                Text(this.saveProgressText).fontSize(11).fontColor(COLOR_MUTED)
+                Blank()
+                Text(`${this.saveProgress}%`).fontSize(11).fontColor(COLOR_PRIMARY)
+              }.width('100%')
+              Progress({ value: this.saveProgress, total: 100, type: ProgressType.Linear })
+                .width('100%').color(COLOR_PRIMARY).backgroundColor(COLOR_SURFACE_2)
+            }.width('100%')
+          }
+          Button(this.savingNewItem ? '正在保存…' : '保存')
             .width('100%').height(50).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
             .backgroundColor(COLOR_PRIMARY).borderRadius(13)
+            .enabled(!this.savingNewItem)
             .onClick((): void => { this.createItem(); })
         }
         .width('100%')
@@ -1816,7 +2138,8 @@ struct Index {
       .width('100%')
       .constraintSize({ minHeight: 420, maxHeight: '88%' })
       .backgroundColor(COLOR_SURFACE)
-      .borderRadius({ topLeft: 24, topRight: 24 })
+      .borderRadius({ bottomLeft: 24, bottomRight: 24 })
+      Blank().onClick((): void => { this.closeNewItem(); })
     }
     .width('100%')
     .height('100%')
@@ -1840,7 +2163,7 @@ struct Index {
           .backgroundColor(COLOR_PRIMARY).borderRadius(13)
           .onClick((): void => { this.renameGroup(group); })
       }
-      .width('100%')
+      .width('90%')
       .padding({ left: 20, right: 20, top: 12, bottom: 16 })
       .backgroundColor(COLOR_SURFACE)
       .borderRadius({ topLeft: 24, topRight: 24 })
@@ -1858,19 +2181,24 @@ struct Index {
         this.groupDeleteConfirmName = '';
       })
       Column({ space: 15 }) {
-        this.modalHeader('删除非空分组', (): void => {
+        this.modalHeader('⚠ 永久删除分组', (): void => {
           this.groupPendingDelete = undefined;
           this.groupDeleteConfirmName = '';
         })
-        Text(`“${group.name}”中有 ${this.groupPendingDeleteCount} 条资料。删除分组后，这些资料将移至“未分组”，资料本身不会被删除。`)
-          .fontSize(13).fontColor(COLOR_MUTED).lineHeight(21).width('100%')
+        Column({ space: 6 }) {
+          Text(`将删除“${group.name}”及其中 ${this.groupPendingDeleteCount} 条资料`)
+            .fontSize(14).fontWeight(FontWeight.Bold).fontColor(COLOR_DANGER).width('100%')
+          Text('分组中当前显示的资料、历史记录和附件会永久删除。回收站资料会保留，恢复时将自动重建原分组。')
+            .fontSize(13).fontColor(COLOR_DANGER).lineHeight(20).width('100%')
+        }
+        .width('100%').padding(12).backgroundColor('#FDEDEF').borderRadius(12)
         Text(`请输入分组名称“${group.name}”以确认删除`)
           .fontSize(12).fontColor(COLOR_DANGER).width('100%')
         TextInput({ placeholder: group.name, text: this.groupDeleteConfirmName })
           .fontColor(COLOR_TEXT).placeholderColor('#A7AFBC').backgroundColor(COLOR_SURFACE_2)
           .height(50).borderRadius(12)
           .onChange((value: string): void => { this.groupDeleteConfirmName = value; })
-        Button('删除分组')
+        Button('永久删除分组及当前资料')
           .width('100%').height(50).fontWeight(FontWeight.Bold)
           .fontColor(this.groupDeleteConfirmName.trim() === group.name ? '#FFFFFF' : COLOR_MUTED)
           .backgroundColor(this.groupDeleteConfirmName.trim() === group.name ? COLOR_DANGER : COLOR_SURFACE_2)
@@ -1887,10 +2215,12 @@ struct Index {
   @Builder
   private newGroupOverlay(): void {
     Column() {
-      Blank().onClick((): void => { this.showNewGroup = false; })
+      Blank().onClick((): void => { this.closeNewGroup(); })
       Column({ space: 10 }) {
-        this.modalHeader('新建分组', (): void => { this.showNewGroup = false; })
+        this.modalHeader('新建分组', (): void => { this.closeNewGroup(); })
         TextInput({ placeholder: '分组名称', text: this.newGroupName })
+          .id('newGroupInput')
+          .defaultFocus(true)
           .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
           .height(50).borderRadius(12)
           .onChange((value: string): void => { this.newGroupName = value; })
@@ -1902,7 +2232,8 @@ struct Index {
       .width('100%')
       .padding({ left: 20, right: 20, top: 12, bottom: 16 })
       .backgroundColor(COLOR_SURFACE)
-      .borderRadius({ topLeft: 24, topRight: 24 })
+      .borderRadius(24)
+      Blank().onClick((): void => { this.closeNewGroup(); })
     }
     .width('100%')
     .height('100%')
@@ -1914,74 +2245,93 @@ struct Index {
     Column() {
       Blank().onClick((): void => { this.closeSelectedItem(); })
       Scroll() {
-        Column({ space: 14 }) {
-          this.modalHeader('资料详情', (): void => { this.closeSelectedItem(); })
-          Row({ space: 12 }) {
-            Stack() { Text(itemTypeGlyph(item.type)).fontSize(22).fontColor(COLOR_PRIMARY) }
-              .width(54).height(54).borderRadius(16).backgroundColor('#1B332C')
+        if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
+          Column({ space: 8 }) {
+            this.modalHeader(this.detailTitle.trim().length > 0 ? this.detailTitle : '媒体',
+              (): void => { this.closeSelectedItem(); })
+            VaultAttachmentGallery({ itemId: item.id, fallbackType: item.type })
             Column() {
-              Text(itemTypeLabel(item.type)).fontSize(13).fontColor(COLOR_PRIMARY)
+              this.detailGroupPicker()
             }
-            .alignItems(HorizontalAlign.Start)
-          }
-          .width('100%')
-          TextInput({ placeholder: '名称', text: this.detailTitle })
-            .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(48).borderRadius(12)
-            .onChange((value: string): void => { this.detailTitle = value; })
-          if (item.type === VaultItemType.Login) {
-            TextInput({ placeholder: '账号', text: this.detailUsername })
-              .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(48).borderRadius(12)
-              .onChange((value: string): void => { this.detailUsername = value; })
-            Row({ space: 8 }) {
-              TextInput({ placeholder: '密码', text: this.detailPassword })
-                .type(this.revealPassword ? InputType.Normal : InputType.Password)
-                .layoutWeight(1).fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
-                .height(48).borderRadius(12)
-                .onChange((value: string): void => { this.detailPassword = value; })
-              Button(this.revealPassword ? '隐藏' : '显示')
-                .height(48).fontColor(COLOR_PRIMARY).backgroundColor('#173128').borderRadius(12)
-                .onClick((): void => { this.toggleDetailPasswordVisibility(); })
+            .width('100%').padding(9).backgroundColor('#0C1714').borderRadius(15)
+            Column({ space: 7 }) {
+              TextInput({ placeholder: '名称', text: this.detailTitle })
+                .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(42).borderRadius(11)
+                .onChange((value: string): void => { this.detailTitle = value; })
+              this.detailNotesEditor(item.type)
+            }
+            .width('100%').padding(9).backgroundColor('#0C1714').borderRadius(15)
+            Row({ space: 10 }) {
+              Button('保存修改').fontSize(14).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
+                .layoutWeight(1).height(44)
+                .backgroundColor(COLOR_PRIMARY).borderRadius(14)
+                .onClick((): void => { this.saveSelectedItem(); })
+              Button('移入回收站').fontSize(14).fontColor(COLOR_DANGER)
+                .layoutWeight(1).height(44)
+                .backgroundColor('#2A1719').borderRadius(14)
+                .onClick((): void => { this.trashSelectedItem(); })
             }
             .width('100%')
-            if (this.revealPassword) {
-              this.screenshotProtectionHint()
+          }
+          .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 12 })
+        } else {
+          Column({ space: 9 }) {
+            this.modalHeader('资料详情', (): void => { this.closeSelectedItem(); })
+            Row({ space: 6 }) {
+              Text(itemTypeGlyph(item.type)).fontSize(16).fontColor(COLOR_PRIMARY)
+              Text(itemTypeLabel(item.type)).fontSize(12).fontColor(COLOR_PRIMARY)
             }
+            .height(32).padding({ left: 10, right: 10 })
+            .backgroundColor('#1B332C').borderRadius(11).alignSelf(ItemAlign.Start)
+            this.detailGroupPicker()
+            TextInput({ placeholder: '名称', text: this.detailTitle })
+              .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)
+              .onChange((value: string): void => { this.detailTitle = value; })
+            if (item.type === VaultItemType.Login) {
+              TextInput({ placeholder: '账号', text: this.detailUsername })
+                .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)
+                .onChange((value: string): void => { this.detailUsername = value; })
+              Row({ space: 6 }) {
+                TextInput({ placeholder: '密码', text: this.detailPassword })
+                  .type(this.revealPassword ? InputType.Normal : InputType.Password)
+                  .layoutWeight(1).fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
+                  .height(44).borderRadius(11)
+                  .onChange((value: string): void => { this.detailPassword = value; })
+                Button(this.revealPassword ? '隐藏' : '显示')
+                  .height(44).fontColor(COLOR_PRIMARY).backgroundColor('#173128').borderRadius(11)
+                  .onClick((): void => { this.toggleDetailPasswordVisibility(); })
+              }.width('100%')
+              if (this.revealPassword) { this.screenshotProtectionHint() }
+            }
+            this.detailNotesEditor(item.type)
+            if (item.type === VaultItemType.File) {
+              Row({ space: 10 }) {
+                Text('▤').fontSize(24).fontColor(COLOR_PRIMARY)
+                Column({ space: 3 }) {
+                  Text(item.title).fontSize(14).fontColor(COLOR_TEXT).maxLines(1)
+                  Text('文件保存在应用本地数据库中').fontSize(11).fontColor(COLOR_MUTED)
+                }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+              }.width('100%').padding(10).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
+              Button('下载到本地')
+                .width('100%').height(44).fontColor(COLOR_PRIMARY)
+                .backgroundColor('#173128').borderRadius(12)
+                .onClick((): void => { this.downloadAttachment(item); })
+            }
+            Button('保存修改')
+              .width('100%').height(46).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
+              .backgroundColor(COLOR_PRIMARY).borderRadius(12)
+              .onClick((): void => { this.saveSelectedItem(); })
+            Button('移入回收站')
+              .width('100%').height(44).fontColor(COLOR_DANGER)
+              .backgroundColor('#2A1719').borderRadius(12)
+              .onClick((): void => { this.trashSelectedItem(); })
           }
-          TextArea({ placeholder: '备注', text: this.detailNotes })
-            .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(105).borderRadius(12)
-            .onChange((value: string): void => { this.detailNotes = value; })
-          if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
-            VaultMedia({ itemId: item.id, mediaType: item.type })
-          }
-          if (item.type === VaultItemType.File) {
-            Row({ space: 12 }) {
-              Text('▤').fontSize(28).fontColor(COLOR_PRIMARY)
-              Column({ space: 3 }) {
-                Text(item.title).fontSize(14).fontColor(COLOR_TEXT).maxLines(1)
-                Text('文件保存在应用本地数据库中').fontSize(11).fontColor(COLOR_MUTED)
-              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            }.width('100%').padding(14).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
-          }
-          if (item.type === VaultItemType.Image || item.type === VaultItemType.Video || item.type === VaultItemType.File) {
-            Button('下载到本地')
-              .width('100%').height(48).fontColor(COLOR_PRIMARY)
-              .backgroundColor('#173128').borderRadius(13)
-              .onClick((): void => { this.downloadAttachment(item); })
-          }
-          Button('保存修改')
-            .width('100%').height(50).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
-            .backgroundColor(COLOR_PRIMARY).borderRadius(13)
-            .onClick((): void => { this.saveSelectedItem(); })
-          Button('移入回收站')
-            .width('100%').height(48).fontColor(COLOR_DANGER)
-            .backgroundColor('#2A1719').borderRadius(13)
-            .onClick((): void => { this.trashSelectedItem(); })
+          .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 14 })
         }
-        .width('100%')
-        .padding(20)
       }
       .width('100%')
-      .height('82%')
+      .constraintSize({ maxHeight: item.type === VaultItemType.Image || item.type === VaultItemType.Video ? '96%' : '88%' })
+      .scrollBar(BarState.Off)
       .backgroundColor(COLOR_SURFACE)
       .borderRadius({ topLeft: 24, topRight: 24 })
     }
