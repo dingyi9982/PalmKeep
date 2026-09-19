@@ -476,11 +476,6 @@ struct Index {
     }
   }
 
-  private toggleNewPasswordVisibility(): void {
-    this.revealNewPassword = !this.revealNewPassword;
-    AbilityContextHolder.setPrivacyMode(this.revealNewPassword);
-  }
-
   private async closeSelectedItem(): Promise<void> {
     try {
     this.selectedItem = undefined;
@@ -498,11 +493,6 @@ struct Index {
       if (error instanceof Error) { throw error; }
       throw new Error('系统操作失败');
     }
-  }
-
-  private toggleDetailPasswordVisibility(): void {
-    this.revealPassword = !this.revealPassword;
-    AbilityContextHolder.setPrivacyMode(this.revealPassword);
   }
 
   private closeGestureSetup(): void {
@@ -1611,15 +1601,11 @@ struct Index {
 
   @Builder
   private brandMark(size: number = 54): void {
-    Stack() {
-      Text('◆')
-        .fontSize(size * 0.36)
-        .fontColor(COLOR_BG)
-    }
+    Image($r('app.media.launcher_icon'))
     .width(size)
     .height(size)
-    .borderRadius(size * 0.3)
-    .backgroundColor(COLOR_PRIMARY)
+    .objectFit(ImageFit.Cover)
+    .borderRadius(size * 0.24)
   }
 
   @Builder
@@ -2041,13 +2027,12 @@ struct Index {
 
   @Builder
   private emptyState(title: string, description: string): void {
-    Column({ space: 9 }) {
-      Text('◇').fontSize(32).fontColor('#A7AFBC')
+    Column({ space: 6 }) {
       Text(title).fontSize(16).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
       Text(description).fontSize(13).fontColor(COLOR_MUTED).textAlign(TextAlign.Center)
     }
     .width('100%')
-    .padding({ top: 48, bottom: 48 })
+    .padding({ top: 34, bottom: 34 })
   }
 
   private homeGroupCardHeight(groupId: number, showAll: boolean): number {
@@ -3517,16 +3502,16 @@ struct Index {
               .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
               .height(48).borderRadius(12)
               .onChange((value: string): void => { this.newUsername = value; })
-            Row({ space: 8 }) {
-              TextInput({ placeholder: '密码', text: this.newPassword })
-                .type(this.revealNewPassword ? InputType.Normal : InputType.Password)
-                .layoutWeight(1).fontColor(COLOR_TEXT).placeholderColor('#607B72')
-                .backgroundColor(COLOR_SURFACE_2).height(48).borderRadius(12)
-                .onChange((value: string): void => { this.newPassword = value; })
-              this.passwordEyeButton(this.revealNewPassword, 48,
-                (): void => { this.toggleNewPasswordVisibility(); })
-            }
-            .width('100%')
+            TextInput({ placeholder: '密码', text: this.newPassword })
+              .type(InputType.Password)
+              .showPassword(this.revealNewPassword)
+              .width('100%').fontColor(COLOR_TEXT).placeholderColor('#607B72')
+              .backgroundColor(COLOR_SURFACE_2).height(48).borderRadius(12)
+              .onChange((value: string): void => { this.newPassword = value; })
+              .onSecurityStateChange((visible: boolean): void => {
+                this.revealNewPassword = visible;
+                AbilityContextHolder.setPrivacyMode(visible);
+              })
             if (this.revealNewPassword) {
               this.screenshotProtectionHint()
             }
@@ -3548,7 +3533,7 @@ struct Index {
               }.width('100%')
             }
           } else if (this.newType === VaultItemType.File) {
-            Button('选择多个要保存的文件')
+            Button('从文件系统添加')
               .width('100%').height(48).fontColor(COLOR_PRIMARY)
               .backgroundColor('#173128').borderRadius(12)
               .enabled(!this.savingNewItem)
@@ -3738,15 +3723,16 @@ struct Index {
               TextInput({ placeholder: '账号', text: this.detailUsername })
                 .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)
                 .onChange((value: string): void => { this.detailUsername = value; })
-              Row({ space: 6 }) {
-                TextInput({ placeholder: '密码', text: this.detailPassword })
-                  .type(this.revealPassword ? InputType.Normal : InputType.Password)
-                  .layoutWeight(1).fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
-                  .height(44).borderRadius(11)
-                  .onChange((value: string): void => { this.detailPassword = value; })
-                this.passwordEyeButton(this.revealPassword, 44,
-                  (): void => { this.toggleDetailPasswordVisibility(); })
-              }.width('100%')
+              TextInput({ placeholder: '密码', text: this.detailPassword })
+                .type(InputType.Password)
+                .showPassword(this.revealPassword)
+                .width('100%').fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
+                .height(44).borderRadius(11)
+                .onChange((value: string): void => { this.detailPassword = value; })
+                .onSecurityStateChange((visible: boolean): void => {
+                  this.revealPassword = visible;
+                  AbilityContextHolder.setPrivacyMode(visible);
+                })
               if (this.revealPassword) { this.screenshotProtectionHint() }
             }
             this.detailNotesEditor(item.type)
