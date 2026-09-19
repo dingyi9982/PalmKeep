@@ -1,6 +1,7 @@
 import promptAction from '@ohos.promptAction';
 import pasteboard from '@ohos.pasteboard';
 import { BusinessError } from '@ohos.base';
+import { VERSION_CODE, VERSION_NAME } from 'BuildProfile';
 import { GestureGrid } from '../components/GestureGrid';
 import { VaultThumbnail } from '../components/VaultThumbnail';
 import { VaultAttachmentPreview } from '../components/VaultAttachmentPreview';
@@ -13,6 +14,7 @@ import { mediaPickerService, PickedMedia } from '../services/MediaPickerService'
 import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
 import { vaultRepository } from '../services/VaultRepository';
+import { BUILD_GIT_LABEL } from '../generated/BuildMetadata';
 import {
   itemTypeGlyph,
   itemTypeLabel,
@@ -2953,11 +2955,28 @@ struct Index {
         .width('100%').padding(14).backgroundColor(COLOR_SURFACE).borderRadius(17)
         .border({ width: 1, color: COLOR_BORDER })
         .onClick((): void => { this.showGroupManager = true; })
+        Column() {
+          Row() {
+            Text('版本与构建').fontSize(15).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+            Blank()
+            Text(`${VERSION_NAME}（${VERSION_CODE}）`).fontSize(12).fontColor(COLOR_MUTED)
+          }
+          .width('100%').padding({ left: 15, right: 15, top: 14, bottom: 12 })
+          Row() {
+            Text('构建标识').fontSize(13).fontColor(COLOR_MUTED)
+            Blank()
+            Text(BUILD_GIT_LABEL).fontSize(12).fontColor('#607B72').maxLines(1)
+          }
+          .width('100%').padding({ left: 15, right: 15, top: 12, bottom: 14 })
+          .border({ width: { top: 1 }, color: COLOR_BORDER })
+        }
+        .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(17)
+        .border({ width: 1, color: COLOR_BORDER })
         Button('立即锁定保险库')
           .width('100%').height(50).fontColor(COLOR_PRIMARY)
           .backgroundColor('#173128').borderRadius(14)
           .onClick((): void => { this.lockVault(); })
-        Text('掌心密匣 PalmVault · 阶段 1')
+        Text('掌心密匣 PalmVault')
           .fontSize(12).fontColor('#607B72').width('100%').textAlign(TextAlign.Center)
       }
       .width('100%')
