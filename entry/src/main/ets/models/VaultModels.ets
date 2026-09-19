@@ -54,12 +54,19 @@ export interface VaultAttachmentSummary {
   name: string;
   sourceUri: string;
   ocrText: string;
+  sizeBytes: number;
 }
 
 export interface VaultSearchHit {
   item: VaultItem;
   attachmentIndex: number;
   matchedTextLine: string;
+  originalGroupName: string;
+}
+
+export interface VaultTrashEntry {
+  item: VaultItem;
+  originalGroupName: string;
 }
 
 export function createVaultId(): string {

@@ -9,6 +9,7 @@ import {
   VaultItem,
   VaultItemInput,
   VaultSearchHit,
+  VaultTrashEntry,
   VaultItemType
 } from '../models/VaultModels';
 
@@ -43,7 +44,7 @@ class VaultRepositoryImpl {
 
   async listGroups(): Promise<VaultGroup[]> {
     const result = await this.requireStore().querySql(
-      'SELECT id, name, color, created_at FROM vault_groups ORDER BY created_at ASC'
+      'SELECT id, name, color, created_at FROM vault_groups ORDER BY sort_order ASC, created_at ASC'
     );
     const groups: VaultGroup[] = [];
     try {
@@ -66,12 +67,32 @@ class VaultRepositoryImpl {
     if (cleanName.length === 0) {
       throw new Error('分组名称不能为空');
     }
+    const orderResult = await this.requireStore().querySql(
+      'SELECT COALESCE(MAX(sort_order), -1) + 1 FROM vault_groups');
+    let sortOrder = 0;
+    try { if (orderResult.goToFirstRow()) { sortOrder = orderResult.getLong(0); } } finally { orderResult.close(); }
     const values: relationalStore.ValuesBucket = {
       name: cleanName,
       color: color,
-      created_at: Date.now()
+      created_at: Date.now(),
+      sort_order: sortOrder
     };
     return this.requireStore().insert('vault_groups', values);
+  }
+
+  async reorderGroups(groupIds: number[]): Promise<void> {
+    if (groupIds.length === 0) { return; }
+    const store = this.requireStore();
+    store.beginTransaction();
+    try {
+      for (let index = 0; index < groupIds.length; index += 1) {
+        await store.executeSql('UPDATE vault_groups SET sort_order = ? WHERE id = ?', [index, groupIds[index]]);
+      }
+      store.commit();
+    } catch (error) {
+      store.rollBack();
+      throw new Error('调整分组顺序失败');
+    }
   }
 
   async updateGroup(id: number, name: string, color: string): Promise<void> {
@@ -155,13 +176,18 @@ class VaultRepositoryImpl {
     const fields = 'vault_items.id AS id, vault_items.type AS type, vault_items.group_id AS group_id, ' +
       'vault_items.title AS title, vault_items.username AS username, vault_items.password AS password, ' +
       'vault_items.notes AS notes, vault_items.attachment_uri AS attachment_uri, vault_items.ocr_text AS ocr_text, ' +
-      'vault_items.created_at AS created_at, vault_items.updated_at AS updated_at, vault_items.deleted_at AS deleted_at';
+      'vault_items.created_at AS created_at, vault_items.updated_at AS updated_at, vault_items.deleted_at AS deleted_at, ' +
+      'COALESCE(vault_groups.name, vault_group_tombstones.name, \'未分组\') AS original_group_name';
     const sql = 'SELECT ' + fields + ', search_attachment.attachment_index AS matched_attachment_index, ' +
       'search_attachment.ocr_text AS matched_ocr_text ' +
       'FROM vault_items JOIN vault_item_attachments search_attachment ON search_attachment.item_id = vault_items.id ' +
-      'WHERE vault_items.deleted_at = 0 AND search_attachment.type = ? AND search_attachment.ocr_text LIKE ? ' +
+      'LEFT JOIN vault_groups ON vault_groups.id = vault_items.group_id ' +
+      'LEFT JOIN vault_group_tombstones ON vault_group_tombstones.group_id = vault_items.group_id ' +
+      'WHERE search_attachment.type = ? AND search_attachment.ocr_text LIKE ? ' +
       'UNION ALL SELECT ' + fields + ', -1 AS matched_attachment_index, \'\' AS matched_ocr_text FROM vault_items ' +
-      'WHERE vault_items.deleted_at = 0 AND (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ?) ' +
+      'LEFT JOIN vault_groups ON vault_groups.id = vault_items.group_id ' +
+      'LEFT JOIN vault_group_tombstones ON vault_group_tombstones.group_id = vault_items.group_id ' +
+      'WHERE (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ?) ' +
       'AND NOT EXISTS (SELECT 1 FROM vault_item_attachments search_attachment ' +
       'WHERE search_attachment.item_id = vault_items.id AND search_attachment.type = ? ' +
       'AND search_attachment.ocr_text LIKE ?) ORDER BY updated_at DESC, matched_attachment_index ASC';
@@ -174,11 +200,44 @@ class VaultRepositoryImpl {
         hits.push({
           item: this.readItem(result),
           attachmentIndex: result.getLong(result.getColumnIndex('matched_attachment_index')),
-          matchedTextLine: this.findMatchingTextLine(matchedOcrText, cleanSearch)
+          matchedTextLine: this.findMatchingTextLine(matchedOcrText, cleanSearch),
+          originalGroupName: result.getString(result.getColumnIndex('original_group_name'))
         });
       }
     } finally { result.close(); }
     return hits;
+  }
+
+  async listTrashEntries(type?: VaultItemType): Promise<VaultTrashEntry[]> {
+    let sql = 'SELECT vault_items.id, vault_items.type, vault_items.group_id, vault_items.title, ' +
+      'vault_items.username, vault_items.password, vault_items.notes, vault_items.attachment_uri, ' +
+      'vault_items.ocr_text, vault_items.created_at, vault_items.updated_at, vault_items.deleted_at, ' +
+      'COALESCE(vault_groups.name, vault_group_tombstones.name, \'未分组\') AS original_group_name ' +
+      'FROM vault_items LEFT JOIN vault_groups ON vault_groups.id = vault_items.group_id ' +
+      'LEFT JOIN vault_group_tombstones ON vault_group_tombstones.group_id = vault_items.group_id ' +
+      'WHERE vault_items.deleted_at > 0';
+    const args: relationalStore.ValueType[] = [];
+    if (type) {
+      if (type === VaultItemType.Image) {
+        sql += ' AND vault_items.type IN (?, ?)';
+        args.push(VaultItemType.Image, VaultItemType.Video);
+      } else {
+        sql += ' AND vault_items.type = ?';
+        args.push(type);
+      }
+    }
+    sql += ' ORDER BY vault_items.deleted_at DESC';
+    const result = await this.requireStore().querySql(sql, args);
+    const entries: VaultTrashEntry[] = [];
+    try {
+      while (result.goToNextRow()) {
+        entries.push({
+          item: this.readItem(result),
+          originalGroupName: result.getString(result.getColumnIndex('original_group_name'))
+        });
+      }
+    } finally { result.close(); }
+    return entries;
   }
 
   private findMatchingTextLine(text: string, search: string): string {
@@ -243,7 +302,7 @@ class VaultRepositoryImpl {
   }
 
   async createItemWithAttachments(input: VaultItemInput, attachments: VaultAttachmentInput[],
-    onProgress?: (completed: number, total: number) => void): Promise<void> {
+    onProgress?: (completed: number, total: number) => void): Promise<string> {
     if (attachments.length === 0) { throw new Error('请先选择附件'); }
     const store = this.requireStore();
     store.beginTransaction();
@@ -280,6 +339,7 @@ class VaultRepositoryImpl {
       }
       await this.refreshItemOcrText(id);
       store.commit();
+      return id;
     } catch (error) {
       store.rollBack();
       throw new Error('资料保存失败，未写入任何附件');
@@ -288,7 +348,10 @@ class VaultRepositoryImpl {
 
   async listItemAttachments(itemId: string): Promise<VaultAttachmentSummary[]> {
     const result = await this.requireStore().querySql(
-      'SELECT attachment_index, type, name, source_uri, ocr_text FROM vault_item_attachments WHERE item_id = ? ORDER BY attachment_index ASC',
+      `SELECT a.attachment_index, a.type, a.name, a.source_uri, a.ocr_text,
+        COALESCE((SELECT SUM(length(p.data)) FROM vault_attachment_parts p
+          WHERE p.item_id = a.item_id AND p.attachment_index = a.attachment_index), 0)
+        FROM vault_item_attachments a WHERE a.item_id = ? ORDER BY a.attachment_index ASC`,
       [itemId]
     );
     const attachments: VaultAttachmentSummary[] = [];
@@ -299,7 +362,8 @@ class VaultRepositoryImpl {
           type: result.getString(1) as VaultItemType,
           name: result.getString(2),
           sourceUri: result.getString(3),
-          ocrText: result.getString(4)
+          ocrText: result.getString(4),
+          sizeBytes: result.getLong(5)
         });
       }
     } finally { result.close(); }
@@ -367,7 +431,7 @@ class VaultRepositoryImpl {
       store.commit();
     } catch (error) {
       store.rollBack();
-      throw new Error('媒体导入失败，原有媒体未更改');
+      throw new Error('附件导入失败，原有内容未更改');
     }
   }
 
@@ -383,7 +447,7 @@ class VaultRepositoryImpl {
     const existing = await this.listItemAttachments(itemId);
     const selected = new Set<number>(attachmentIndexes);
     const remaining = existing.filter((attachment: VaultAttachmentSummary): boolean => !selected.has(attachment.index));
-    if (remaining.length === 0) { throw new Error('至少需要保留一个媒体'); }
+    if (remaining.length === 0) { throw new Error('至少需要保留一个附件'); }
     const store = this.requireStore();
     store.beginTransaction();
     try {
@@ -420,7 +484,7 @@ class VaultRepositoryImpl {
       store.commit();
     } catch (error) {
       store.rollBack();
-      throw new Error('删除媒体失败，数据未更改');
+      throw new Error('删除附件失败，数据未更改');
     }
   }
 
@@ -452,44 +516,88 @@ class VaultRepositoryImpl {
   }
 
   async restoreFromTrash(id: string): Promise<void> {
+    await this.restoreTrashItems([id]);
+  }
+
+  async restoreTrashItems(ids: string[]): Promise<void> {
+    if (ids.length === 0) { return; }
     const store = this.requireStore();
     store.beginTransaction();
     try {
-      const itemResult = await store.querySql('SELECT group_id FROM vault_items WHERE id = ?', [id]);
-      let groupId = 0;
-      try {
-        if (itemResult.goToFirstRow()) {
-          groupId = itemResult.getLong(0);
+      for (let index = 0; index < ids.length; index += 1) {
+        const id = ids[index];
+        const itemResult = await store.querySql(
+          'SELECT group_id FROM vault_items WHERE id = ? AND deleted_at > 0', [id]);
+        let groupId = 0;
+        let exists = false;
+        try {
+          if (itemResult.goToFirstRow()) {
+            exists = true;
+            groupId = itemResult.getLong(0);
+          }
+        } finally { itemResult.close(); }
+        if (!exists) { continue; }
+        if (groupId > 0) {
+          const groupResult = await store.querySql('SELECT id FROM vault_groups WHERE id = ?', [groupId]);
+          let groupExists = false;
+          try { groupExists = groupResult.goToFirstRow(); } finally { groupResult.close(); }
+          if (!groupExists) { groupId = await this.restoreDeletedGroup(store, groupId); }
         }
-      } finally {
-        itemResult.close();
-      }
-      if (groupId > 0) {
-        const groupResult = await store.querySql('SELECT id FROM vault_groups WHERE id = ?', [groupId]);
-        let groupExists = false;
-        try { groupExists = groupResult.goToFirstRow(); } finally { groupResult.close(); }
-        if (!groupExists) {
-          groupId = await this.restoreDeletedGroup(store, groupId);
-        }
+        await store.executeSql(
+          'UPDATE vault_items SET group_id = ?, deleted_at = 0, updated_at = ? WHERE id = ?',
+          [groupId, Date.now(), id]
+        );
       }
       await store.executeSql(
-        'UPDATE vault_items SET group_id = ?, deleted_at = 0, updated_at = ? WHERE id = ?',
-        [groupId, Date.now(), id]
+        'DELETE FROM vault_group_tombstones WHERE group_id NOT IN ' +
+        '(SELECT DISTINCT group_id FROM vault_items WHERE deleted_at > 0)'
       );
       store.commit();
     } catch (error) {
       store.rollBack();
-      throw new Error('恢复资料失败，数据未更改');
+      throw new Error('批量恢复失败，数据未更改');
     }
   }
 
   async permanentlyDelete(id: string): Promise<void> {
+    await this.permanentlyDeleteItems([id]);
+  }
+
+  async permanentlyDeleteItems(ids: string[]): Promise<void> {
+    if (ids.length === 0) { return; }
     const store = this.requireStore();
-    await store.executeSql('DELETE FROM vault_item_history WHERE item_id = ?', [id]);
-    await store.executeSql('DELETE FROM vault_attachment_parts WHERE item_id = ?', [id]);
-    await store.executeSql('DELETE FROM vault_item_attachments WHERE item_id = ?', [id]);
-    await store.executeSql('DELETE FROM vault_attachment_chunks WHERE item_id = ?', [id]);
-    await store.executeSql('DELETE FROM vault_items WHERE id = ?', [id]);
+    store.beginTransaction();
+    try {
+      for (let index = 0; index < ids.length; index += 1) {
+        await this.permanentlyDeleteTrashItem(store, ids[index]);
+      }
+      await store.executeSql(
+        'DELETE FROM vault_group_tombstones WHERE group_id NOT IN ' +
+        '(SELECT DISTINCT group_id FROM vault_items WHERE deleted_at > 0)'
+      );
+      store.commit();
+    } catch (error) {
+      store.rollBack();
+      throw new Error('永久删除失败，数据未更改');
+    }
+  }
+
+  async emptyTrash(): Promise<void> {
+    const store = this.requireStore();
+    store.beginTransaction();
+    try {
+      const result = await store.querySql('SELECT id FROM vault_items WHERE deleted_at > 0');
+      const ids: string[] = [];
+      try { while (result.goToNextRow()) { ids.push(result.getString(0)); } } finally { result.close(); }
+      for (let index = 0; index < ids.length; index += 1) {
+        await this.permanentlyDeleteTrashItem(store, ids[index]);
+      }
+      await store.executeSql('DELETE FROM vault_group_tombstones');
+      store.commit();
+    } catch (error) {
+      store.rollBack();
+      throw new Error('清空回收站失败，数据未更改');
+    }
   }
 
   async readAttachment(id: string, attachmentIndex: number = 0): Promise<Uint8Array> {
@@ -621,15 +729,32 @@ class VaultRepositoryImpl {
 
   private async createSchema(): Promise<void> {
     const store = this.requireStore();
-    await store.executeSql('CREATE TABLE IF NOT EXISTS vault_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL, created_at INTEGER NOT NULL)');
+    await store.executeSql('CREATE TABLE IF NOT EXISTS vault_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL, created_at INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0)');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_items (id TEXT PRIMARY KEY, type TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL, username TEXT NOT NULL DEFAULT \'\', password TEXT NOT NULL DEFAULT \'\', notes TEXT NOT NULL DEFAULT \'\', attachment_uri TEXT NOT NULL DEFAULT \'\', attachment_data BLOB NOT NULL DEFAULT X\'\', ocr_text TEXT NOT NULL DEFAULT \'\', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL DEFAULT 0)');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_history (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, snapshot TEXT NOT NULL, created_at INTEGER NOT NULL)');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_group_tombstones (group_id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT NOT NULL, created_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL)');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_attachment_chunks (item_id TEXT NOT NULL, chunk_index INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (item_id, chunk_index))');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_attachments (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL, source_uri TEXT NOT NULL, ocr_text TEXT NOT NULL DEFAULT \'\', PRIMARY KEY (item_id, attachment_index))');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_attachment_parts (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, chunk_index INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (item_id, attachment_index, chunk_index))');
+    await this.ensureGroupSortOrderColumn();
     await this.ensureAttachmentOcrColumn();
     await store.executeSql('CREATE INDEX IF NOT EXISTS idx_vault_items_group ON vault_items(group_id, deleted_at, updated_at)');
+  }
+
+  private async ensureGroupSortOrderColumn(): Promise<void> {
+    const columns = await this.requireStore().querySql('PRAGMA table_info(vault_groups)');
+    let hasSortOrder = false;
+    try {
+      const nameIndex = columns.getColumnIndex('name');
+      while (columns.goToNextRow()) {
+        if (columns.getString(nameIndex) === 'sort_order') { hasSortOrder = true; break; }
+      }
+    } finally { columns.close(); }
+    if (!hasSortOrder) {
+      await this.requireStore().executeSql(
+        'ALTER TABLE vault_groups ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
+      await this.requireStore().executeSql('UPDATE vault_groups SET sort_order = id');
+    }
   }
 
   private async ensureAttachmentOcrColumn(): Promise<void> {
@@ -747,12 +872,27 @@ class VaultRepositoryImpl {
     } finally {
       sameName.close();
     }
+    const orderResult = await store.querySql('SELECT COALESCE(MAX(sort_order), -1) + 1 FROM vault_groups');
+    let sortOrder = 0;
+    try { if (orderResult.goToFirstRow()) { sortOrder = orderResult.getLong(0); } } finally { orderResult.close(); }
     await store.executeSql(
-      'INSERT INTO vault_groups (id, name, color, created_at) VALUES (?, ?, ?, ?)',
-      [deletedGroupId, name, color, createdAt]
+      'INSERT INTO vault_groups (id, name, color, created_at, sort_order) VALUES (?, ?, ?, ?, ?)',
+      [deletedGroupId, name, color, createdAt, sortOrder]
     );
     await store.executeSql('DELETE FROM vault_group_tombstones WHERE group_id = ?', [deletedGroupId]);
     return deletedGroupId;
+  }
+
+  private async permanentlyDeleteTrashItem(store: relationalStore.RdbStore, id: string): Promise<void> {
+    const result = await store.querySql('SELECT id FROM vault_items WHERE id = ? AND deleted_at > 0', [id]);
+    let exists = false;
+    try { exists = result.goToFirstRow(); } finally { result.close(); }
+    if (!exists) { return; }
+    await store.executeSql('DELETE FROM vault_item_history WHERE item_id = ?', [id]);
+    await store.executeSql('DELETE FROM vault_attachment_parts WHERE item_id = ?', [id]);
+    await store.executeSql('DELETE FROM vault_item_attachments WHERE item_id = ?', [id]);
+    await store.executeSql('DELETE FROM vault_attachment_chunks WHERE item_id = ?', [id]);
+    await store.executeSql('DELETE FROM vault_items WHERE id = ?', [id]);
   }
 
   private async seedGroups(): Promise<void> {

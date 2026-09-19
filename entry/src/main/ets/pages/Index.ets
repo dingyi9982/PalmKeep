@@ -1,9 +1,12 @@
 import promptAction from '@ohos.promptAction';
+import pasteboard from '@ohos.pasteboard';
 import { BusinessError } from '@ohos.base';
 import { GestureGrid } from '../components/GestureGrid';
 import { VaultThumbnail } from '../components/VaultThumbnail';
 import { VaultAttachmentPreview } from '../components/VaultAttachmentPreview';
 import { VaultAttachmentGallery } from '../components/VaultAttachmentGallery';
+import { VaultFileSummary } from '../components/VaultFileSummary';
+import { VaultFileGallery } from '../components/VaultFileGallery';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { QuickUnlockStatus, VaultSecurityService } from '../services/VaultSecurityService';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
@@ -18,6 +21,7 @@ import {
   VaultItem,
   VaultItemInput,
   VaultSearchHit,
+  VaultTrashEntry,
   VaultItemType
 } from '../models/VaultModels';
 
@@ -44,6 +48,7 @@ struct Index {
   @State private groups: VaultGroup[] = [];
   @State private items: VaultItem[] = [];
   @State private allItems: VaultItem[] = [];
+  @State private totalItemCount: number = 0;
   @State private loginCount: number = 0;
   @State private noteCount: number = 0;
   @State private mediaCount: number = 0;
@@ -54,8 +59,13 @@ struct Index {
   @State private showNewItem: boolean = false;
   @State private showNewGroup: boolean = false;
   @State private expandedGroupId: number = -1;
+  @State private draggingGroupId: number = -1;
+  @State private draggingGroupName: string = '';
+  @State private groupDropTargetId: number = -1;
+  @State private groupDragCancelActive: boolean = false;
   @State private selectedCategoryType: VaultItemType = VaultItemType.Login;
-  @State private showCategoryItems: boolean = false;
+  @State private categoryGroupId: number = -1;
+  @State private categorySort: string = 'updated';
   @State private showGestureSetup: boolean = false;
   @State private gestureSetupStep: number = 1;
   @State private gestureSetupHint: string = '绘制新手势';
@@ -65,7 +75,14 @@ struct Index {
   @State private unlockMode: string = 'password';
   @State private gestureFailures: number = 0;
   @State private gestureCooldownUntil: number = 0;
-  @State private trashItems: VaultItem[] = [];
+  @State private trashEntries: VaultTrashEntry[] = [];
+  @State private trashTypeFilter: string = 'all';
+  @State private trashManaging: boolean = false;
+  @State private trashSelectedIds: string[] = [];
+  @State private showTrashMore: boolean = false;
+  @State private trashBusy: boolean = false;
+  @State private selectedTrashEntry?: VaultTrashEntry = undefined;
+  @State private revealTrashPassword: boolean = false;
   @State private selectedItem?: VaultItem = undefined;
   @State private selectedAttachmentIndex: number = -1;
   @State private revealPassword: boolean = false;
@@ -78,7 +95,6 @@ struct Index {
   @State private newAttachmentUri: string = '';
   @State private selectedMediaCount: number = 0;
   @State private selectedMediaPreviewIndex: number = 0;
-  @State private currentPendingMediaOcrText: string = '';
   @State private recognizingMedia: boolean = false;
   @State private recognitionProgressText: string = '';
   @State private selectedFileCount: number = 0;
@@ -103,6 +119,16 @@ struct Index {
   private pendingFiles: PickedMedia[] = [];
   private mediaRecognitionVersion: number = 0;
   private searchVersion: number = 0;
+  private trashRefreshVersion: number = 0;
+  private trashLongPressTriggered: boolean = false;
+  private groupDragClickSuppressed: boolean = false;
+  private groupDragFinalizeScheduled: boolean = false;
+  private groupDragAccepted: boolean = false;
+  private groupDragCancelled: boolean = false;
+  private groupsBeforeDrag: VaultGroup[] = [];
+  private groupDragPositionLocked: boolean = false;
+  private groupDragLastReorderX: number = 0;
+  private groupDragLastReorderY: number = 0;
   private sessionKey: Uint8Array = new Uint8Array(0);
   private firstGesture: number[] = [];
 
@@ -113,6 +139,18 @@ struct Index {
   onBackPress(): boolean {
     if (this.showNewItem) {
       this.requestCloseNewItem();
+      return true;
+    }
+    if (this.selectedTrashEntry) {
+      this.closeTrashDetail();
+      return true;
+    }
+    if (this.trashManaging) {
+      this.closeTrashManagement();
+      return true;
+    }
+    if (this.showTrashMore) {
+      this.showTrashMore = false;
       return true;
     }
     return false;
@@ -199,14 +237,36 @@ struct Index {
 
   private async lockVault(): Promise<void> {
     AbilityContextHolder.setPrivacyMode(true);
-    this.trashItems = [];
+    this.trashEntries = [];
+    this.trashRefreshVersion += 1;
+    this.trashLongPressTriggered = false;
+    this.trashTypeFilter = 'all';
+    this.trashManaging = false;
+    this.trashSelectedIds = [];
+    this.showTrashMore = false;
+    this.trashBusy = false;
+    this.selectedTrashEntry = undefined;
+    this.revealTrashPassword = false;
     this.activeTab = 0;
     this.searchText = '';
     this.searchHits = [];
     this.searchVersion += 1;
     this.searchActive = false;
     this.expandedGroupId = -1;
-    this.showCategoryItems = false;
+    this.draggingGroupId = -1;
+    this.draggingGroupName = '';
+    this.groupDropTargetId = -1;
+    this.groupDragCancelActive = false;
+    this.groupDragClickSuppressed = false;
+    this.groupDragFinalizeScheduled = false;
+    this.groupDragAccepted = false;
+    this.groupDragCancelled = false;
+    this.groupsBeforeDrag = [];
+    this.groupDragPositionLocked = false;
+    this.groupDragLastReorderX = 0;
+    this.groupDragLastReorderY = 0;
+    this.categoryGroupId = -1;
+    this.categorySort = 'updated';
     this.masterPassword = '';
     this.confirmPassword = '';
     this.detailPassword = '';
@@ -231,6 +291,7 @@ struct Index {
     this.noteCount = 0;
     this.mediaCount = 0;
     this.fileCount = 0;
+    this.totalItemCount = 0;
     this.groups = [];
     this.sessionKey.fill(0);
     this.sessionKey = new Uint8Array(0);
@@ -238,9 +299,6 @@ struct Index {
     await this.refreshQuickUnlockStatus();
     this.unlockMode = this.preferredUnlockMode();
     this.screen = 'locked';
-    if (this.unlockMode === 'fingerprint') {
-      this.unlockWithFingerprint();
-    }
   }
 
   private async openWithKey(key: Uint8Array): Promise<void> {
@@ -389,7 +447,11 @@ struct Index {
     this.detailGroupId = 0;
     this.detailPassword = '';
     this.revealPassword = false;
-    await AbilityContextHolder.setPrivacyMode(false);
+    try {
+      await AbilityContextHolder.setPrivacyMode(false);
+    } catch (error) {
+      // 页面数据刷新不应被窗口隐私模式恢复失败阻断。
+    }
     await this.reloadVault();
   }
 
@@ -548,12 +610,7 @@ struct Index {
 
   private async reloadVault(): Promise<void> {
     this.groups = await vaultRepository.listGroups();
-    this.allItems = await vaultRepository.listItems();
-    this.loginCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.Login).length;
-    this.noteCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.Note).length;
-    this.mediaCount = this.allItems.filter((item: VaultItem): boolean =>
-      item.type === VaultItemType.Image || item.type === VaultItemType.Video).length;
-    this.fileCount = this.allItems.filter((item: VaultItem): boolean => item.type === VaultItemType.File).length;
+    this.applyActiveItems(await vaultRepository.listItems());
     if (this.groups.length > 0 && this.newGroupId === 0) {
       this.newGroupId = this.groups[0].id;
     }
@@ -566,21 +623,224 @@ struct Index {
     }
   }
 
+  private applyActiveItems(items: VaultItem[]): void {
+    this.allItems = items;
+    this.totalItemCount = items.length;
+    this.loginCount = items.filter((item: VaultItem): boolean => item.type === VaultItemType.Login).length;
+    this.noteCount = items.filter((item: VaultItem): boolean => item.type === VaultItemType.Note).length;
+    this.mediaCount = items.filter((item: VaultItem): boolean =>
+      item.type === VaultItemType.Image || item.type === VaultItemType.Video).length;
+    this.fileCount = items.filter((item: VaultItem): boolean => item.type === VaultItemType.File).length;
+  }
+
+  private addCreatedItemToView(id: string, input: VaultItemInput): void {
+    const now = Date.now();
+    const item: VaultItem = {
+      id: id,
+      type: input.type,
+      groupId: input.groupId,
+      title: input.title.trim(),
+      username: input.username.trim(),
+      password: input.password,
+      notes: input.notes,
+      attachmentUri: input.attachmentUri,
+      ocrText: '',
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: 0
+    };
+    this.applyActiveItems([item, ...this.allItems]);
+    if (this.searchText.trim().length === 0) { this.items = [item, ...this.items]; }
+  }
+
   private async refreshTrash(): Promise<void> {
-    this.trashItems = (await vaultRepository.listItems('', -1, true)).filter((item: VaultItem): boolean => item.deletedAt > 0);
+    const version = ++this.trashRefreshVersion;
+    let filter: VaultItemType | undefined = undefined;
+    if (this.trashTypeFilter !== 'all') { filter = this.trashTypeFilter as VaultItemType; }
+    const entries = await vaultRepository.listTrashEntries(filter);
+    if (version !== this.trashRefreshVersion) { return; }
+    this.trashEntries = entries;
+    const visibleIds = new Set<string>(this.trashEntries.map((entry: VaultTrashEntry): string => entry.item.id));
+    this.trashSelectedIds = this.trashSelectedIds.filter((id: string): boolean => visibleIds.has(id));
   }
 
   private async trashAction(item: VaultItem, permanent: boolean): Promise<void> {
+    if (this.trashBusy) { return; }
     try {
       if (permanent) {
         const choice = await promptAction.showDialog({ title: '永久删除此资料？', message: '删除后无法恢复。',
           buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '永久删除', color: COLOR_DANGER }] });
         if (choice.index !== 1) { return; }
-        await vaultRepository.permanentlyDelete(item.id);
-      } else { await vaultRepository.restoreFromTrash(item.id); }
+      }
+      this.trashBusy = true;
+      if (permanent) { await vaultRepository.permanentlyDelete(item.id); }
+      else { await vaultRepository.restoreFromTrash(item.id); }
+      if (this.selectedTrashEntry && this.selectedTrashEntry.item.id === item.id) {
+        await this.closeTrashDetail();
+      }
       await this.refreshTrash();
       await this.reloadVault();
+      promptAction.showToast({ message: permanent ? '资料已永久删除' : '资料已恢复' });
     } catch (error) { promptAction.showToast({ message: this.describeError(error) }); }
+    finally { this.trashBusy = false; }
+  }
+
+  private setTrashTypeFilter(filter: string): void {
+    this.trashTypeFilter = filter;
+    this.trashSelectedIds = [];
+    this.refreshTrash();
+  }
+
+  private openTrashManagement(selectedId: string = ''): void {
+    this.trashManaging = true;
+    this.showTrashMore = false;
+    this.trashSelectedIds = selectedId.length > 0 ? [selectedId] : [];
+    if (selectedId.length > 0) {
+      this.trashLongPressTriggered = true;
+      setTimeout((): void => { this.trashLongPressTriggered = false; }, 350);
+    }
+  }
+
+  private closeTrashManagement(): void {
+    this.trashManaging = false;
+    this.trashSelectedIds = [];
+  }
+
+  private trashIsSelected(id: string): boolean {
+    return this.trashSelectedIds.indexOf(id) >= 0;
+  }
+
+  private toggleTrashSelection(id: string): void {
+    const selected = this.trashSelectedIds.slice();
+    const position = selected.indexOf(id);
+    if (position >= 0) { selected.splice(position, 1); } else { selected.push(id); }
+    this.trashSelectedIds = selected;
+  }
+
+  private toggleSelectAllTrash(): void {
+    this.trashSelectedIds = this.trashSelectedIds.length === this.trashEntries.length ? [] :
+      this.trashEntries.map((entry: VaultTrashEntry): string => entry.item.id);
+  }
+
+  private async restoreSelectedTrash(): Promise<void> {
+    if (this.trashBusy || this.trashSelectedIds.length === 0) { return; }
+    const count = this.trashSelectedIds.length;
+    this.trashBusy = true;
+    try {
+      await vaultRepository.restoreTrashItems(this.trashSelectedIds);
+      this.closeTrashManagement();
+      await this.refreshTrash();
+      await this.reloadVault();
+      promptAction.showToast({ message: `已恢复 ${count} 条资料` });
+    } catch (error) { promptAction.showToast({ message: this.describeError(error) }); }
+    finally { this.trashBusy = false; }
+  }
+
+  private async permanentlyDeleteSelectedTrash(): Promise<void> {
+    if (this.trashBusy || this.trashSelectedIds.length === 0) { return; }
+    const count = this.trashSelectedIds.length;
+    const choice = await promptAction.showDialog({
+      title: `永久删除 ${count} 条资料？`,
+      message: '资料、历史记录和附件将被永久删除，且无法恢复。',
+      buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '永久删除', color: COLOR_DANGER }]
+    });
+    if (choice.index !== 1) { return; }
+    this.trashBusy = true;
+    try {
+      await vaultRepository.permanentlyDeleteItems(this.trashSelectedIds);
+      this.closeTrashManagement();
+      await this.refreshTrash();
+      await this.reloadVault();
+      promptAction.showToast({ message: `已永久删除 ${count} 条资料` });
+    } catch (error) { promptAction.showToast({ message: this.describeError(error) }); }
+    finally { this.trashBusy = false; }
+  }
+
+  private async emptyTrash(): Promise<void> {
+    if (this.trashBusy) { return; }
+    this.showTrashMore = false;
+    const allEntries = await vaultRepository.listTrashEntries();
+    if (allEntries.length === 0) { return; }
+    const choice = await promptAction.showDialog({
+      title: `清空回收站中的 ${allEntries.length} 条资料？`,
+      message: '所有资料、历史记录和附件将被永久删除，且无法恢复。',
+      buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '清空', color: COLOR_DANGER }]
+    });
+    if (choice.index !== 1) { return; }
+    this.trashBusy = true;
+    try {
+      await vaultRepository.emptyTrash();
+      this.closeTrashManagement();
+      await this.refreshTrash();
+      await this.reloadVault();
+      promptAction.showToast({ message: '回收站已清空' });
+    } catch (error) { promptAction.showToast({ message: this.describeError(error) }); }
+    finally { this.trashBusy = false; }
+  }
+
+  private trashSection(item: VaultItem): string {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (item.deletedAt >= today) { return '今天'; }
+    if (item.deletedAt >= today - 6 * 24 * 60 * 60 * 1000) { return '最近 7 天'; }
+    return '更早';
+  }
+
+  private trashEntriesInSection(section: string): VaultTrashEntry[] {
+    return this.trashEntries.filter((entry: VaultTrashEntry): boolean =>
+      this.trashSection(entry.item) === section);
+  }
+
+  private formatTrashTime(value: number): string {
+    const date = new Date(value);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const hour = `${date.getHours()}`.padStart(2, '0');
+    const minute = `${date.getMinutes()}`.padStart(2, '0');
+    if (value >= today) { return `今天 ${hour}:${minute}`; }
+    return `${date.getMonth() + 1}月${date.getDate()}日 ${hour}:${minute}`;
+  }
+
+  private openTrashDetail(entry: VaultTrashEntry): void {
+    if (this.trashLongPressTriggered) {
+      this.trashLongPressTriggered = false;
+      return;
+    }
+    if (this.trashManaging) {
+      this.toggleTrashSelection(entry.item.id);
+      return;
+    }
+    this.selectedTrashEntry = entry;
+    this.revealTrashPassword = false;
+    AbilityContextHolder.setPrivacyMode(entry.item.type !== VaultItemType.Login);
+  }
+
+  private openSearchResult(hit: VaultSearchHit): void {
+    if (hit.item.deletedAt > 0) {
+      this.openTrashDetail({ item: hit.item, originalGroupName: hit.originalGroupName });
+      return;
+    }
+    this.openItem(hit.item, hit.attachmentIndex);
+  }
+
+  private async closeTrashDetail(): Promise<void> {
+    this.selectedTrashEntry = undefined;
+    this.revealTrashPassword = false;
+    await AbilityContextHolder.setPrivacyMode(false);
+  }
+
+  private toggleTrashPasswordVisibility(): void {
+    this.revealTrashPassword = !this.revealTrashPassword;
+    AbilityContextHolder.setPrivacyMode(this.revealTrashPassword);
+  }
+
+  private async copyTrashUsername(username: string): Promise<void> {
+    if (username.length === 0) { return; }
+    try {
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, username);
+      await pasteboard.getSystemPasteboard().setData(data);
+      promptAction.showToast({ message: '账号已复制' });
+    } catch (error) { promptAction.showToast({ message: '复制失败' }); }
   }
 
   private async applySearch(text: string): Promise<void> {
@@ -726,8 +986,7 @@ struct Index {
         this.clearPendingMedia();
         this.pendingMedia = mediaItems;
         this.selectedMediaCount = mediaItems.length;
-        this.selectedMediaPreviewIndex = 0;
-        this.currentPendingMediaOcrText = '';
+        this.selectedMediaPreviewIndex = mediaItems.length - 1;
         await this.recognizePendingMedia();
         return;
       }
@@ -767,12 +1026,6 @@ struct Index {
         this.pendingMedia[index].ocrText = results[index];
       }
       this.pendingMedia = this.pendingMedia.slice();
-      if (this.selectedMediaPreviewIndex < this.pendingMedia.length &&
-        this.pendingMedia[this.selectedMediaPreviewIndex].type === VaultItemType.Image) {
-        this.currentPendingMediaOcrText = this.pendingMedia[this.selectedMediaPreviewIndex].ocrText;
-      } else {
-        this.currentPendingMediaOcrText = '';
-      }
     } finally {
       if (recognitionVersion === this.mediaRecognitionVersion) {
         this.recognizingMedia = false;
@@ -796,19 +1049,19 @@ struct Index {
     } else if (this.selectedMediaPreviewIndex >= this.pendingMedia.length) {
       this.selectedMediaPreviewIndex = this.pendingMedia.length - 1;
     }
-    if (this.pendingMedia.length > 0 &&
-      this.pendingMedia[this.selectedMediaPreviewIndex].type === VaultItemType.Image) {
-      this.currentPendingMediaOcrText = this.pendingMedia[this.selectedMediaPreviewIndex].ocrText;
-    } else {
-      this.currentPendingMediaOcrText = '';
-    }
   }
 
   private selectPendingMedia(index: number): void {
     if (index < 0 || index >= this.pendingMedia.length) { return; }
     this.selectedMediaPreviewIndex = index;
-    this.currentPendingMediaOcrText = this.pendingMedia[index].type === VaultItemType.Image ?
-      this.pendingMedia[index].ocrText : '';
+  }
+
+  private removePendingFile(index: number): void {
+    if (this.savingNewItem || index < 0 || index >= this.pendingFiles.length) { return; }
+    this.pendingFiles[index].data.fill(0);
+    this.pendingFiles = this.pendingFiles.filter((file: PickedMedia, fileIndex: number): boolean =>
+      fileIndex !== index);
+    this.selectedFileCount = this.pendingFiles.length;
   }
 
   private async createItem(): Promise<void> {
@@ -841,7 +1094,7 @@ struct Index {
             });
           }
           this.saveProgressText = '正在写入本地数据';
-          await vaultRepository.createItemWithAttachments({
+          const mediaInput: VaultItemInput = {
             type: VaultItemType.Image,
             groupId: this.newGroupId,
             title: this.newTitle,
@@ -850,9 +1103,12 @@ struct Index {
             notes: this.newNotes,
             attachmentUri: '',
             attachmentData: new Uint8Array(0)
-          }, attachments, (completed: number, total: number): void => {
+          };
+          const createdId = await vaultRepository.createItemWithAttachments(mediaInput, attachments,
+            (completed: number, total: number): void => {
             this.saveProgress = 70 + Math.round(completed / total * 30);
           });
+          this.addCreatedItemToView(createdId, mediaInput);
         } finally {
           compressedPaths.forEach((path: string): void => { mediaCompressionService.removeTemporary(path); });
         }
@@ -880,7 +1136,7 @@ struct Index {
           });
         }
         this.saveProgressText = '正在写入本地数据';
-        await vaultRepository.createItemWithAttachments({
+        const fileInput: VaultItemInput = {
           type: VaultItemType.File,
           groupId: this.newGroupId,
           title: baseTitle.length > 0 ? baseTitle : (this.pendingFiles.length === 1 ? this.pendingFiles[0].name : `${this.pendingFiles.length} 个文件`),
@@ -889,9 +1145,12 @@ struct Index {
           notes: this.newNotes,
           attachmentUri: '',
           attachmentData: new Uint8Array(0)
-        }, attachments, (completed: number, total: number): void => {
+        };
+        const createdId = await vaultRepository.createItemWithAttachments(fileInput, attachments,
+          (completed: number, total: number): void => {
           this.saveProgress = Math.round(completed / total * 100);
         });
+        this.addCreatedItemToView(createdId, fileInput);
         const importedCount = this.pendingFiles.length;
         this.resetNewItem();
         this.closeNewItem();
@@ -909,7 +1168,8 @@ struct Index {
         attachmentUri: this.newAttachmentUri,
         attachmentData: this.pendingAttachment
       };
-      await vaultRepository.createItem(input);
+      const createdId = await vaultRepository.createItem(input);
+      this.addCreatedItemToView(createdId, input);
       this.resetNewItem();
       this.closeNewItem();
       await this.reloadVault();
@@ -968,9 +1228,16 @@ struct Index {
     if (!item) {
       return;
     }
-    await vaultRepository.moveToTrash(item.id);
-    await this.closeSelectedItem();
-    promptAction.showToast({ message: '资料已移入回收站' });
+    try {
+      await vaultRepository.moveToTrash(item.id);
+      this.applyActiveItems(this.allItems.filter((value: VaultItem): boolean => value.id !== item.id));
+      this.items = this.items.filter((value: VaultItem): boolean => value.id !== item.id);
+      await this.closeSelectedItem();
+      await this.refreshTrash();
+      promptAction.showToast({ message: '资料已移入回收站' });
+    } catch (error) {
+      promptAction.showToast({ message: this.describeError(error) });
+    }
   }
 
   private async downloadAttachment(item: VaultItem): Promise<void> {
@@ -1008,7 +1275,6 @@ struct Index {
     this.pendingMedia = [];
     this.selectedMediaCount = 0;
     this.selectedMediaPreviewIndex = 0;
-    this.currentPendingMediaOcrText = '';
     this.recognizingMedia = false;
     this.recognitionProgressText = '';
   }
@@ -1061,6 +1327,72 @@ struct Index {
 
   private countGroupByType(groupId: number, type: VaultItemType): number {
     return this.itemsInGroupByType(groupId, type).length;
+  }
+
+  private selectCategoryType(type: VaultItemType): void {
+    this.selectedCategoryType = type;
+    if (this.categoryGroupId >= 0 && this.countGroupByType(this.categoryGroupId, type) === 0) {
+      this.categoryGroupId = -1;
+    }
+  }
+
+  private categoryItems(): VaultItem[] {
+    const result = this.allItems.filter((item: VaultItem): boolean =>
+      this.matchesCategory(item, this.selectedCategoryType) &&
+      (this.categoryGroupId < 0 || item.groupId === this.categoryGroupId));
+    result.sort((left: VaultItem, right: VaultItem): number => {
+      if (this.categorySort === 'created') { return right.createdAt - left.createdAt; }
+      if (this.categorySort === 'name') {
+        const leftTitle = left.title.trim().toLowerCase();
+        const rightTitle = right.title.trim().toLowerCase();
+        if (leftTitle === rightTitle) { return right.updatedAt - left.updatedAt; }
+        return leftTitle > rightTitle ? 1 : -1;
+      }
+      return right.updatedAt - left.updatedAt;
+    });
+    return result;
+  }
+
+  private categoryGroupName(groupId: number): string {
+    if (groupId === 0) { return '未分组'; }
+    const group = this.groups.find((value: VaultGroup): boolean => value.id === groupId);
+    return group ? group.name : '未分组';
+  }
+
+  private categorySortLabel(): string {
+    if (this.categorySort === 'created') { return '最近创建'; }
+    if (this.categorySort === 'name') { return '名称'; }
+    return '最近修改';
+  }
+
+  private async chooseCategorySort(): Promise<void> {
+    const values: string[] = ['updated', 'created', 'name'];
+    const buttons: [promptAction.Button, promptAction.Button, promptAction.Button] = [
+      { text: `${this.categorySort === 'updated' ? '✓  ' : ''}最近修改`,
+        color: this.categorySort === 'updated' ? COLOR_PRIMARY : COLOR_TEXT },
+      { text: `${this.categorySort === 'created' ? '✓  ' : ''}最近创建`,
+        color: this.categorySort === 'created' ? COLOR_PRIMARY : COLOR_TEXT },
+      { text: `${this.categorySort === 'name' ? '✓  ' : ''}名称`,
+        color: this.categorySort === 'name' ? COLOR_PRIMARY : COLOR_TEXT }
+    ];
+    try {
+      const result: promptAction.ActionMenuSuccessResponse =
+        await promptAction.showActionMenu({ title: '选择排序方式', buttons: buttons });
+      if (result.index >= 0 && result.index < values.length) { this.categorySort = values[result.index]; }
+    } catch (error) {
+      // 用户关闭菜单时保持当前排序，不需要提示错误。
+    }
+  }
+
+  private formatCategoryTime(value: number): string {
+    const date = new Date(value);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (value >= today) {
+      return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+    }
+    if (date.getFullYear() === now.getFullYear()) { return `${date.getMonth() + 1}/${date.getDate()}`; }
+    return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
   }
 
   private typeColor(type: VaultItemType): string {
@@ -1262,9 +1594,6 @@ struct Index {
               Text('◎')
                 .fontSize(58)
                 .fontColor(COLOR_PRIMARY)
-              Text(this.busy ? '正在验证指纹…' : '触碰指纹传感器完成验证')
-                .fontSize(14)
-                .fontColor(COLOR_MUTED)
               Button(this.busy ? '正在验证…' : '验证指纹')
                 .width('100%')
                 .height(52)
@@ -1391,17 +1720,37 @@ struct Index {
   }
 
   @Builder
-  private itemRow(item: VaultItem, showThumbnail: boolean = false, highlightedAttachmentIndex: number = -1): void {
+  private itemRow(item: VaultItem, showThumbnail: boolean = false, highlightedAttachmentIndex: number = -1,
+    thumbnailCount: number = 3, originalGroupName: string = ''): void {
     Row({ space: 8 }) {
-      if (showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video || item.type === VaultItemType.File)) {
+      if (showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video)) {
         VaultAttachmentPreview({
           itemId: item.id,
           fallbackType: item.type,
-          highlightAttachmentIndex: highlightedAttachmentIndex
+          highlightAttachmentIndex: highlightedAttachmentIndex,
+          maxVisibleCount: thumbnailCount
         })
       }
-      Column({ space: 0 }) {
-        if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
+      Column({ space: 1 }) {
+        if (item.deletedAt > 0) {
+          Row({ space: 5 }) {
+            Text('回收站')
+              .fontSize(10).fontWeight(FontWeight.Medium).fontColor(COLOR_DANGER)
+              .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+              .backgroundColor('#FDEDEF').borderRadius(7)
+            Text(originalGroupName.length > 0 ? `原分组 · ${originalGroupName}` : '已删除')
+              .fontSize(10).fontColor(COLOR_MUTED).maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }.width('100%')
+        }
+        if (item.type === VaultItemType.File) {
+          if (item.title.length > 0) {
+            Text(item.title)
+              .fontSize(13).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+          }
+          VaultFileSummary({ itemId: item.id })
+        } else if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
           if (item.title.length > 0) {
             Text(item.title)
               .fontSize(14)
@@ -1432,17 +1781,59 @@ struct Index {
       Text('›').fontSize(20).fontColor('#B2B8C2')
     }
     .width('100%')
-    .height(showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video || item.type === VaultItemType.File) ?
-      (highlightedAttachmentIndex >= 0 ? 52 : 48) : 42)
-    .padding({ left: 12, right: 10 })
+    .height(item.type === VaultItemType.File ? 88 + (item.deletedAt > 0 ? 20 : 0) :
+      (showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video) ?
+        (highlightedAttachmentIndex >= 0 ? 52 : 48) + (item.deletedAt > 0 ? 20 : 0) :
+        42 + (item.deletedAt > 0 ? 20 : 0)))
+    .padding({ left: 8, right: 8 })
     .backgroundColor(COLOR_SURFACE)
     .borderRadius(15)
-    .onClick((): void => { this.openItem(item, highlightedAttachmentIndex); })
+    .onClick((): void => {
+      if (item.deletedAt > 0) {
+        this.openTrashDetail({ item: item, originalGroupName: originalGroupName });
+      } else {
+        this.openItem(item, highlightedAttachmentIndex);
+      }
+    })
+  }
+
+  @Builder
+  private homeMediaItemRow(item: VaultItem): void {
+    Column({ space: 3 }) {
+      if (item.title.length > 0) {
+        Text(item.title)
+          .fontSize(13).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+      }
+      VaultAttachmentPreview({
+        itemId: item.id,
+        fallbackType: item.type,
+        maxVisibleCount: 3
+      })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding({ left: 8, right: 8, top: 5, bottom: 5 })
+    .backgroundColor(COLOR_SURFACE)
+    .borderRadius(15)
+    .onClick((): void => { this.openItem(item); })
   }
 
   @Builder
   private ocrSearchHitRow(hit: VaultSearchHit): void {
     Column({ space: 4 }) {
+      if (hit.item.deletedAt > 0) {
+        Row({ space: 5 }) {
+          Text('回收站')
+            .fontSize(10).fontWeight(FontWeight.Medium).fontColor(COLOR_DANGER)
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .backgroundColor('#FDEDEF').borderRadius(7)
+          Text(`原分组 · ${hit.originalGroupName}`)
+            .fontSize(10).fontColor(COLOR_MUTED).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }.width('100%')
+      }
       if (hit.item.title.length > 0) {
         Text(hit.item.title)
           .fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
@@ -1465,7 +1856,7 @@ struct Index {
     .padding({ left: 12, right: 10, top: 6, bottom: 6 })
     .backgroundColor(COLOR_SURFACE)
     .borderRadius(15)
-    .onClick((): void => { this.openItem(hit.item, hit.attachmentIndex); })
+    .onClick((): void => { this.openSearchResult(hit); })
   }
 
   @Builder
@@ -1488,12 +1879,16 @@ struct Index {
     let height = 58;
     for (let index = 0; index < visibleItems.length; index += 1) {
       const type = visibleItems[index].type;
-      height += type === VaultItemType.Image || type === VaultItemType.Video ? 48 : 42;
+      if (type === VaultItemType.Image || type === VaultItemType.Video) {
+        height += visibleItems[index].title.length > 0 ? 62 : 48;
+      } else {
+        height += 42;
+      }
     }
     if (!showAll && items.length > 3) {
       height += 34;
     }
-    return height + 12;
+    return height + 3;
   }
 
   private canShowAllHomeItems(): boolean {
@@ -1567,6 +1962,85 @@ struct Index {
     .width('48.5%')
   }
 
+  private beginGroupDrag(group: VaultGroup, event: DragEvent): DragItemInfo {
+    this.draggingGroupId = group.id;
+    this.draggingGroupName = group.name;
+    this.groupDropTargetId = group.id;
+    this.groupDragAccepted = false;
+    this.groupDragCancelled = false;
+    this.groupDragCancelActive = false;
+    this.groupsBeforeDrag = this.groups.slice();
+    this.groupDragPositionLocked = false;
+    this.groupDragLastReorderX = event.getWindowX();
+    this.groupDragLastReorderY = event.getWindowY();
+    this.groupDragClickSuppressed = true;
+    return { extraInfo: `${group.id}` };
+  }
+
+  private previewGroupReorder(targetId: number, event: DragEvent): void {
+    if (this.draggingGroupId < 0 || targetId < 0 || targetId === this.draggingGroupId ||
+      targetId === this.groupDropTargetId) { return; }
+    const pointerX = event.getWindowX();
+    const pointerY = event.getWindowY();
+    if (this.groupDragPositionLocked) {
+      const deltaX = pointerX - this.groupDragLastReorderX;
+      const deltaY = pointerY - this.groupDragLastReorderY;
+      if (deltaX * deltaX + deltaY * deltaY < 2304) { return; }
+      this.groupDragPositionLocked = false;
+    }
+    const sourceIndex = this.groups.findIndex((group: VaultGroup): boolean =>
+      group.id === this.draggingGroupId);
+    const targetIndex = this.groups.findIndex((group: VaultGroup): boolean => group.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) { return; }
+    const reordered = this.groups.slice();
+    const moved = reordered.splice(sourceIndex, 1)[0];
+    reordered.splice(targetIndex, 0, moved);
+    this.groupDropTargetId = targetId;
+    this.groupDragLastReorderX = pointerX;
+    this.groupDragLastReorderY = pointerY;
+    this.groupDragPositionLocked = true;
+    this.groups = reordered;
+  }
+
+  private scheduleFinishGroupDrag(): void {
+    if (this.groupDragFinalizeScheduled) { return; }
+    this.groupDragFinalizeScheduled = true;
+    setTimeout((): void => {
+      this.groupDragFinalizeScheduled = false;
+      this.finishGroupDrag();
+    }, 80);
+  }
+
+  private async finishGroupDrag(): Promise<void> {
+    const sourceId = this.draggingGroupId;
+    const accepted = this.groupDragAccepted && !this.groupDragCancelled;
+    const originalGroups = this.groupsBeforeDrag.slice();
+    const reordered = this.groups.slice();
+    this.draggingGroupId = -1;
+    this.draggingGroupName = '';
+    this.groupDropTargetId = -1;
+    this.groupDragCancelActive = false;
+    this.groupDragAccepted = false;
+    this.groupDragCancelled = false;
+    this.groupsBeforeDrag = [];
+    this.groupDragPositionLocked = false;
+    setTimeout((): void => { this.groupDragClickSuppressed = false; }, 250);
+    if (sourceId < 0) { return; }
+    if (!accepted) {
+      this.groups = originalGroups;
+      return;
+    }
+    const originalIds = originalGroups.map((group: VaultGroup): number => group.id).join(',');
+    const reorderedIds = reordered.map((group: VaultGroup): number => group.id).join(',');
+    if (originalIds === reorderedIds) { return; }
+    try {
+      await vaultRepository.reorderGroups(reordered.map((group: VaultGroup): number => group.id));
+    } catch (error) {
+      this.groups = originalGroups;
+      promptAction.showToast({ message: this.describeError(error) });
+    }
+  }
+
   @Builder
   private homeTab(): void {
     Scroll() {
@@ -1582,17 +2056,17 @@ struct Index {
             .alignItems(HorizontalAlign.Start)
             .layoutWeight(1)
             Column({ space: 2 }) {
-              Text(`${this.allItems.length}`)
+              Text(`${this.totalItemCount}`)
                 .fontSize(28).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
               Text('条资料').fontSize(11).fontColor('#AAB5C8')
             }
           }
           .width('100%')
           Row({ space: 5 }) {
-            this.summaryPill('账号', this.loginCount)
-            this.summaryPill('笔记', this.noteCount)
-            this.summaryPill('媒体', this.mediaCount)
-            this.summaryPill('文件', this.fileCount)
+            this.summaryPill(VaultItemType.Login)
+            this.summaryPill(VaultItemType.Note)
+            this.summaryPill(VaultItemType.Image)
+            this.summaryPill(VaultItemType.File)
           }
           .width('100%')
         }
@@ -1613,10 +2087,25 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
           if (this.searchText.length === 0) {
-            Button('+ 新建分组')
-              .height(38).fontSize(13).fontColor(COLOR_PRIMARY)
-              .backgroundColor('#E5F6F0').borderRadius(12)
-              .onClick((): void => { this.openNewGroup(); })
+            if (this.draggingGroupId >= 0) {
+              Button('拖到这里取消')
+                .height(38).fontSize(12).fontColor(COLOR_DANGER)
+                .backgroundColor(this.groupDragCancelActive ? '#FFDDE1' : '#FFF0F2')
+                .border({ width: this.groupDragCancelActive ? 2 : 1, color: COLOR_DANGER })
+                .borderRadius(12)
+                .onDragEnter((): void => { this.groupDragCancelActive = true; })
+                .onDragLeave((): void => { this.groupDragCancelActive = false; })
+                .onDrop((): void => {
+                  this.groupDragCancelled = true;
+                  this.groupDragAccepted = true;
+                  this.groupDragCancelActive = false;
+                })
+            } else {
+              Button('+ 新建分组')
+                .height(38).fontSize(13).fontColor(COLOR_PRIMARY)
+                .backgroundColor('#E5F6F0').borderRadius(12)
+                .onClick((): void => { this.openNewGroup(); })
+            }
           }
         }
         .width('100%')
@@ -1630,7 +2119,7 @@ struct Index {
                 if (hit.attachmentIndex >= 0) {
                   this.ocrSearchHitRow(hit)
                 } else {
-                  this.itemRow(hit.item, true)
+                  this.itemRow(hit.item, true, -1, 3, hit.originalGroupName)
                 }
               }, (hit: VaultSearchHit): string =>
                 `${hit.item.id}-${hit.attachmentIndex}-${hit.item.updatedAt}`)
@@ -1640,7 +2129,7 @@ struct Index {
         } else if (this.groups.length === 0 && this.countGroup(0) === 0) {
           this.emptyState('还没有分组', '创建分组后，即可分类保存各种资料')
         } else {
-          Row({ space: 12 }) {
+          Row({ space: 3 }) {
             this.homeGroupColumn(0)
             this.homeGroupColumn(1)
           }
@@ -1658,8 +2147,10 @@ struct Index {
   }
 
   @Builder
-  private summaryPill(label: string, count: number): void {
-    Text(`${label} ${count}`)
+  private summaryPill(type: VaultItemType): void {
+    Text(`${itemTypeLabel(type)} ${type === VaultItemType.Login ? this.loginCount :
+      (type === VaultItemType.Note ? this.noteCount :
+        (type === VaultItemType.File ? this.fileCount : this.mediaCount))}`)
       .fontSize(11).fontColor('#CFD6E2')
       .padding({ left: 10, right: 10, top: 6, bottom: 6 })
       .backgroundColor('#28364D')
@@ -1683,6 +2174,7 @@ struct Index {
     .padding({ left: 12, right: 12 })
     .backgroundColor('#F5FBF9')
     .border({ width: { top: 1 }, color: COLOR_BORDER })
+    .opacity(this.draggingGroupId === groupId ? 0 : 1)
     .onClick((): void => {
       this.expandedGroupId = this.expandedGroupId === groupId ? -1 : groupId;
     })
@@ -1693,26 +2185,39 @@ struct Index {
     Column() {
       Row({ space: 8 }) {
         Row({ space: 5 }) {
-          Column({ space: 2 }) {
-            Text(group.name)
-              .fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-            Text(`${this.countGroup(group.id)} 条资料`).fontSize(11).fontColor(COLOR_MUTED)
+          Stack({ alignContent: Alignment.Start }) {
+            Column({ space: 2 }) {
+              Text(group.name)
+                .fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+              Text(`${this.countGroup(group.id)} 条资料`).fontSize(11).fontColor(COLOR_MUTED)
+            }
+            .alignItems(HorizontalAlign.Start)
+            .width('100%')
+            .opacity(this.draggingGroupId === group.id ? 0 : 1)
+            Text('松开以放置')
+              .fontSize(13).fontWeight(FontWeight.Medium).fontColor(COLOR_PRIMARY)
+              .opacity(this.draggingGroupId === group.id ? 1 : 0)
           }
-          .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
         }
         .layoutWeight(1)
         .onClick((): void => {
+          if (this.groupDragClickSuppressed) { return; }
           if (this.shouldShowHomeMoreRow(group.id)) {
             this.expandedGroupId = this.expandedGroupId === group.id ? -1 : group.id;
           }
         })
+        .backgroundColor(this.groupDropTargetId === group.id && this.draggingGroupId !== group.id ?
+          '#E8F7F2' : Color.Transparent)
+        .borderRadius(11)
         Stack() {
           Text('+').fontSize(22).fontColor(COLOR_PRIMARY)
         }
           .width(34).height(34).borderRadius(11).backgroundColor('#E8F7F2')
+          .opacity(this.draggingGroupId === group.id ? 0 : 1)
+          .draggable(false)
           .onClick((): void => {
             this.openNewItem(VaultItemType.Login, group.id);
           })
@@ -1724,25 +2229,42 @@ struct Index {
           .fontSize(11).fontColor(COLOR_MUTED).maxLines(1)
           .width('100%').padding({ left: 12, right: 12, top: 10, bottom: 12 })
           .border({ width: { top: 1 }, color: COLOR_BORDER })
+          .opacity(this.draggingGroupId === group.id ? 0 : 1)
       } else {
         Column({ space: 0 }) {
           ForEach(this.homeItemsInGroup(group.id), (item: VaultItem): void => {
-            this.itemRow(item, true)
+            if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
+              this.homeMediaItemRow(item)
+            } else {
+              this.itemRow(item, true)
+            }
           }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
         }
         .width('100%')
         .padding({ left: 3, right: 3, bottom: 3 })
         .border({ width: { top: 1 }, color: COLOR_BORDER })
+        .opacity(this.draggingGroupId === group.id ? 0 : 1)
         if (this.shouldShowHomeMoreRow(group.id)) {
           this.moreItemsRow(group.id, this.countGroup(group.id))
         }
       }
     }
     .width(fullWidth ? '100%' : '48.5%')
-    .margin({ bottom: 12 })
-    .backgroundColor(COLOR_SURFACE)
+    .margin({ bottom: 3 })
+    .backgroundColor(this.draggingGroupId === group.id ? '#F3FBF8' : COLOR_SURFACE)
     .borderRadius(18)
-    .border({ width: 1, color: COLOR_BORDER })
+    .border({ width: this.groupDropTargetId === group.id && this.draggingGroupId !== group.id ? 2 : 1,
+      color: this.draggingGroupId === group.id ? COLOR_PRIMARY :
+        (this.groupDropTargetId === group.id ? COLOR_PRIMARY : COLOR_BORDER),
+      style: this.draggingGroupId === group.id ? BorderStyle.Dashed : BorderStyle.Solid })
+    .onDragStart((event: DragEvent): DragItemInfo => this.beginGroupDrag(group, event))
+    .onDragEnter((event: DragEvent): void => { this.previewGroupReorder(group.id, event); })
+    .onDragMove((event: DragEvent): void => { this.previewGroupReorder(group.id, event); })
+    .onDrop((): void => {
+      this.groupDragAccepted = true;
+      this.groupDragCancelled = false;
+    })
+    .onDragEnd((): void => { this.scheduleFinishGroupDrag(); })
   }
 
   @Builder
@@ -1761,7 +2283,11 @@ struct Index {
       })
       Column({ space: 0 }) {
         ForEach(this.homeItemsInGroup(0), (item: VaultItem): void => {
-          this.itemRow(item, true)
+          if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
+            this.homeMediaItemRow(item)
+          } else {
+            this.itemRow(item, true)
+          }
         }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
       }
       .width('100%').padding({ left: 3, right: 3, bottom: 3 })
@@ -1771,7 +2297,7 @@ struct Index {
       }
     }
     .width(fullWidth ? '100%' : '48.5%')
-    .margin({ bottom: 12 }).backgroundColor(COLOR_SURFACE).borderRadius(18)
+    .margin({ bottom: 3 }).backgroundColor(COLOR_SURFACE).borderRadius(18)
     .border({ width: 1, color: COLOR_BORDER })
   }
 
@@ -1807,152 +2333,336 @@ struct Index {
   }
 
   @Builder
-  private categoryCard(type: VaultItemType, description: string): void {
-    Column({ space: 8 }) {
-      Row() {
-        Stack() {
-          this.categoryTypeIcon(type)
-        }
-        .width(40).height(40).borderRadius(13).backgroundColor(this.typeBackground(type))
-        Blank()
-        Text(`${this.countType(type)}`).fontSize(18).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-      }
-      .width('100%')
-      Column({ space: 4 }) {
-        Text(itemTypeLabel(type)).fontSize(16).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-        Text(description).fontSize(11).fontColor(COLOR_MUTED).maxLines(1)
-      }
-      .width('100%').alignItems(HorizontalAlign.Start)
+  private categoryTypeSwitch(type: VaultItemType): void {
+    Column({ space: 1 }) {
+      Text(itemTypeLabel(type)).fontSize(12).fontWeight(FontWeight.Medium)
+        .fontColor(this.selectedCategoryType === type ? '#FFFFFF' : COLOR_TEXT)
+      Text(`${this.countType(type)}`).fontSize(10)
+        .fontColor(this.selectedCategoryType === type ? '#DDF8EF' : COLOR_MUTED)
     }
-    .width('48.5%')
-    .padding(12)
-    .margin({ bottom: 6 })
-    .backgroundColor(COLOR_SURFACE)
-    .borderRadius(18)
-    .border({ width: 1, color: COLOR_BORDER })
-    .onClick((): void => {
-      this.selectedCategoryType = type;
-      this.showCategoryItems = true;
-    })
+    .layoutWeight(1).height(48).justifyContent(FlexAlign.Center)
+    .backgroundColor(this.selectedCategoryType === type ? COLOR_PRIMARY : COLOR_SURFACE)
+    .borderRadius(13)
+    .border({ width: 1, color: this.selectedCategoryType === type ? COLOR_PRIMARY : COLOR_BORDER })
+    .onClick((): void => { this.selectCategoryType(type); })
   }
 
   @Builder
-  private categoryGroupSection(group: VaultGroup, type: VaultItemType): void {
-    Column() {
-      Row() {
-        Text(group.name).fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-        Blank()
-        Text(`${this.countGroupByType(group.id, type)} 条`).fontSize(11).fontColor(COLOR_MUTED)
-      }
-      .width('100%').padding({ left: 12, right: 12, top: 9, bottom: 8 })
-      Column({ space: 0 }) {
-        ForEach(this.itemsInGroupByType(group.id, type), (item: VaultItem): void => {
-          this.itemRow(item)
-        }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
-      }
-      .width('100%').padding({ left: 3, right: 3, bottom: 3 })
-      .border({ width: { top: 1 }, color: COLOR_BORDER })
+  private categoryGroupChip(groupId: number, label: string): void {
+    Text(label).fontSize(11).maxLines(1)
+      .fontColor(this.categoryGroupId === groupId ? COLOR_PRIMARY : COLOR_MUTED)
+      .padding({ left: 11, right: 11, top: 7, bottom: 7 })
+      .backgroundColor(this.categoryGroupId === groupId ? '#E5F6F0' : COLOR_SURFACE)
+      .borderRadius(13)
+      .border({ width: 1, color: this.categoryGroupId === groupId ? '#BDE8DA' : COLOR_BORDER })
+      .onClick((): void => { this.categoryGroupId = groupId; })
+  }
+
+  @Builder
+  private categoryItemMeta(item: VaultItem): void {
+    Row({ space: 6 }) {
+      Text(this.categoryGroupName(item.groupId)).fontSize(10).fontColor(COLOR_PRIMARY)
+        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+        .backgroundColor('#E8F7F2').borderRadius(7).maxLines(1)
+      Blank()
+      Text(this.formatCategoryTime(item.updatedAt)).fontSize(10).fontColor('#9AA2B1')
+    }.width('100%')
+  }
+
+  @Builder
+  private categoryAccountRow(item: VaultItem): void {
+    Column({ space: 5 }) {
+      Row({ space: 8 }) {
+        Column({ space: 2 }) {
+          Text(item.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+          if (item.username.length > 0) {
+            Text(item.username).fontSize(11).fontColor(COLOR_MUTED)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+          }
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Text('›').fontSize(19).fontColor('#B2B8C2')
+      }.width('100%')
+      this.categoryItemMeta(item)
     }
-    .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
-    .border({ width: 1, color: COLOR_BORDER })
+    .width('100%').padding({ left: 11, right: 10, top: 8, bottom: 8 })
+    .backgroundColor(COLOR_SURFACE).borderRadius(14).border({ width: 1, color: COLOR_BORDER })
+    .onClick((): void => { this.openItem(item); })
+  }
+
+  @Builder
+  private categoryNoteRow(item: VaultItem): void {
+    Column({ space: 5 }) {
+      Text(item.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+      if (item.notes.length > 0) {
+        Text(item.notes).fontSize(11).lineHeight(16).fontColor(COLOR_MUTED)
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+      }
+      this.categoryItemMeta(item)
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+    .padding({ left: 11, right: 11, top: 8, bottom: 8 })
+    .backgroundColor(COLOR_SURFACE).borderRadius(14).border({ width: 1, color: COLOR_BORDER })
+    .onClick((): void => { this.openItem(item); })
+  }
+
+  @Builder
+  private categoryFileRow(item: VaultItem): void {
+    Column({ space: 5 }) {
+      Row({ space: 8 }) {
+        Column({ space: 4 }) {
+          Text(item.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+          VaultFileSummary({ itemId: item.id })
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Text('›').fontSize(19).fontColor('#B2B8C2')
+      }.width('100%')
+      this.categoryItemMeta(item)
+    }
+    .width('100%').padding({ left: 11, right: 10, top: 8, bottom: 8 })
+    .backgroundColor(COLOR_SURFACE).borderRadius(14).border({ width: 1, color: COLOR_BORDER })
+    .onClick((): void => { this.openItem(item); })
+  }
+
+  @Builder
+  private categoryMediaRow(item: VaultItem): void {
+    Column({ space: 5 }) {
+      Row({ space: 8 }) {
+        Text(item.title.length > 0 ? item.title : ' ')
+          .fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+        Text('›').fontSize(19).fontColor('#B2B8C2')
+      }.width('100%')
+      VaultAttachmentPreview({
+        itemId: item.id,
+        fallbackType: item.type,
+        maxVisibleCount: 6,
+        thumbnailSize: 44
+      })
+      this.categoryItemMeta(item)
+    }
+    .width('100%').padding({ left: 11, right: 10, top: 8, bottom: 8 })
+    .alignItems(HorizontalAlign.Start)
+    .backgroundColor(COLOR_SURFACE).borderRadius(14).border({ width: 1, color: COLOR_BORDER })
+    .onClick((): void => { this.openItem(item); })
+  }
+
+  @Builder
+  private categoryContent(): void {
+    if (this.categoryItems().length === 0) {
+      this.emptyState(`还没有${itemTypeLabel(this.selectedCategoryType)}`, '点击底部加号添加第一条资料')
+    } else if (this.selectedCategoryType === VaultItemType.Image) {
+      Column({ space: 5 }) {
+        ForEach(this.categoryItems(), (item: VaultItem): void => {
+          this.categoryMediaRow(item)
+        }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
+      }.width('100%')
+    } else {
+      Column({ space: 5 }) {
+        ForEach(this.categoryItems(), (item: VaultItem): void => {
+          if (this.selectedCategoryType === VaultItemType.Login) {
+            this.categoryAccountRow(item)
+          } else if (this.selectedCategoryType === VaultItemType.Note) {
+            this.categoryNoteRow(item)
+          } else {
+            this.categoryFileRow(item)
+          }
+        }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
+      }.width('100%')
+    }
   }
 
   @Builder
   private categoryTab(): void {
-    Scroll() {
-      Column({ space: 12 }) {
-        if (this.showCategoryItems) {
-          Row({ space: 10 }) {
-            Button('‹')
-              .width(40).height(40).fontSize(26).fontColor(COLOR_TEXT)
-              .backgroundColor(COLOR_SURFACE).borderRadius(12)
-              .onClick((): void => { this.showCategoryItems = false; })
-            Column({ space: 3 }) {
-              Text(itemTypeLabel(this.selectedCategoryType))
-                .fontSize(26).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-              Text(`共 ${this.countType(this.selectedCategoryType)} 条资料`)
-                .fontSize(12).fontColor(COLOR_MUTED)
-            }
-            .alignItems(HorizontalAlign.Start).layoutWeight(1)
-          }
-          .width('100%')
-          if (this.countType(this.selectedCategoryType) === 0) {
-            this.emptyState(`还没有${itemTypeLabel(this.selectedCategoryType)}`, '点击底部加号添加第一条资料')
-          } else {
+    Column({ space: 8 }) {
+      Row({ space: 5 }) {
+        this.categoryTypeSwitch(VaultItemType.Login)
+        this.categoryTypeSwitch(VaultItemType.Note)
+        this.categoryTypeSwitch(VaultItemType.Image)
+        this.categoryTypeSwitch(VaultItemType.File)
+      }.width('100%')
+      Row({ space: 6 }) {
+        Scroll() {
+          Row({ space: 5 }) {
+            this.categoryGroupChip(-1, '全部分组')
             ForEach(this.groups, (group: VaultGroup): void => {
               if (this.countGroupByType(group.id, this.selectedCategoryType) > 0) {
-                this.categoryGroupSection(group, this.selectedCategoryType)
+                this.categoryGroupChip(group.id, group.name)
               }
             }, (group: VaultGroup): string => `${group.id}-${group.name}`)
             if (this.countGroupByType(0, this.selectedCategoryType) > 0) {
-              Column() {
-                Row() {
-                  Text('未分组').fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-                  Blank()
-                  Text(`${this.countGroupByType(0, this.selectedCategoryType)} 条`)
-                    .fontSize(11).fontColor(COLOR_MUTED)
-                }.width('100%').padding({ left: 12, right: 12, top: 9, bottom: 8 })
-                Column({ space: 0 }) {
-                  ForEach(this.itemsInGroupByType(0, this.selectedCategoryType), (item: VaultItem): void => {
-                    this.itemRow(item)
-                  }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
-                }.width('100%').padding({ left: 3, right: 3, bottom: 3 })
-                  .border({ width: { top: 1 }, color: COLOR_BORDER })
-              }.width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
-                .border({ width: 1, color: COLOR_BORDER })
+              this.categoryGroupChip(0, '未分组')
             }
           }
-        } else {
-          Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-            this.categoryCard(VaultItemType.Login, '网站账号与密码')
-            this.categoryCard(VaultItemType.Note, '文字与私密记录')
-            this.categoryCard(VaultItemType.Image, '图片与可直接播放的视频')
-            this.categoryCard(VaultItemType.File, '文档与任意文件')
-          }
-          .width('100%')
-        }
-      }
-      .width('100%').padding({ left: 18, right: 18, top: 12, bottom: 92 })
+        }.layoutWeight(1).scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+        Button(`${this.categorySortLabel()}  ▾`)
+          .height(31).fontSize(10).fontColor(COLOR_MUTED)
+          .padding({ left: 9, right: 9 }).backgroundColor(COLOR_SURFACE).borderRadius(12)
+          .border({ width: 1, color: COLOR_BORDER })
+          .onClick((): void => { this.chooseCategorySort(); })
+      }.width('100%')
+      Row() {
+        Text(`${this.categoryItems().length} 条资料`).fontSize(11).fontColor(COLOR_MUTED)
+      }.width('100%').padding({ left: 2 })
+      Scroll() {
+        this.categoryContent()
+      }.layoutWeight(1).width('100%').scrollBar(BarState.Off)
     }
     .width('100%').height('100%')
+    .padding({ left: 18, right: 18, top: 10, bottom: 92 })
+  }
+
+  @Builder
+  private trashFilterChip(value: string, label: string): void {
+    Text(label)
+      .fontSize(12).maxLines(1)
+      .fontColor(this.trashTypeFilter === value ? COLOR_BG : COLOR_MUTED)
+      .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+      .backgroundColor(this.trashTypeFilter === value ? COLOR_PRIMARY : COLOR_SURFACE_2)
+      .borderRadius(14)
+      .onClick((): void => { this.setTrashTypeFilter(value); })
+  }
+
+  @Builder
+  private trashEntryCard(entry: VaultTrashEntry): void {
+    Column({ space: 5 }) {
+      Row({ space: 8 }) {
+        if (this.trashManaging) {
+          Stack({ alignContent: Alignment.Center }) {
+            Circle({ width: 22, height: 22 })
+              .fill(this.trashIsSelected(entry.item.id) ? COLOR_PRIMARY : Color.Transparent)
+              .stroke(this.trashIsSelected(entry.item.id) ? COLOR_PRIMARY : '#B5BDC8').strokeWidth(1.5)
+            if (this.trashIsSelected(entry.item.id)) {
+              Text('✓').fontSize(13).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+            }
+          }.width(26).height(32)
+        }
+        Column({ space: 3 }) {
+          if (entry.item.title.length > 0) {
+            Text(entry.item.title)
+              .fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+          }
+          Row({ space: 6 }) {
+            Text(itemTypeLabel(entry.item.type)).fontSize(10).fontColor(COLOR_PRIMARY)
+              .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+              .backgroundColor('#E5F6F0').borderRadius(8)
+            Text(entry.originalGroupName).fontSize(11).fontColor(COLOR_MUTED)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }.width('100%')
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Text(this.formatTrashTime(entry.item.deletedAt)).fontSize(10).fontColor('#9AA2B1')
+      }.width('100%')
+      if (entry.item.type === VaultItemType.Image || entry.item.type === VaultItemType.Video) {
+        VaultAttachmentPreview({ itemId: entry.item.id, fallbackType: entry.item.type, maxVisibleCount: 5 })
+      } else if (entry.item.type === VaultItemType.Login && entry.item.username.length > 0) {
+        Text(entry.item.username).fontSize(11).fontColor(COLOR_MUTED).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+      } else if (entry.item.notes.length > 0) {
+        Text(entry.item.notes).fontSize(11).fontColor(COLOR_MUTED).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+      }
+    }
+    .width('100%')
+    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+    .backgroundColor(COLOR_SURFACE).borderRadius(14)
+    .border({ width: 1, color: this.trashIsSelected(entry.item.id) ? COLOR_PRIMARY : COLOR_BORDER })
+    .onClick((): void => { this.openTrashDetail(entry); })
+    .priorityGesture(LongPressGesture({ repeat: false, duration: 500 })
+      .onAction((): void => { this.openTrashManagement(entry.item.id); }))
+  }
+
+  @Builder
+  private trashSectionList(section: string): void {
+    if (this.trashEntriesInSection(section).length > 0) {
+      Column({ space: 4 }) {
+        Text(section).fontSize(12).fontWeight(FontWeight.Medium).fontColor(COLOR_MUTED)
+          .width('100%').padding({ left: 2, top: 3 })
+        ForEach(this.trashEntriesInSection(section), (entry: VaultTrashEntry): void => {
+          this.trashEntryCard(entry)
+        }, (entry: VaultTrashEntry): string => `${entry.item.id}-${entry.item.deletedAt}`)
+      }.width('100%')
+    }
   }
 
   @Builder
   private trashTab(): void {
-    Column({ space: 16 }) {
-      List({ space: 10 }) {
-        if (this.trashItems.length === 0) {
-          ListItem() { this.emptyState('回收站为空', '删除的资料会保留在这里') }
-        } else {
-          ForEach(this.trashItems, (item: VaultItem): void => {
-            ListItem() {
-              Column({ space: 10 }) {
-                Row({ space: 12 }) {
-                  Stack() { Text(itemTypeGlyph(item.type)).fontSize(18).fontColor(this.typeColor(item.type)) }
-                    .width(42).height(42).borderRadius(13).backgroundColor(this.typeBackground(item.type))
-                  Column({ space: 3 }) {
-                    Text(item.title).fontSize(15).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-                    Text(itemTypeLabel(item.type)).fontSize(11).fontColor(COLOR_MUTED)
-                  }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-                }.width('100%')
-                Row({ space: 10 }) {
-                  Button('恢复')
-                    .layoutWeight(1).height(38).fontColor(COLOR_PRIMARY).backgroundColor('#E7F7F2')
-                    .onClick((): void => { this.trashAction(item, false); })
-                  Button('永久删除')
-                    .layoutWeight(1).height(38).fontColor(COLOR_DANGER).backgroundColor('#FDEDEF')
-                    .onClick((): void => { this.trashAction(item, true); })
-                }.width('100%')
-              }.width('100%').padding(14).backgroundColor(COLOR_SURFACE).borderRadius(17)
-                .border({ width: 1, color: COLOR_BORDER })
-            }
-          }, (item: VaultItem): string => item.id)
+    Column({ space: 8 }) {
+      Row({ space: 8 }) {
+        Text(`${this.trashEntries.length} 条资料`).fontSize(11).fontColor(COLOR_MUTED)
+        Blank()
+        if (!this.trashManaging) {
+          Button('管理').height(40).fontSize(12).fontColor(COLOR_PRIMARY)
+            .backgroundColor(COLOR_SURFACE).borderRadius(12)
+            .onClick((): void => { this.openTrashManagement(); })
+          Row({ space: 3 }) {
+            Circle({ width: 3, height: 3 }).fill(COLOR_MUTED)
+            Circle({ width: 3, height: 3 }).fill(COLOR_MUTED)
+            Circle({ width: 3, height: 3 }).fill(COLOR_MUTED)
+          }
+            .width(40).height(40).justifyContent(FlexAlign.Center)
+            .backgroundColor(COLOR_SURFACE).borderRadius(12)
+            .onClick((): void => { this.showTrashMore = !this.showTrashMore; })
         }
+      }.width('100%')
+      Scroll() {
+        Row({ space: 6 }) {
+          this.trashFilterChip('all', '全部')
+          this.trashFilterChip(VaultItemType.Login, '账号')
+          this.trashFilterChip(VaultItemType.Note, '笔记')
+          this.trashFilterChip(VaultItemType.Image, '媒体')
+          this.trashFilterChip(VaultItemType.File, '文件')
+        }
+      }.width('100%').scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+      if (this.showTrashMore && !this.trashManaging) {
+        Row() {
+          Text('清空回收站').fontSize(12).fontColor(COLOR_DANGER)
+          Blank()
+          Text('永久删除全部资料').fontSize(10).fontColor(COLOR_MUTED)
+        }
+        .width('100%').height(38).padding({ left: 12, right: 12 })
+        .backgroundColor('#FFF3F4').borderRadius(11)
+        .onClick((): void => { this.emptyTrash(); })
       }
-      .layoutWeight(1).width('100%').scrollBar(BarState.Off)
+      if (this.trashManaging) {
+        Row() {
+          Text(`已选择 ${this.trashSelectedIds.length} 项`).fontSize(12).fontColor(COLOR_TEXT)
+          Blank()
+          Text(this.trashSelectedIds.length === this.trashEntries.length && this.trashEntries.length > 0 ? '取消全选' : '全选')
+            .fontSize(12).fontColor(COLOR_PRIMARY).padding(6)
+            .onClick((): void => { this.toggleSelectAllTrash(); })
+          Text('取消').fontSize(12).fontColor(COLOR_MUTED).padding(6)
+            .onClick((): void => { this.closeTrashManagement(); })
+        }.width('100%').height(34)
+      }
+      Scroll() {
+        Column({ space: 7 }) {
+          if (this.trashEntries.length === 0) {
+            this.emptyState(this.trashTypeFilter !== 'all' ? '没有此类型的资料' : '回收站为空',
+              this.trashTypeFilter !== 'all' ? '选择其他类型查看' : '删除的资料会一直保留在这里')
+          } else {
+            this.trashSectionList('今天')
+            this.trashSectionList('最近 7 天')
+            this.trashSectionList('更早')
+          }
+        }.width('100%')
+      }.layoutWeight(1).width('100%').scrollBar(BarState.Off)
+      if (this.trashManaging) {
+        Row({ space: 8 }) {
+          Button('恢复')
+            .layoutWeight(1).height(44).fontColor(COLOR_PRIMARY).backgroundColor('#E7F7F2').borderRadius(13)
+            .enabled(this.trashSelectedIds.length > 0).opacity(this.trashSelectedIds.length > 0 ? 1 : 0.45)
+            .onClick((): void => { this.restoreSelectedTrash(); })
+          Button('永久删除')
+            .layoutWeight(1).height(44).fontColor(COLOR_DANGER).backgroundColor('#FDEDEF').borderRadius(13)
+            .enabled(this.trashSelectedIds.length > 0).opacity(this.trashSelectedIds.length > 0 ? 1 : 0.45)
+            .onClick((): void => { this.permanentlyDeleteSelectedTrash(); })
+        }.width('100%')
+      }
     }
     .width('100%').height('100%')
-    .padding({ left: 18, right: 18, top: 12, bottom: 92 })
+    .padding({ left: 18, right: 18, top: 10, bottom: 92 })
   }
 
   @Builder
@@ -2120,8 +2830,9 @@ struct Index {
     .padding({ top: 6, bottom: 4 })
     .onClick((): void => {
       this.activeTab = index;
-      if (index === 1) {
-        this.showCategoryItems = false;
+      if (index !== 2) {
+        this.closeTrashManagement();
+        this.showTrashMore = false;
       }
       if (index === 2) {
         this.refreshTrash();
@@ -2186,6 +2897,9 @@ struct Index {
       if (this.groupPendingDelete) {
         this.deleteGroupOverlay(this.groupPendingDelete as VaultGroup)
       }
+      if (this.selectedTrashEntry) {
+        this.trashDetailOverlay(this.selectedTrashEntry as VaultTrashEntry)
+      }
       if (this.selectedItem) {
         this.detailOverlay(this.selectedItem as VaultItem)
       }
@@ -2193,6 +2907,93 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+  }
+
+  @Builder
+  private trashReadOnlyField(label: string, value: string): void {
+    Column({ space: 4 }) {
+      Text(label).fontSize(11).fontColor(COLOR_MUTED).width('100%')
+      Text(value.length > 0 ? value : '—')
+        .fontSize(14).fontColor(value.length > 0 ? COLOR_TEXT : COLOR_MUTED)
+        .width('100%').textAlign(TextAlign.Start)
+    }
+    .width('100%').padding(10).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
+  }
+
+  @Builder
+  private trashDetailOverlay(entry: VaultTrashEntry): void {
+    Column() {
+      Blank().onClick((): void => { this.closeTrashDetail(); })
+      Scroll() {
+        Column({ space: 8 }) {
+          this.modalHeader('只读详情', (): void => { this.closeTrashDetail(); })
+          Row({ space: 6 }) {
+            Text(itemTypeLabel(entry.item.type)).fontSize(11).fontColor(COLOR_PRIMARY)
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .backgroundColor('#E5F6F0').borderRadius(9)
+            Text(entry.originalGroupName).fontSize(11).fontColor(COLOR_MUTED)
+            Blank()
+            Text(this.formatTrashTime(entry.item.deletedAt)).fontSize(10).fontColor(COLOR_MUTED)
+          }.width('100%')
+          if (entry.item.type === VaultItemType.Image || entry.item.type === VaultItemType.Video) {
+            if (entry.item.title.length > 0) {
+              Text(entry.item.title).fontSize(16).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT).width('100%')
+            }
+            VaultAttachmentGallery({ itemId: entry.item.id, fallbackType: entry.item.type, readOnly: true })
+            if (entry.item.notes.length > 0) {
+              this.trashReadOnlyField('备注', entry.item.notes)
+            }
+          } else {
+            this.trashReadOnlyField('名称', entry.item.title)
+            if (entry.item.type === VaultItemType.Login) {
+              Row({ space: 6 }) {
+                Column({ space: 4 }) {
+                  Text('账号').fontSize(11).fontColor(COLOR_MUTED).width('100%')
+                  Text(entry.item.username.length > 0 ? entry.item.username : '—')
+                    .fontSize(14).fontColor(entry.item.username.length > 0 ? COLOR_TEXT : COLOR_MUTED)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+                }.layoutWeight(1).padding(10).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
+                Button('复制').height(44).fontSize(12).fontColor(COLOR_PRIMARY)
+                  .backgroundColor('#E5F6F0').borderRadius(11)
+                  .enabled(entry.item.username.length > 0)
+                  .onClick((): void => { this.copyTrashUsername(entry.item.username); })
+              }.width('100%')
+              Row({ space: 6 }) {
+                Column({ space: 4 }) {
+                  Text('密码').fontSize(11).fontColor(COLOR_MUTED).width('100%')
+                  Text(this.revealTrashPassword ? entry.item.password : '••••••••')
+                    .fontSize(14).fontColor(COLOR_TEXT).maxLines(1).width('100%')
+                }.layoutWeight(1).padding(10).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
+                this.passwordEyeButton(this.revealTrashPassword, 44,
+                  (): void => { this.toggleTrashPasswordVisibility(); })
+              }.width('100%')
+              if (this.revealTrashPassword) { this.screenshotProtectionHint() }
+            }
+            if (entry.item.notes.length > 0) {
+              this.trashReadOnlyField(entry.item.type === VaultItemType.Note ? '内容' : '备注', entry.item.notes)
+            }
+            if (entry.item.type === VaultItemType.File) {
+              VaultAttachmentPreview({ itemId: entry.item.id, fallbackType: entry.item.type, maxVisibleCount: 5 })
+              Button('下载到本地').width('100%').height(44).fontColor(COLOR_PRIMARY)
+                .backgroundColor('#E5F6F0').borderRadius(12)
+                .onClick((): void => { this.downloadAttachment(entry.item); })
+            }
+          }
+          Row({ space: 8 }) {
+            Button('恢复').layoutWeight(1).height(46).fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(13)
+              .onClick((): void => { this.trashAction(entry.item, false); })
+            Button('永久删除').layoutWeight(1).height(46).fontColor(COLOR_DANGER)
+              .backgroundColor('#FDEDEF').borderRadius(13)
+              .onClick((): void => { this.trashAction(entry.item, true); })
+          }.width('100%')
+        }
+        .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 14 })
+      }
+      .width('100%').constraintSize({ maxHeight: '94%' }).scrollBar(BarState.Off)
+      .backgroundColor(COLOR_SURFACE).borderRadius({ topLeft: 24, topRight: 24 })
+    }
+    .width('100%').height('100%').backgroundColor('#99000000')
   }
 
   @Builder
@@ -2232,6 +3033,56 @@ struct Index {
         .width(38).height(38)
         .backgroundColor(COLOR_SURFACE_2).borderRadius(11)
         .onClick(closeAction)
+    }
+    .width('100%')
+  }
+
+  @Builder
+  private detailTypeIcon(type: VaultItemType): void {
+    if (type === VaultItemType.Image || type === VaultItemType.Video) {
+      Stack({ alignContent: Alignment.Center }) {
+        Stack() {
+          Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY).position({ left: 4, top: 3 })
+          Text('▶').fontSize(7).fontColor(COLOR_PRIMARY)
+            .width(9).height(9).textAlign(TextAlign.Center).position({ right: 2, bottom: 1 })
+        }
+        .width(20).height(15).border({ width: 1.6, color: COLOR_PRIMARY }).borderRadius(4)
+      }.width(22).height(22)
+    } else if (type === VaultItemType.File) {
+      Stack({ alignContent: Alignment.Center }) {
+        Stack() {
+          Column({ space: 2 }) {
+            Divider().width(8).strokeWidth(1.4).color(COLOR_PRIMARY)
+            Divider().width(8).strokeWidth(1.4).color(COLOR_PRIMARY)
+          }.position({ left: 4, top: 8 })
+          Stack().width(5).height(5)
+            .border({ width: { left: 1.4, bottom: 1.4 }, color: COLOR_PRIMARY })
+            .position({ right: 0, top: 0 })
+        }
+        .width(16).height(19).border({ width: 1.6, color: COLOR_PRIMARY }).borderRadius(3)
+      }.width(22).height(22)
+    } else {
+      Text(itemTypeGlyph(type)).fontSize(16).fontColor(COLOR_PRIMARY)
+        .width(22).height(22).textAlign(TextAlign.Center)
+    }
+  }
+
+  @Builder
+  private detailHeader(type: VaultItemType, closeAction: () => void): void {
+    Row({ space: 9 }) {
+      Text('资料详情').fontSize(19).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
+      Row({ space: 4 }) {
+        this.detailTypeIcon(type)
+        Text(itemTypeLabel(type)).fontSize(11).fontColor(COLOR_PRIMARY)
+      }
+      .height(28).padding({ left: 7, right: 9 })
+      .backgroundColor('#1B332C').borderRadius(10)
+      Blank()
+      Stack() {
+        Text('×').fontSize(22).lineHeight(24).fontColor(COLOR_MUTED)
+      }
+      .width(38).height(38).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
+      .onClick(closeAction)
     }
     .width('100%')
   }
@@ -2297,34 +3148,100 @@ struct Index {
 
   @Builder
   private pendingMediaOcrText(): void {
-    if (this.pendingMedia.length > this.selectedMediaPreviewIndex &&
-      this.pendingMedia[this.selectedMediaPreviewIndex].type === VaultItemType.Image) {
-      Column({ space: 9 }) {
-        Row({ space: 8 }) {
-          Text('图片文字').fontSize(13).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-          Blank()
-          Text('自动识别 · 只读')
-            .fontSize(10).fontColor(COLOR_PRIMARY)
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .backgroundColor('#E5F7F1').borderRadius(10)
+    if (this.selectedMediaPreviewIndex >= 0 && this.selectedMediaPreviewIndex < this.pendingMedia.length &&
+      this.pendingMedia[this.selectedMediaPreviewIndex].type === VaultItemType.Image &&
+      this.pendingMedia[this.selectedMediaPreviewIndex].ocrText.trim().length > 0) {
+      Column({ space: 6 }) {
+        Row({ space: 6 }) {
+          Text('识别文字').fontSize(12).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+          Text('只读').fontSize(9).fontColor(COLOR_PRIMARY)
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .backgroundColor('#DDF3EB').borderRadius(8)
         }.width('100%')
         Scroll() {
-          Text(this.currentPendingMediaOcrText.length > 0 ? this.currentPendingMediaOcrText : '未识别到文字')
-            .fontSize(13)
-            .fontColor(this.currentPendingMediaOcrText.length > 0 ? COLOR_TEXT : COLOR_MUTED)
-            .width('100%')
+          Text(this.pendingMedia[this.selectedMediaPreviewIndex].ocrText)
+            .fontSize(12).fontColor('#52665F').lineHeight(19).width('100%')
             .textAlign(TextAlign.Start)
         }
         .width('100%')
-        .height(this.currentPendingMediaOcrText.length > 0 ? 92 : 24)
+        .constraintSize({ maxHeight: 108 })
         .scrollBar(BarState.Auto)
       }
       .width('100%')
-      .padding(12)
-      .backgroundColor('#F5FBF9')
-      .border({ width: 1, color: '#D8EEE7' })
-      .borderRadius(12)
+      .alignItems(HorizontalAlign.Start)
+      .padding({ left: 11, right: 11, top: 9, bottom: 9 })
+      .backgroundColor('#F0F8F5')
+      .border({ width: { left: 3 }, color: COLOR_PRIMARY })
+      .borderRadius(10)
     }
+  }
+
+  @Builder
+  private selectedFilesPreview(): void {
+    Column({ space: 0 }) {
+      Row() {
+        Text(`已选择 ${this.selectedFileCount} 个文件`)
+          .fontSize(12).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+        Blank()
+        Text('可单独移除').fontSize(10).fontColor(COLOR_MUTED)
+      }
+      .width('100%')
+      .height(34)
+      .padding({ left: 11, right: 11 })
+      Scroll() {
+        Column({ space: 0 }) {
+          ForEach(this.pendingFiles, (file: PickedMedia, index: number): void => {
+            Row({ space: 9 }) {
+              Stack({ alignContent: Alignment.Center }) {
+                Text('▤').fontSize(17).fontColor(COLOR_PRIMARY)
+              }
+              .width(30).height(30).borderRadius(9).backgroundColor('#E5F6F0')
+              Text(file.name)
+                .fontSize(12).fontColor(COLOR_TEXT).maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+              Text('×')
+                .fontSize(17).fontColor(COLOR_MUTED).textAlign(TextAlign.Center)
+                .width(30).height(30).borderRadius(10).backgroundColor('#E9EEEC')
+                .enabled(!this.savingNewItem)
+                .opacity(this.savingNewItem ? 0.45 : 1)
+                .onClick((): void => { this.removePendingFile(index); })
+            }
+            .width('100%')
+            .padding({ left: 9, right: 9, top: 7, bottom: 7 })
+            if (index < this.pendingFiles.length - 1) {
+              Divider().strokeWidth(1).color(COLOR_BORDER).margin({ left: 48 })
+            }
+          }, (file: PickedMedia, index: number): string => `${file.uri}-${index}`)
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxHeight: 190 })
+      .scrollBar(BarState.Auto)
+    }
+    .width('100%')
+    .backgroundColor('#F0F8F5')
+    .borderRadius(12)
+  }
+
+  @Builder
+  private passwordEyeButton(revealed: boolean, height: number, action: () => void): void {
+    Stack({ alignContent: Alignment.Center }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Stack()
+          .width(22).height(14)
+          .border({ width: 2, color: COLOR_PRIMARY })
+          .borderRadius(9)
+        Circle({ width: 6, height: 6 }).fill(COLOR_PRIMARY)
+      }
+      if (!revealed) {
+        Divider().width(27).strokeWidth(2).color(COLOR_PRIMARY).borderRadius(1)
+          .rotate({ angle: -42 })
+      }
+    }
+    .width(46).height(height)
+    .backgroundColor('#E5F6F0').borderRadius(11)
+    .onClick(action)
   }
 
   @Builder
@@ -2357,6 +3274,7 @@ struct Index {
       .padding({ left: 12, right: 12, top: 8, bottom: 8 })
       .backgroundColor(this.detailGroupId === groupId ? COLOR_PRIMARY : COLOR_SURFACE_2)
       .borderRadius(16)
+      .margin({ right: 6, bottom: 6 })
       .onClick((): void => { this.detailGroupId = groupId; })
   }
 
@@ -2364,16 +3282,12 @@ struct Index {
   private detailGroupPicker(): void {
     Column({ space: 6 }) {
       Text('移动到分组').fontSize(12).fontColor(COLOR_MUTED).width('100%')
-      Scroll() {
-        Row({ space: 6 }) {
-          this.detailGroupChip(0, '未分组')
-          ForEach(this.groups, (group: VaultGroup): void => {
-            this.detailGroupChip(group.id, group.name)
-          }, (group: VaultGroup): string => `${group.id}-${group.name}`)
-        }
+      Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+        this.detailGroupChip(0, '未分组')
+        ForEach(this.groups, (group: VaultGroup): void => {
+          this.detailGroupChip(group.id, group.name)
+        }, (group: VaultGroup): string => `${group.id}-${group.name}`)
       }
-      .scrollable(ScrollDirection.Horizontal)
-      .scrollBar(BarState.Off)
       .width('100%')
     }
     .width('100%')
@@ -2386,20 +3300,19 @@ struct Index {
         Column({ space: 10 }) {
           this.modalHeader('新建资料', (): void => { this.requestCloseNewItem(); })
           Text('保存到分组').fontSize(12).fontColor(COLOR_MUTED).width('100%')
-          Scroll() {
-            Row({ space: 6 }) {
-              ForEach(this.groups, (group: VaultGroup): void => {
-                Text(group.name)
-                  .fontSize(12)
-                  .fontColor(this.newGroupId === group.id ? COLOR_BG : COLOR_MUTED)
-                  .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                  .backgroundColor(this.newGroupId === group.id ? COLOR_PRIMARY : COLOR_SURFACE_2)
-                  .borderRadius(16)
-                  .onClick((): void => { this.newGroupId = group.id; })
-              }, (group: VaultGroup): string => `${group.id}-${group.name}`)
-            }
+          Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+            ForEach(this.groups, (group: VaultGroup): void => {
+              Text(group.name)
+                .fontSize(12)
+                .fontColor(this.newGroupId === group.id ? COLOR_BG : COLOR_MUTED)
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor(this.newGroupId === group.id ? COLOR_PRIMARY : COLOR_SURFACE_2)
+                .borderRadius(16)
+                .margin({ right: 6, bottom: 6 })
+                .onClick((): void => { this.newGroupId = group.id; })
+            }, (group: VaultGroup): string => `${group.id}-${group.name}`)
           }
-          .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%')
+          .width('100%')
           Row({ space: 4 }) {
             this.typeChip(VaultItemType.Login)
             this.typeChip(VaultItemType.Note)
@@ -2425,9 +3338,8 @@ struct Index {
                 .layoutWeight(1).fontColor(COLOR_TEXT).placeholderColor('#607B72')
                 .backgroundColor(COLOR_SURFACE_2).height(48).borderRadius(12)
                 .onChange((value: string): void => { this.newPassword = value; })
-              Button(this.revealNewPassword ? '隐藏' : '显示')
-                .height(48).fontColor(COLOR_PRIMARY).backgroundColor('#173128').borderRadius(12)
-                .onClick((): void => { this.toggleNewPasswordVisibility(); })
+              this.passwordEyeButton(this.revealNewPassword, 48,
+                (): void => { this.toggleNewPasswordVisibility(); })
             }
             .width('100%')
             if (this.revealNewPassword) {
@@ -2435,13 +3347,14 @@ struct Index {
             }
           }
           if (this.newType === VaultItemType.Image) {
-            Button('从系统相册中添加')
+            Button('从系统相册添加')
               .width('100%').height(48).fontColor(COLOR_PRIMARY)
               .backgroundColor('#173128').borderRadius(12)
               .enabled(!this.recognizingMedia && !this.savingNewItem)
               .onClick((): void => { this.chooseMedia(); })
             if (this.selectedMediaCount > 0) {
               this.selectedMediaPreview()
+              this.pendingMediaOcrText()
             }
             if (this.recognizingMedia) {
               Row({ space: 8 }) {
@@ -2450,18 +3363,19 @@ struct Index {
               }.width('100%')
             }
           } else if (this.newType === VaultItemType.File) {
-            Button(this.selectedFileCount > 0 ? `✓ 已选择 ${this.selectedFileCount} 个文件` : '选择多个要保存的文件')
+            Button('选择多个要保存的文件')
               .width('100%').height(48).fontColor(COLOR_PRIMARY)
               .backgroundColor('#173128').borderRadius(12)
+              .enabled(!this.savingNewItem)
               .onClick((): void => { this.chooseMedia(true); })
+            if (this.selectedFileCount > 0) {
+              this.selectedFilesPreview()
+            }
           }
           TextArea({ placeholder: this.newType === VaultItemType.Note ? '内容' : '备注', text: this.newNotes })
             .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
             .height(92).borderRadius(12)
             .onChange((value: string): void => { this.newNotes = value; })
-          if (this.newType === VaultItemType.Image && this.selectedMediaCount > 0) {
-            this.pendingMediaOcrText()
-          }
           if (this.savingNewItem) {
             Column({ space: 5 }) {
               Row() {
@@ -2595,8 +3509,7 @@ struct Index {
       Scroll() {
         if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
           Column({ space: 8 }) {
-            this.modalHeader(this.detailTitle.trim().length > 0 ? this.detailTitle : '媒体',
-              (): void => { this.closeSelectedItem(); })
+            this.detailHeader(VaultItemType.Image, (): void => { this.closeSelectedItem(); })
             VaultAttachmentGallery({
               itemId: item.id,
               fallbackType: item.type,
@@ -2628,14 +3541,11 @@ struct Index {
           .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 12 })
         } else {
           Column({ space: 9 }) {
-            this.modalHeader('资料详情', (): void => { this.closeSelectedItem(); })
-            Row({ space: 6 }) {
-              Text(itemTypeGlyph(item.type)).fontSize(16).fontColor(COLOR_PRIMARY)
-              Text(itemTypeLabel(item.type)).fontSize(12).fontColor(COLOR_PRIMARY)
-            }
-            .height(32).padding({ left: 10, right: 10 })
-            .backgroundColor('#1B332C').borderRadius(11).alignSelf(ItemAlign.Start)
+            this.detailHeader(item.type, (): void => { this.closeSelectedItem(); })
             this.detailGroupPicker()
+            if (item.type === VaultItemType.File) {
+              VaultFileGallery({ itemId: item.id })
+            }
             TextInput({ placeholder: '名称', text: this.detailTitle })
               .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)
               .onChange((value: string): void => { this.detailTitle = value; })
@@ -2649,26 +3559,12 @@ struct Index {
                   .layoutWeight(1).fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
                   .height(44).borderRadius(11)
                   .onChange((value: string): void => { this.detailPassword = value; })
-                Button(this.revealPassword ? '隐藏' : '显示')
-                  .height(44).fontColor(COLOR_PRIMARY).backgroundColor('#173128').borderRadius(11)
-                  .onClick((): void => { this.toggleDetailPasswordVisibility(); })
+                this.passwordEyeButton(this.revealPassword, 44,
+                  (): void => { this.toggleDetailPasswordVisibility(); })
               }.width('100%')
               if (this.revealPassword) { this.screenshotProtectionHint() }
             }
             this.detailNotesEditor(item.type)
-            if (item.type === VaultItemType.File) {
-              Row({ space: 10 }) {
-                Text('▤').fontSize(24).fontColor(COLOR_PRIMARY)
-                Column({ space: 3 }) {
-                  Text(item.title).fontSize(14).fontColor(COLOR_TEXT).maxLines(1)
-                  Text('文件保存在应用本地数据库中').fontSize(11).fontColor(COLOR_MUTED)
-                }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-              }.width('100%').padding(10).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
-              Button('下载到本地')
-                .width('100%').height(44).fontColor(COLOR_PRIMARY)
-                .backgroundColor('#173128').borderRadius(12)
-                .onClick((): void => { this.downloadAttachment(item); })
-            }
             Button('保存修改')
               .width('100%').height(46).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
               .backgroundColor(COLOR_PRIMARY).borderRadius(12)

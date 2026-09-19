@@ -15,6 +15,7 @@ export struct VaultAttachmentGallery {
   itemId: string = '';
   fallbackType: VaultItemType = VaultItemType.Image;
   initialAttachmentIndex: number = -1;
+  readOnly: boolean = false;
   @State private attachments: VaultAttachmentSummary[] = [];
   @State private currentIndex: number = 0;
   @State private overlayMode: string = 'none';
@@ -179,6 +180,7 @@ export struct VaultAttachmentGallery {
               this.progress = 75 + Math.round((completed / total) * 25);
             });
           await this.load(true);
+          this.selectMedia(this.attachments.length - 1);
         }
         let message = `已导入，共 ${newMedia.length} 个素材`;
         if (newMedia.length === 0 && duplicateCount > 0) {
@@ -314,11 +316,43 @@ export struct VaultAttachmentGallery {
               this.selectMedia(index);
             })
             .priorityGesture(LongPressGesture({ repeat: false, duration: 500 })
-              .onAction((): void => { this.openManagerWithSelection(attachment.index); }))
+              .onAction((): void => {
+                if (!this.readOnly) { this.openManagerWithSelection(attachment.index); }
+              }))
           }, (attachment: VaultAttachmentSummary): string =>
             `${this.attachmentRevision}-${attachment.index}`)
         }.padding({ left: 2, right: 2 })
       }.width('100%').scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+    }
+  }
+
+  @Builder
+  private currentOcrText(): void {
+    if (this.currentIndex >= 0 && this.currentIndex < this.attachments.length &&
+      this.attachments[this.currentIndex].type === VaultItemType.Image &&
+      this.attachments[this.currentIndex].ocrText.trim().length > 0) {
+      Column({ space: 6 }) {
+        Row({ space: 6 }) {
+          Text('识别文字').fontSize(12).fontWeight(FontWeight.Medium).fontColor('#23312C')
+          Text('只读').fontSize(9).fontColor('#20A47D')
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .backgroundColor('#DDF3EB').borderRadius(8)
+        }.width('100%')
+        Scroll() {
+          Text(this.attachments[this.currentIndex].ocrText)
+            .fontSize(12).fontColor('#52665F').lineHeight(19).width('100%')
+            .textAlign(TextAlign.Start)
+        }
+        .width('100%')
+        .constraintSize({ maxHeight: 108 })
+        .scrollBar(BarState.Auto)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .padding({ left: 11, right: 11, top: 9, bottom: 9 })
+      .backgroundColor('#F0F8F5')
+      .border({ width: { left: 3 }, color: '#20A47D' })
+      .borderRadius(10)
     }
   }
 
@@ -332,23 +366,6 @@ export struct VaultAttachmentGallery {
         }.width('100%')
         Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
           .width('100%').height(4).color('#2DD6A6')
-      }.width('100%')
-    }
-  }
-
-  @Builder
-  private currentImageOcrText(): void {
-    if (this.attachments.length > this.currentIndex &&
-      this.attachments[this.currentIndex].type === VaultItemType.Image) {
-      Column({ space: 6 }) {
-        Text('图片文字（自动识别）').fontSize(11).fontColor('#91A09A').width('100%')
-        Scroll() {
-          Text(this.attachments[this.currentIndex].ocrText)
-            .fontSize(12).fontColor('#DCE9E4').width('100%').textAlign(TextAlign.Start)
-        }
-        .width('100%')
-        .height(this.attachments[this.currentIndex].ocrText.length > 0 ? 96 : 40)
-        .padding(9).backgroundColor('#101E1A').borderRadius(12).scrollBar(BarState.Auto)
       }.width('100%')
     }
   }
@@ -462,7 +479,7 @@ export struct VaultAttachmentGallery {
           Text('媒体管理').fontSize(20).fontWeight(FontWeight.Bold).fontColor('#18231F')
           Text(`${this.attachments.length} 项媒体`).fontSize(11).fontColor('#738078')
         }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Button('导入').height(36).fontSize(13).fontColor('#20A47D').backgroundColor('#E7F7F1')
+        Button('添加').height(36).fontSize(13).fontColor('#20A47D').backgroundColor('#E7F7F1')
           .borderRadius(18).enabled(!this.busy).onClick((): void => { this.importMedia(); })
         Button(this.selectionMode ? '取消' : '选择').height(36).fontSize(13)
           .fontColor(this.selectionMode ? '#738078' : '#20A47D').backgroundColor('#F0F4F2')
@@ -529,12 +546,14 @@ export struct VaultAttachmentGallery {
           Text(`${this.attachments.length}`).fontSize(10).fontColor('#718078')
             .padding({ left: 7, right: 7, top: 2, bottom: 2 }).backgroundColor('#EDF2F0').borderRadius(10)
           Blank()
-          Button('导入').height(32).fontSize(13).fontColor('#20A47D').backgroundColor('#00000000')
-            .enabled(!this.busy).onClick((): void => { this.importMedia(); })
-          Button('管理').height(32).fontSize(13).fontColor('#20A47D').backgroundColor('#00000000')
-            .enabled(!this.busy).onClick((): void => {
-              this.selectionMode = false; this.selectedIndexes = []; this.overlayMode = 'manager';
-            })
+          if (!this.readOnly) {
+            Button('添加').height(32).fontSize(13).fontColor('#20A47D').backgroundColor('#00000000')
+              .enabled(!this.busy).onClick((): void => { this.importMedia(); })
+            Button('管理').height(32).fontSize(13).fontColor('#20A47D').backgroundColor('#00000000')
+              .enabled(!this.busy).onClick((): void => {
+                this.selectionMode = false; this.selectedIndexes = []; this.overlayMode = 'manager';
+              })
+          }
         }.width('100%').height(34)
         Stack({ alignContent: Alignment.Center }) {
           if (this.switchingMedia) {
@@ -564,7 +583,7 @@ export struct VaultAttachmentGallery {
             if (event.offsetX > 60) { this.move(-1); }
           }))
         this.thumbnailStrip()
-        this.currentImageOcrText()
+        this.currentOcrText()
         this.progressRow()
       } else if (this.attachments.length === 0) {
         VaultMedia({ itemId: this.itemId, mediaType: this.fallbackType })
