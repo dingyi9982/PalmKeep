@@ -1,6 +1,5 @@
 import fs from '@ohos.file.fs';
 import util from '@ohos.util';
-import promptAction from '@ohos.promptAction';
 import { VaultMedia } from './VaultMedia';
 import { VaultThumbnail } from './VaultThumbnail';
 import { VaultAttachmentInput, VaultAttachmentSummary, VaultItemType } from '../models/VaultModels';
@@ -36,6 +35,7 @@ export struct VaultAttachmentGallery {
   aboutToAppear(): void { this.load(); }
 
   private async load(keepIndex: boolean = false): Promise<void> {
+    try {
     const previousIndex = this.currentIndex;
     this.attachments = await vaultRepository.listItemAttachments(this.itemId);
     this.attachmentRevision += 1;
@@ -46,6 +46,10 @@ export struct VaultAttachmentGallery {
     this.switchingMedia = false;
     this.selectedIndexes = this.selectedIndexes.filter((index: number): boolean =>
       this.attachments.some((attachment: VaultAttachmentSummary): boolean => attachment.index === index));
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private move(step: number): void { this.selectMedia(this.currentIndex + step); }
@@ -72,7 +76,12 @@ export struct VaultAttachmentGallery {
   }
 
   private isInGallery(attachment: VaultAttachmentSummary): boolean {
+    try {
     return mediaPickerService.isMediaInGallery(attachment.sourceUri);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private exportPath(attachment: VaultAttachmentSummary): string {
@@ -81,11 +90,12 @@ export struct VaultAttachmentGallery {
   }
 
   private async exportAttachments(selected: VaultAttachmentSummary[]): Promise<void> {
+    try {
     if (this.busy || selected.length === 0) { return; }
     const pending = selected.filter((attachment: VaultAttachmentSummary): boolean => !this.isInGallery(attachment));
     const existingCount = selected.length - pending.length;
     if (pending.length === 0) {
-      promptAction.showToast({ message: '所选素材已存在于系统相册' });
+      this.getUIContext().getPromptAction().showToast({ message: '所选素材已存在于系统相册' });
       return;
     }
     this.busy = true;
@@ -119,15 +129,19 @@ export struct VaultAttachmentGallery {
       }
       await this.load(true);
       const suffix = existingCount > 0 ? `，另有 ${existingCount} 项已在相册中` : '';
-      promptAction.showToast({ message: `已下载 ${pending.length} 项到系统相册${suffix}` });
+      this.getUIContext().getPromptAction().showToast({ message: `已下载 ${pending.length} 项到系统相册${suffix}` });
     } catch (error) {
-      promptAction.showToast({ message: error instanceof Error ? error.message : '保存到相册失败' });
+      this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '保存到相册失败' });
     } finally {
       paths.forEach((path: string): void => { try { fs.unlinkSync(path); } catch (error) {} });
       this.busy = false;
       this.progress = 0;
       this.progressText = '';
       await AbilityContextHolder.setPrivacyMode(true);
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -136,6 +150,7 @@ export struct VaultAttachmentGallery {
   }
 
   private async importMedia(): Promise<void> {
+    try {
     if (this.busy) { return; }
     try {
       const picked = await mediaPickerService.pickMany();
@@ -188,17 +203,21 @@ export struct VaultAttachmentGallery {
         } else if (duplicateCount > 0) {
           message = `已导入 ${newMedia.length} 个素材，${duplicateCount} 个素材已存在，未重复导入`;
         }
-        promptAction.showToast({ message: message });
+        this.getUIContext().getPromptAction().showToast({ message: message });
       } finally {
         temporaryPaths.forEach((path: string): void => { mediaCompressionService.removeTemporary(path); });
         picked.forEach((mediaItem: PickedMedia): void => { mediaItem.data.fill(0); });
       }
     } catch (error) {
-      promptAction.showToast({ message: error instanceof Error ? error.message : '媒体导入失败' });
+      this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '媒体导入失败' });
     } finally {
       this.busy = false;
       this.progress = 0;
       this.progressText = '';
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -244,12 +263,13 @@ export struct VaultAttachmentGallery {
   }
 
   private async deleteSelected(): Promise<void> {
+    try {
     if (this.busy || this.selectedIndexes.length === 0) { return; }
     if (this.selectedIndexes.length === this.attachments.length) {
-      promptAction.showToast({ message: '媒体资料至少需要保留一项' });
+      this.getUIContext().getPromptAction().showToast({ message: '媒体资料至少需要保留一项' });
       return;
     }
-    const result = await promptAction.showDialog({
+    const result = await this.getUIContext().getPromptAction().showDialog({
       title: '删除所选媒体？',
       message: `将从此资料中永久删除 ${this.selectedIndexes.length} 项媒体。`,
       buttons: [{ text: '取消', color: '#738078' }, { text: '删除', color: '#D95656' }]
@@ -261,10 +281,14 @@ export struct VaultAttachmentGallery {
       this.selectionMode = false;
       this.selectedIndexes = [];
       await this.load();
-      promptAction.showToast({ message: '所选媒体已删除' });
+      this.getUIContext().getPromptAction().showToast({ message: '所选媒体已删除' });
     } catch (error) {
-      promptAction.showToast({ message: error instanceof Error ? error.message : '删除媒体失败' });
+      this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '删除媒体失败' });
     } finally { this.busy = false; }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   @Builder

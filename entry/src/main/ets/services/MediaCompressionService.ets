@@ -12,6 +12,7 @@ interface VideoDimensions {
 
 class MediaCompressionService {
   async compress(uri: string, type: VaultItemType, onProgress?: (progress: number) => void): Promise<string> {
+    try {
     if (type === VaultItemType.Video) {
       return await this.compressVideo(uri, onProgress);
     }
@@ -19,10 +20,19 @@ class MediaCompressionService {
     const path = await this.compressImage(uri);
     if (onProgress) { onProgress(100); }
     return path;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   removeTemporary(path: string): void {
+    try {
     try { fs.unlinkSync(path); } catch (error) {}
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private temporaryPath(extension: string): string {
@@ -30,6 +40,7 @@ class MediaCompressionService {
   }
 
   private async compressImage(uri: string): Promise<string> {
+    try {
     const path = this.temporaryPath('.jpg');
     let input: fs.File | undefined = undefined;
     let output: fs.File | undefined = undefined;
@@ -46,7 +57,7 @@ class MediaCompressionService {
       } });
       try {
         packer = image.createImagePacker();
-        const packed = await packer.packing(pixelMap, { format: 'image/jpeg', quality: 82 });
+        const packed = await packer.packToData(pixelMap, { format: 'image/jpeg', quality: 82 });
         output = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
         fs.writeSync(output.fd, packed);
         fs.fsyncSync(output.fd);
@@ -63,9 +74,14 @@ class MediaCompressionService {
       if (input) { fs.closeSync(input); }
       if (output) { fs.closeSync(output); }
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async compressVideo(uri: string, onProgress?: (progress: number) => void): Promise<string> {
+    try {
     const path = this.temporaryPath('.mp4');
     try {
       const dimensions = await this.videoOutputDimensions(uri);
@@ -77,10 +93,15 @@ class MediaCompressionService {
       this.removeTemporary(path);
       throw new Error('视频导入失败，请确认文件完整且系统支持该编码');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async transcodeVideo(uri: string, path: string, dimensions: VideoDimensions,
     onProgress?: (progress: number) => void): Promise<boolean> {
+    try {
     let input: fs.File | undefined = undefined;
     let output: fs.File | undefined = undefined;
     let transcoder: media.AVTranscoder | undefined = undefined;
@@ -124,9 +145,14 @@ class MediaCompressionService {
       try { if (output) { fs.closeSync(output); } } catch (error) {}
     }
     return succeeded;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async videoOutputDimensions(uri: string): Promise<VideoDimensions> {
+    try {
     let file: fs.File | undefined = undefined;
     let extractor: media.AVMetadataExtractor | undefined = undefined;
     try {
@@ -150,6 +176,10 @@ class MediaCompressionService {
       try { if (extractor) { await extractor.release(); } } catch (error) {}
       try { if (file) { fs.closeSync(file); } } catch (error) {}
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private evenDimension(value: number): number {
@@ -158,6 +188,7 @@ class MediaCompressionService {
   }
 
   private async isPlayableVideo(path: string): Promise<boolean> {
+    try {
     let file: fs.File | undefined = undefined;
     let generator: media.AVImageGenerator | undefined = undefined;
     let frame: image.PixelMap | undefined = undefined;
@@ -176,6 +207,10 @@ class MediaCompressionService {
       try { if (frame) { await frame.release(); } } catch (error) {}
       try { if (generator) { await generator.release(); } } catch (error) {}
       try { if (file) { fs.closeSync(file); } } catch (error) {}
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 }

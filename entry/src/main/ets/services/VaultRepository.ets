@@ -19,30 +19,42 @@ class VaultRepositoryImpl {
   private store?: relationalStore.RdbStore;
 
   async open(context: common.UIAbilityContext, databaseKey: Uint8Array): Promise<void> {
-    if (this.store) {
+    try {
+      if (this.store) {
+        databaseKey.fill(0);
+        return;
+      }
       databaseKey.fill(0);
-      return;
+      const config: relationalStore.StoreConfig = {
+        name: DEVELOPMENT_DATABASE_NAME,
+        securityLevel: relationalStore.SecurityLevel.S4,
+        encrypt: false
+      };
+      this.store = await relationalStore.getRdbStore(context, config);
+      await this.createSchema();
+      await this.seedGroups();
+    } catch (error) {
+      databaseKey.fill(0);
+      if (error instanceof Error) { throw error; }
+      throw new Error('打开本地数据库失败');
     }
-    databaseKey.fill(0);
-    const config: relationalStore.StoreConfig = {
-      name: DEVELOPMENT_DATABASE_NAME,
-      securityLevel: relationalStore.SecurityLevel.S4,
-      encrypt: false
-    };
-    this.store = await relationalStore.getRdbStore(context, config);
-    await this.createSchema();
-    await this.seedGroups();
   }
 
   async close(): Promise<void> {
+    try {
     const current = this.store;
     this.store = undefined;
     if (current) {
       await current.close();
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async listGroups(): Promise<VaultGroup[]> {
+    try {
     const result = await this.requireStore().querySql(
       'SELECT id, name, color, created_at FROM vault_groups ORDER BY sort_order ASC, created_at ASC'
     );
@@ -60,9 +72,14 @@ class VaultRepositoryImpl {
       result.close();
     }
     return groups;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async createGroup(name: string, color: string): Promise<number> {
+    try {
     const cleanName = name.trim();
     if (cleanName.length === 0) {
       throw new Error('分组名称不能为空');
@@ -78,9 +95,14 @@ class VaultRepositoryImpl {
       sort_order: sortOrder
     };
     return this.requireStore().insert('vault_groups', values);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async reorderGroups(groupIds: number[]): Promise<void> {
+    try {
     if (groupIds.length === 0) { return; }
     const store = this.requireStore();
     store.beginTransaction();
@@ -93,16 +115,26 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('调整分组顺序失败');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async updateGroup(id: number, name: string, color: string): Promise<void> {
+    try {
     const values: relationalStore.ValuesBucket = { name: name.trim(), color: color };
     const predicates = new relationalStore.RdbPredicates('vault_groups');
     predicates.equalTo('id', id);
     await this.requireStore().update(values, predicates);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async deleteGroup(id: number): Promise<void> {
+    try {
     const store = this.requireStore();
     store.beginTransaction();
     try {
@@ -136,9 +168,14 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('删除分组失败，数据未更改');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async listItems(search: string = '', groupId: number = -1, includeDeleted: boolean = false): Promise<VaultItem[]> {
+    try {
     let sql = 'SELECT id, type, group_id, title, username, password, notes, attachment_uri, ocr_text, created_at, updated_at, deleted_at FROM vault_items WHERE 1 = 1';
     const args: relationalStore.ValueType[] = [];
     if (!includeDeleted) {
@@ -167,9 +204,14 @@ class VaultRepositoryImpl {
       result.close();
     }
     return items;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async searchItems(search: string): Promise<VaultSearchHit[]> {
+    try {
     const cleanSearch = search.trim();
     if (cleanSearch.length === 0) { return []; }
     const pattern = `%${cleanSearch}%`;
@@ -206,9 +248,14 @@ class VaultRepositoryImpl {
       }
     } finally { result.close(); }
     return hits;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async listTrashEntries(type?: VaultItemType): Promise<VaultTrashEntry[]> {
+    try {
     let sql = 'SELECT vault_items.id, vault_items.type, vault_items.group_id, vault_items.title, ' +
       'vault_items.username, vault_items.password, vault_items.notes, vault_items.attachment_uri, ' +
       'vault_items.ocr_text, vault_items.created_at, vault_items.updated_at, vault_items.deleted_at, ' +
@@ -238,6 +285,10 @@ class VaultRepositoryImpl {
       }
     } finally { result.close(); }
     return entries;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private findMatchingTextLine(text: string, search: string): string {
@@ -252,6 +303,7 @@ class VaultRepositoryImpl {
   }
 
   async createItem(input: VaultItemInput): Promise<string> {
+    try {
     if (input.title.trim().length === 0 && input.type !== VaultItemType.Image && input.type !== VaultItemType.Video) {
       throw new Error('名称不能为空');
     }
@@ -282,9 +334,14 @@ class VaultRepositoryImpl {
       await this.importAttachmentChunks(id, input.attachmentUri);
     }
     return id;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async createItems(inputs: VaultItemInput[]): Promise<void> {
+    try {
     if (inputs.length === 0) {
       return;
     }
@@ -299,10 +356,15 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('批量导入失败，未保存任何媒体');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async createItemWithAttachments(input: VaultItemInput, attachments: VaultAttachmentInput[],
     onProgress?: (completed: number, total: number) => void): Promise<string> {
+    try {
     if (attachments.length === 0) { throw new Error('请先选择附件'); }
     const store = this.requireStore();
     store.beginTransaction();
@@ -344,9 +406,14 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('资料保存失败，未写入任何附件');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async listItemAttachments(itemId: string): Promise<VaultAttachmentSummary[]> {
+    try {
     const result = await this.requireStore().querySql(
       `SELECT a.attachment_index, a.type, a.name, a.source_uri, a.ocr_text,
         COALESCE((SELECT SUM(length(p.data)) FROM vault_attachment_parts p
@@ -368,10 +435,15 @@ class VaultRepositoryImpl {
       }
     } finally { result.close(); }
     return attachments;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async replaceItemAttachments(itemId: string, attachments: VaultAttachmentInput[],
     onProgress?: (completed: number, total: number) => void): Promise<void> {
+    try {
     if (attachments.length === 0) { throw new Error('请先选择媒体'); }
     const store = this.requireStore();
     store.beginTransaction();
@@ -402,10 +474,15 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('媒体修改失败，原有媒体未更改');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async appendItemAttachments(itemId: string, attachments: VaultAttachmentInput[],
     onProgress?: (completed: number, total: number) => void): Promise<void> {
+    try {
     if (attachments.length === 0) { return; }
     const existing = await this.listItemAttachments(itemId);
     const startIndex = existing.length > 0 ? existing[existing.length - 1].index + 1 : 0;
@@ -433,16 +510,26 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('附件导入失败，原有内容未更改');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async updateAttachmentSourceUri(itemId: string, attachmentIndex: number, sourceUri: string): Promise<void> {
+    try {
     await this.requireStore().executeSql(
       'UPDATE vault_item_attachments SET source_uri = ? WHERE item_id = ? AND attachment_index = ?',
       [sourceUri, itemId, attachmentIndex]
     );
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async deleteItemAttachments(itemId: string, attachmentIndexes: number[]): Promise<void> {
+    try {
     if (attachmentIndexes.length === 0) { return; }
     const existing = await this.listItemAttachments(itemId);
     const selected = new Set<number>(attachmentIndexes);
@@ -486,9 +573,14 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('删除附件失败，数据未更改');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async updateItem(item: VaultItem): Promise<void> {
+    try {
     if (item.title.trim().length === 0 && item.type !== VaultItemType.Image && item.type !== VaultItemType.Video) {
       throw new Error('名称不能为空');
     }
@@ -506,20 +598,35 @@ class VaultRepositoryImpl {
     const predicates = new relationalStore.RdbPredicates('vault_items');
     predicates.equalTo('id', item.id);
     await this.requireStore().update(values, predicates);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async moveToTrash(id: string): Promise<void> {
+    try {
     await this.requireStore().executeSql(
       'UPDATE vault_items SET deleted_at = ?, updated_at = ? WHERE id = ?',
       [Date.now(), Date.now(), id]
     );
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async restoreFromTrash(id: string): Promise<void> {
+    try {
     await this.restoreTrashItems([id]);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async restoreTrashItems(ids: string[]): Promise<void> {
+    try {
     if (ids.length === 0) { return; }
     const store = this.requireStore();
     store.beginTransaction();
@@ -557,13 +664,23 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('批量恢复失败，数据未更改');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async permanentlyDelete(id: string): Promise<void> {
+    try {
     await this.permanentlyDeleteItems([id]);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async permanentlyDeleteItems(ids: string[]): Promise<void> {
+    try {
     if (ids.length === 0) { return; }
     const store = this.requireStore();
     store.beginTransaction();
@@ -580,9 +697,14 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('永久删除失败，数据未更改');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async emptyTrash(): Promise<void> {
+    try {
     const store = this.requireStore();
     store.beginTransaction();
     try {
@@ -598,9 +720,14 @@ class VaultRepositoryImpl {
       store.rollBack();
       throw new Error('清空回收站失败，数据未更改');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async readAttachment(id: string, attachmentIndex: number = 0): Promise<Uint8Array> {
+    try {
     const store = this.requireStore();
     const partSizeResult = await store.querySql(
       'SELECT COALESCE(SUM(length(data)), 0) FROM vault_attachment_parts WHERE item_id = ? AND attachment_index = ?',
@@ -662,9 +789,14 @@ class VaultRepositoryImpl {
       }
       return data;
     } catch (error) { data.fill(0); throw new Error('附件读取失败，请重新解锁后再试'); }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   async writeAttachmentToFd(id: string, targetFd: number, attachmentIndex: number = 0): Promise<number> {
+    try {
     const store = this.requireStore();
     let total = 0;
     const attachmentParts = await store.querySql(
@@ -712,9 +844,14 @@ class VaultRepositoryImpl {
     }
     if (size > 0 && total !== size) { throw new Error('附件写入不完整'); }
     return total;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private writeAllToFd(targetFd: number, bytes: Uint8Array): number {
+    try {
     let offset = 0;
     while (offset < bytes.length) {
       const remaining = bytes.slice(offset);
@@ -725,9 +862,14 @@ class VaultRepositoryImpl {
       } finally { remaining.fill(0); }
     }
     return offset;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async createSchema(): Promise<void> {
+    try {
     const store = this.requireStore();
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL, created_at INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0)');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_items (id TEXT PRIMARY KEY, type TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL, username TEXT NOT NULL DEFAULT \'\', password TEXT NOT NULL DEFAULT \'\', notes TEXT NOT NULL DEFAULT \'\', attachment_uri TEXT NOT NULL DEFAULT \'\', attachment_data BLOB NOT NULL DEFAULT X\'\', ocr_text TEXT NOT NULL DEFAULT \'\', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL DEFAULT 0)');
@@ -739,9 +881,14 @@ class VaultRepositoryImpl {
     await this.ensureGroupSortOrderColumn();
     await this.ensureAttachmentOcrColumn();
     await store.executeSql('CREATE INDEX IF NOT EXISTS idx_vault_items_group ON vault_items(group_id, deleted_at, updated_at)');
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async ensureGroupSortOrderColumn(): Promise<void> {
+    try {
     const columns = await this.requireStore().querySql('PRAGMA table_info(vault_groups)');
     let hasSortOrder = false;
     try {
@@ -755,9 +902,14 @@ class VaultRepositoryImpl {
         'ALTER TABLE vault_groups ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
       await this.requireStore().executeSql('UPDATE vault_groups SET sort_order = id');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async ensureAttachmentOcrColumn(): Promise<void> {
+    try {
     const columns = await this.requireStore().querySql('PRAGMA table_info(vault_item_attachments)');
     let hasOcrText = false;
     try {
@@ -771,9 +923,14 @@ class VaultRepositoryImpl {
         'ALTER TABLE vault_item_attachments ADD COLUMN ocr_text TEXT NOT NULL DEFAULT \'\''
       );
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async refreshItemOcrText(itemId: string): Promise<void> {
+    try {
     const result = await this.requireStore().querySql(
       'SELECT ocr_text FROM vault_item_attachments WHERE item_id = ? AND type = ? ORDER BY attachment_index ASC',
       [itemId, VaultItemType.Image]
@@ -787,9 +944,14 @@ class VaultRepositoryImpl {
     } finally { result.close(); }
     await this.requireStore().executeSql('UPDATE vault_items SET ocr_text = ? WHERE id = ?',
       [values.join('\n'), itemId]);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async importAttachmentChunks(itemId: string, uri: string): Promise<void> {
+    try {
     let file: fs.File | undefined = undefined;
     try {
       file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
@@ -815,9 +977,14 @@ class VaultRepositoryImpl {
     } finally {
       if (file) { fs.closeSync(file); }
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async importAttachmentParts(itemId: string, attachmentIndex: number, uri: string): Promise<void> {
+    try {
     let file: fs.File | undefined = undefined;
     try {
       file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
@@ -844,9 +1011,14 @@ class VaultRepositoryImpl {
     } finally {
       if (file) { fs.closeSync(file); }
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async restoreDeletedGroup(store: relationalStore.RdbStore, deletedGroupId: number): Promise<number> {
+    try {
     const tombstone = await store.querySql(
       'SELECT name, color, created_at FROM vault_group_tombstones WHERE group_id = ?',
       [deletedGroupId]
@@ -881,9 +1053,14 @@ class VaultRepositoryImpl {
     );
     await store.executeSql('DELETE FROM vault_group_tombstones WHERE group_id = ?', [deletedGroupId]);
     return deletedGroupId;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async permanentlyDeleteTrashItem(store: relationalStore.RdbStore, id: string): Promise<void> {
+    try {
     const result = await store.querySql('SELECT id FROM vault_items WHERE id = ? AND deleted_at > 0', [id]);
     let exists = false;
     try { exists = result.goToFirstRow(); } finally { result.close(); }
@@ -893,9 +1070,14 @@ class VaultRepositoryImpl {
     await store.executeSql('DELETE FROM vault_item_attachments WHERE item_id = ?', [id]);
     await store.executeSql('DELETE FROM vault_attachment_chunks WHERE item_id = ?', [id]);
     await store.executeSql('DELETE FROM vault_items WHERE id = ?', [id]);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async seedGroups(): Promise<void> {
+    try {
     const result = await this.requireStore().querySql('SELECT COUNT(*) AS count_value FROM vault_groups');
     let count: number = 0;
     try {
@@ -911,9 +1093,14 @@ class VaultRepositoryImpl {
     await this.createGroup('账号密码', '#67E8C5');
     await this.createGroup('个人信息', '#75D7FF');
     await this.createGroup('家庭资料', '#F3C969');
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private async saveHistory(id: string): Promise<void> {
+    try {
     const result = await this.requireStore().querySql(
       'SELECT type, group_id, title, username, password, notes, attachment_uri, ocr_text, updated_at FROM vault_items WHERE id = ?',
       [id]
@@ -941,9 +1128,14 @@ class VaultRepositoryImpl {
     } finally {
       result.close();
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private readItem(result: relationalStore.ResultSet): VaultItem {
+    try {
     return {
       id: result.getString(result.getColumnIndex('id')),
       type: result.getString(result.getColumnIndex('type')) as VaultItemType,
@@ -958,6 +1150,10 @@ class VaultRepositoryImpl {
       updatedAt: result.getLong(result.getColumnIndex('updated_at')),
       deletedAt: result.getLong(result.getColumnIndex('deleted_at'))
     };
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('本地数据操作失败');
+    }
   }
 
   private requireStore(): relationalStore.RdbStore {

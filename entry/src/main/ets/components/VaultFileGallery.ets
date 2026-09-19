@@ -1,6 +1,5 @@
 import fs from '@ohos.file.fs';
 import picker from '@ohos.file.picker';
-import promptAction from '@ohos.promptAction';
 import { VaultAttachmentInput, VaultAttachmentSummary, VaultItemType } from '../models/VaultModels';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { vaultRepository } from '../services/VaultRepository';
@@ -21,9 +20,14 @@ export struct VaultFileGallery {
   }
 
   private async load(): Promise<void> {
+    try {
     this.attachments = await vaultRepository.listItemAttachments(this.itemId);
     this.selectedIndexes = this.selectedIndexes.filter((index: number): boolean =>
       this.attachments.some((attachment: VaultAttachmentSummary): boolean => attachment.index === index));
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private isSelected(index: number): boolean {
@@ -56,6 +60,7 @@ export struct VaultFileGallery {
   }
 
   private async addFiles(): Promise<void> {
+    try {
     if (this.busy || this.readOnly) { return; }
     let files: PickedMedia[] = [];
     try {
@@ -89,18 +94,23 @@ export struct VaultFileGallery {
       } else if (duplicateCount > 0) {
         message = `已添加 ${newFiles.length} 个文件，${duplicateCount} 个文件已存在，未重复添加`;
       }
-      promptAction.showToast({ message: message });
+      this.getUIContext().getPromptAction().showToast({ message: message });
     } catch (error) {
-      promptAction.showToast({ message: error instanceof Error ? error.message : '添加文件失败' });
+      this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '添加文件失败' });
     } finally {
       files.forEach((file: PickedMedia): void => { file.data.fill(0); });
       this.busy = false;
       this.progress = 0;
       this.progressText = '';
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async download(attachment: VaultAttachmentSummary): Promise<void> {
+    try {
     if (this.busy) { return; }
     let target: fs.File | undefined = undefined;
     try {
@@ -116,24 +126,29 @@ export struct VaultFileGallery {
       fs.fsyncSync(target.fd);
       if (size <= 0) { throw new Error('文件内容不可用'); }
       this.progress = 100;
-      promptAction.showToast({ message: '文件已保存' });
+      this.getUIContext().getPromptAction().showToast({ message: '文件已保存' });
     } catch (error) {
-      promptAction.showToast({ message: error instanceof Error ? error.message : '文件下载失败' });
+      this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '文件下载失败' });
     } finally {
       if (target) { fs.closeSync(target); }
       this.busy = false;
       this.progress = 0;
       this.progressText = '';
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async deleteSelected(): Promise<void> {
+    try {
     if (this.busy || this.selectedIndexes.length === 0 || this.readOnly) { return; }
     if (this.selectedIndexes.length >= this.attachments.length) {
-      promptAction.showToast({ message: '文件资料至少需要保留一个文件' });
+      this.getUIContext().getPromptAction().showToast({ message: '文件资料至少需要保留一个文件' });
       return;
     }
-    const result = await promptAction.showDialog({
+    const result = await this.getUIContext().getPromptAction().showDialog({
       title: '删除所选文件？',
       message: `将永久删除 ${this.selectedIndexes.length} 个文件，此操作不可恢复。`,
       buttons: [{ text: '取消', color: '#738078' }, { text: '删除', color: '#D95656' }]
@@ -146,12 +161,16 @@ export struct VaultFileGallery {
       this.managing = false;
       this.selectedIndexes = [];
       await this.load();
-      promptAction.showToast({ message: '所选文件已删除' });
+      this.getUIContext().getPromptAction().showToast({ message: '所选文件已删除' });
     } catch (error) {
-      promptAction.showToast({ message: error instanceof Error ? error.message : '删除文件失败' });
+      this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '删除文件失败' });
     } finally {
       this.busy = false;
       this.progressText = '';
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 

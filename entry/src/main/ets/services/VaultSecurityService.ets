@@ -33,11 +33,17 @@ export class VaultSecurityService {
   }
 
   async isInitialized(): Promise<boolean> {
+    try {
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     return store.getSync(KEY_INITIALIZED, false) as boolean;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async getQuickUnlockStatus(): Promise<QuickUnlockStatus> {
+    try {
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     const gestureEnabled = (store.getSync(KEY_GESTURE_WRAPPED, '') as string).length > 0;
     const fingerprintEnabled = (store.getSync(KEY_FINGERPRINT_WRAPPED, '') as string).length > 0;
@@ -46,9 +52,14 @@ export class VaultSecurityService {
       fingerprintEnabled: fingerprintEnabled,
       fingerprintAvailable: this.isFingerprintAvailable()
     };
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async createMasterPassword(password: string): Promise<Uint8Array> {
+    try {
     if (password.length < 8) {
       throw new Error('密码至少需要 8 个字符');
     }
@@ -65,9 +76,14 @@ export class VaultSecurityService {
     verifier.fill(0);
     salt.fill(0);
     return databaseKey;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async unlock(password: string): Promise<Uint8Array | undefined> {
+    try {
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     const saltText = store.getSync(KEY_SALT, '') as string;
     const expectedText = store.getSync(KEY_VERIFIER, '') as string;
@@ -89,9 +105,14 @@ export class VaultSecurityService {
       return undefined;
     }
     return databaseKey;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async enableGesture(pattern: number[], databaseKey: Uint8Array): Promise<void> {
+    try {
     this.validatePattern(pattern);
     const salt = cryptoFramework.createRandom().generateRandomSync(16).data;
     const material = this.derive(this.patternText(pattern), salt);
@@ -108,9 +129,14 @@ export class VaultSecurityService {
     verifier.fill(0);
     wrapped.fill(0);
     salt.fill(0);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async unlockWithGesture(pattern: number[]): Promise<Uint8Array | undefined> {
+    try {
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     const saltText = store.getSync(KEY_GESTURE_SALT, '') as string;
     const verifierText = store.getSync(KEY_GESTURE_VERIFIER, '') as string;
@@ -136,17 +162,27 @@ export class VaultSecurityService {
     wrapped.fill(0);
     salt.fill(0);
     return databaseKey;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async disableGesture(): Promise<void> {
+    try {
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     await store.delete(KEY_GESTURE_SALT);
     await store.delete(KEY_GESTURE_VERIFIER);
     await store.delete(KEY_GESTURE_WRAPPED);
     await store.flush();
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async enableFingerprint(databaseKey: Uint8Array): Promise<void> {
+    try {
     if (!this.isFingerprintAvailable()) {
       throw new Error('当前设备未录入指纹或不支持指纹认证');
     }
@@ -160,9 +196,14 @@ export class VaultSecurityService {
     await store.flush();
     nonce.fill(0);
     wrapped.fill(0);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async unlockWithFingerprint(): Promise<Uint8Array> {
+    try {
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     const nonceText = store.getSync(KEY_FINGERPRINT_NONCE, '') as string;
     const wrappedText = store.getSync(KEY_FINGERPRINT_WRAPPED, '') as string;
@@ -181,15 +222,24 @@ export class VaultSecurityService {
       nonce.fill(0);
       wrapped.fill(0);
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async disableFingerprint(): Promise<void> {
+    try {
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     await store.delete(KEY_FINGERPRINT_NONCE);
     await store.delete(KEY_FINGERPRINT_WRAPPED);
     await store.flush();
     if (await this.fingerprintKeyExists()) {
       await huks.deleteKeyItem(FINGERPRINT_KEY_ALIAS, {});
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -203,6 +253,7 @@ export class VaultSecurityService {
   }
 
   private authenticateFingerprint(title: string): Promise<Uint8Array> {
+    try {
     const challenge = cryptoFramework.createRandom().generateRandomSync(32).data;
     return new Promise<Uint8Array>((resolve, reject): void => {
       const instance = userAuth.getUserAuthInstance({
@@ -239,9 +290,14 @@ export class VaultSecurityService {
         reject(error);
       }
     });
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async ensureFingerprintKey(): Promise<void> {
+    try {
     if (await this.fingerprintKeyExists()) {
       return;
     }
@@ -255,6 +311,10 @@ export class VaultSecurityService {
         { tag: huks.HuksTag.HUKS_TAG_PADDING, value: huks.HuksKeyPadding.HUKS_PADDING_NONE }
       ]
     });
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async fingerprintKeyExists(): Promise<boolean> {
@@ -267,6 +327,7 @@ export class VaultSecurityService {
   }
 
   private async huksCrypt(input: Uint8Array, nonce: Uint8Array, encrypt: boolean): Promise<Uint8Array> {
+    try {
     const authenticationTagLength = 16;
     if (!encrypt && input.length <= authenticationTagLength) {
       throw new Error('指纹凭据已损坏，请使用密码登录后重新启用指纹');
@@ -300,6 +361,10 @@ export class VaultSecurityService {
         authenticationTag.fill(0);
       }
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private validatePattern(pattern: number[]): void {
@@ -332,6 +397,7 @@ export class VaultSecurityService {
   }
 
   private derive(password: string, salt: Uint8Array): Uint8Array {
+    try {
     const kdf = cryptoFramework.createKdf('PBKDF2|SHA256');
     const spec: cryptoFramework.PBKDF2Spec = {
       algName: 'PBKDF2',
@@ -341,6 +407,10 @@ export class VaultSecurityService {
       keySize: 64
     };
     return kdf.generateSecretSync(spec).data;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private constantTimeEquals(left: Uint8Array, right: Uint8Array): boolean {

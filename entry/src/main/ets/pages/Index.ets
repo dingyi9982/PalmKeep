@@ -158,6 +158,7 @@ struct Index {
 
   private async initialize(): Promise<void> {
     try {
+    try {
       const security = new VaultSecurityService(AbilityContextHolder.getContext());
       const initialized = await security.isInitialized();
       if (initialized) {
@@ -172,6 +173,10 @@ struct Index {
       this.errorMessage = this.describeError(error);
       this.screen = 'setup';
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private handleLifecycleLock(): void {
@@ -185,6 +190,7 @@ struct Index {
   }
 
   private async createVault(): Promise<void> {
+    try {
     this.errorMessage = '';
     if (this.masterPassword.length < 8) {
       this.errorMessage = '密码至少需要 8 个字符';
@@ -208,9 +214,14 @@ struct Index {
     } finally {
       this.busy = false;
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async unlockVault(): Promise<void> {
+    try {
     this.errorMessage = '';
     if (this.masterPassword.length === 0) {
       this.errorMessage = '请输入密码';
@@ -233,9 +244,14 @@ struct Index {
     } finally {
       this.busy = false;
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async lockVault(): Promise<void> {
+    try {
     AbilityContextHolder.setPrivacyMode(true);
     this.trashEntries = [];
     this.trashRefreshVersion += 1;
@@ -299,9 +315,14 @@ struct Index {
     await this.refreshQuickUnlockStatus();
     this.unlockMode = this.preferredUnlockMode();
     this.screen = 'locked';
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async openWithKey(key: Uint8Array): Promise<void> {
+    try {
     this.sessionKey.fill(0);
     this.sessionKey = key.slice();
     try {
@@ -311,11 +332,20 @@ struct Index {
       this.sessionKey = new Uint8Array(0);
       throw new Error(this.describeError(error));
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async showVaultScreen(): Promise<void> {
+    try {
     await AbilityContextHolder.setPrivacyMode(false);
     this.screen = 'vault';
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private clearHomeFocus(): void {
@@ -381,10 +411,11 @@ struct Index {
   }
 
   private async requestCloseNewItem(): Promise<void> {
+    try {
     if (this.savingNewItem) { return; }
     if (this.hasUnsavedNewItem()) {
       try {
-        const choice = await promptAction.showDialog({
+        const choice = await this.getUIContext().getPromptAction().showDialog({
           title: '放弃未保存的资料？',
           message: '已填写的内容和已选择的素材将被清空。',
           buttons: [{ text: '继续编辑', color: COLOR_MUTED }, { text: '放弃', color: COLOR_DANGER }]
@@ -396,6 +427,10 @@ struct Index {
     }
     this.resetNewItem();
     this.closeNewItem();
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private applyNewItemType(type: VaultItemType): void {
@@ -419,10 +454,11 @@ struct Index {
   }
 
   private async requestSelectNewItemType(type: VaultItemType): Promise<void> {
+    try {
     if (type === this.newType || this.savingNewItem) { return; }
     if (this.hasUnsavedNewItem()) {
       try {
-        const choice = await promptAction.showDialog({
+        const choice = await this.getUIContext().getPromptAction().showDialog({
           title: '切换资料类型？',
           message: '当前未保存的内容将被清空。',
           buttons: [{ text: '继续编辑', color: COLOR_MUTED }, { text: '切换', color: COLOR_DANGER }]
@@ -434,6 +470,10 @@ struct Index {
       this.resetNewItem();
     }
     this.applyNewItemType(type);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private toggleNewPasswordVisibility(): void {
@@ -442,6 +482,7 @@ struct Index {
   }
 
   private async closeSelectedItem(): Promise<void> {
+    try {
     this.selectedItem = undefined;
     this.selectedAttachmentIndex = -1;
     this.detailGroupId = 0;
@@ -453,6 +494,10 @@ struct Index {
       // 页面数据刷新不应被窗口隐私模式恢复失败阻断。
     }
     await this.reloadVault();
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private toggleDetailPasswordVisibility(): void {
@@ -467,11 +512,16 @@ struct Index {
   }
 
   private async refreshQuickUnlockStatus(): Promise<void> {
+    try {
     const security = new VaultSecurityService(AbilityContextHolder.getContext());
     const status: QuickUnlockStatus = await security.getQuickUnlockStatus();
     this.gestureEnabled = status.gestureEnabled;
     this.fingerprintEnabled = status.fingerprintEnabled;
     this.fingerprintAvailable = status.fingerprintAvailable;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private preferredUnlockMode(): string {
@@ -509,6 +559,7 @@ struct Index {
   }
 
   private async handleGestureSetup(pattern: number[]): Promise<void> {
+    try {
     if (pattern.length < 4) {
       this.gestureSetupHint = '至少连接 4 个点，请重试';
       return;
@@ -530,13 +581,18 @@ struct Index {
       await security.enableGesture(pattern, this.sessionKey);
       await this.refreshQuickUnlockStatus();
       this.closeGestureSetup();
-      promptAction.showToast({ message: '手势登录已启用' });
+      this.getUIContext().getPromptAction().showToast({ message: '手势登录已启用' });
     } catch (error) {
       this.gestureSetupHint = this.describeError(error);
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
   private async unlockWithGesture(pattern: number[]): Promise<void> {
+    try {
     if (Date.now() < this.gestureCooldownUntil) {
       this.errorMessage = '尝试次数过多，请稍后使用密码';
       return;
@@ -567,9 +623,14 @@ struct Index {
     } finally {
       this.busy = false;
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async unlockWithFingerprint(): Promise<void> {
+    try {
     this.busy = true;
     this.errorMessage = '';
     try {
@@ -583,32 +644,47 @@ struct Index {
     } finally {
       this.busy = false;
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async toggleFingerprint(): Promise<void> {
     try {
+    try {
       const security = new VaultSecurityService(AbilityContextHolder.getContext());
       if (this.fingerprintEnabled) {
         await security.disableFingerprint();
-        promptAction.showToast({ message: '指纹登录已关闭' });
+        this.getUIContext().getPromptAction().showToast({ message: '指纹登录已关闭' });
       } else {
         await security.enableFingerprint(this.sessionKey);
-        promptAction.showToast({ message: '指纹登录已启用' });
+        this.getUIContext().getPromptAction().showToast({ message: '指纹登录已启用' });
       }
       await this.refreshQuickUnlockStatus();
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
   private async disableGesture(): Promise<void> {
+    try {
     const security = new VaultSecurityService(AbilityContextHolder.getContext());
     await security.disableGesture();
     await this.refreshQuickUnlockStatus();
-    promptAction.showToast({ message: '手势登录已关闭' });
+    this.getUIContext().getPromptAction().showToast({ message: '手势登录已关闭' });
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async reloadVault(): Promise<void> {
+    try {
     this.groups = await vaultRepository.listGroups();
     this.applyActiveItems(await vaultRepository.listItems());
     if (this.groups.length > 0 && this.newGroupId === 0) {
@@ -620,6 +696,10 @@ struct Index {
     } else {
       this.searchHits = [];
       this.items = await vaultRepository.listItems('', -1);
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -654,6 +734,7 @@ struct Index {
   }
 
   private async refreshTrash(): Promise<void> {
+    try {
     const version = ++this.trashRefreshVersion;
     let filter: VaultItemType | undefined = undefined;
     if (this.trashTypeFilter !== 'all') { filter = this.trashTypeFilter as VaultItemType; }
@@ -662,13 +743,18 @@ struct Index {
     this.trashEntries = entries;
     const visibleIds = new Set<string>(this.trashEntries.map((entry: VaultTrashEntry): string => entry.item.id));
     this.trashSelectedIds = this.trashSelectedIds.filter((id: string): boolean => visibleIds.has(id));
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async trashAction(item: VaultItem, permanent: boolean): Promise<void> {
+    try {
     if (this.trashBusy) { return; }
     try {
       if (permanent) {
-        const choice = await promptAction.showDialog({ title: '永久删除此资料？', message: '删除后无法恢复。',
+        const choice = await this.getUIContext().getPromptAction().showDialog({ title: '永久删除此资料？', message: '删除后无法恢复。',
           buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '永久删除', color: COLOR_DANGER }] });
         if (choice.index !== 1) { return; }
       }
@@ -680,9 +766,13 @@ struct Index {
       }
       await this.refreshTrash();
       await this.reloadVault();
-      promptAction.showToast({ message: permanent ? '资料已永久删除' : '资料已恢复' });
-    } catch (error) { promptAction.showToast({ message: this.describeError(error) }); }
+      this.getUIContext().getPromptAction().showToast({ message: permanent ? '资料已永久删除' : '资料已恢复' });
+    } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private setTrashTypeFilter(filter: string): void {
@@ -723,6 +813,7 @@ struct Index {
   }
 
   private async restoreSelectedTrash(): Promise<void> {
+    try {
     if (this.trashBusy || this.trashSelectedIds.length === 0) { return; }
     const count = this.trashSelectedIds.length;
     this.trashBusy = true;
@@ -731,15 +822,20 @@ struct Index {
       this.closeTrashManagement();
       await this.refreshTrash();
       await this.reloadVault();
-      promptAction.showToast({ message: `已恢复 ${count} 条资料` });
-    } catch (error) { promptAction.showToast({ message: this.describeError(error) }); }
+      this.getUIContext().getPromptAction().showToast({ message: `已恢复 ${count} 条资料` });
+    } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async permanentlyDeleteSelectedTrash(): Promise<void> {
+    try {
     if (this.trashBusy || this.trashSelectedIds.length === 0) { return; }
     const count = this.trashSelectedIds.length;
-    const choice = await promptAction.showDialog({
+    const choice = await this.getUIContext().getPromptAction().showDialog({
       title: `永久删除 ${count} 条资料？`,
       message: '资料、历史记录和附件将被永久删除，且无法恢复。',
       buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '永久删除', color: COLOR_DANGER }]
@@ -751,17 +847,22 @@ struct Index {
       this.closeTrashManagement();
       await this.refreshTrash();
       await this.reloadVault();
-      promptAction.showToast({ message: `已永久删除 ${count} 条资料` });
-    } catch (error) { promptAction.showToast({ message: this.describeError(error) }); }
+      this.getUIContext().getPromptAction().showToast({ message: `已永久删除 ${count} 条资料` });
+    } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async emptyTrash(): Promise<void> {
+    try {
     if (this.trashBusy) { return; }
     this.showTrashMore = false;
     const allEntries = await vaultRepository.listTrashEntries();
     if (allEntries.length === 0) { return; }
-    const choice = await promptAction.showDialog({
+    const choice = await this.getUIContext().getPromptAction().showDialog({
       title: `清空回收站中的 ${allEntries.length} 条资料？`,
       message: '所有资料、历史记录和附件将被永久删除，且无法恢复。',
       buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '清空', color: COLOR_DANGER }]
@@ -773,9 +874,13 @@ struct Index {
       this.closeTrashManagement();
       await this.refreshTrash();
       await this.reloadVault();
-      promptAction.showToast({ message: '回收站已清空' });
-    } catch (error) { promptAction.showToast({ message: this.describeError(error) }); }
+      this.getUIContext().getPromptAction().showToast({ message: '回收站已清空' });
+    } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private trashSection(item: VaultItem): string {
@@ -824,9 +929,14 @@ struct Index {
   }
 
   private async closeTrashDetail(): Promise<void> {
+    try {
     this.selectedTrashEntry = undefined;
     this.revealTrashPassword = false;
     await AbilityContextHolder.setPrivacyMode(false);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private toggleTrashPasswordVisibility(): void {
@@ -835,15 +945,21 @@ struct Index {
   }
 
   private async copyTrashUsername(username: string): Promise<void> {
+    try {
     if (username.length === 0) { return; }
     try {
       const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, username);
       await pasteboard.getSystemPasteboard().setData(data);
-      promptAction.showToast({ message: '账号已复制' });
-    } catch (error) { promptAction.showToast({ message: '复制失败' }); }
+      this.getUIContext().getPromptAction().showToast({ message: '账号已复制' });
+    } catch (error) { this.getUIContext().getPromptAction().showToast({ message: '复制失败' }); }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async applySearch(text: string): Promise<void> {
+    try {
     this.searchText = text;
     this.activeTab = 0;
     const version = ++this.searchVersion;
@@ -858,17 +974,26 @@ struct Index {
       this.searchHits = hits;
       this.items = [];
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async createGroup(): Promise<void> {
+    try {
     try {
       await vaultRepository.createGroup(this.newGroupName, COLOR_PRIMARY);
       this.newGroupName = '';
       this.showNewGroup = false;
       await this.reloadVault();
-      promptAction.showToast({ message: '分组已创建' });
+      this.getUIContext().getPromptAction().showToast({ message: '分组已创建' });
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -907,22 +1032,28 @@ struct Index {
   }
 
   private async renameGroup(group: VaultGroup): Promise<void> {
+    try {
     const name = this.groupRenameName.trim();
     if (name.length === 0) {
-      promptAction.showToast({ message: '分组名称不能为空' });
+      this.getUIContext().getPromptAction().showToast({ message: '分组名称不能为空' });
       return;
     }
     try {
       await vaultRepository.updateGroup(group.id, name, group.color);
       this.closeRenameGroup();
       await this.reloadVault();
-      promptAction.showToast({ message: '分组已重命名' });
+      this.getUIContext().getPromptAction().showToast({ message: '分组已重命名' });
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
   private async requestDeleteGroup(group: VaultGroup): Promise<void> {
+    try {
     try {
       const groupItems = await vaultRepository.listItems('', group.id, false);
       if (groupItems.length > 0) {
@@ -931,7 +1062,7 @@ struct Index {
         this.groupDeleteConfirmName = '';
         return;
       }
-      const choice = await promptAction.showDialog({
+      const choice = await this.getUIContext().getPromptAction().showDialog({
         title: `删除“${group.name}”？`,
         message: '确定删除该分组吗？',
         buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '删除', color: COLOR_DANGER }]
@@ -940,19 +1071,29 @@ struct Index {
         await this.deleteGroup(group);
       }
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
   private async confirmDeleteGroup(group: VaultGroup): Promise<void> {
+    try {
     if (this.groupDeleteConfirmName.trim() !== group.name) {
-      promptAction.showToast({ message: '输入的分组名称不一致' });
+      this.getUIContext().getPromptAction().showToast({ message: '输入的分组名称不一致' });
       return;
     }
     await this.deleteGroup(group);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async deleteGroup(group: VaultGroup): Promise<void> {
+    try {
     try {
       const hadItems = this.groupPendingDeleteCount > 0;
       await vaultRepository.deleteGroup(group.id);
@@ -964,13 +1105,18 @@ struct Index {
         this.newGroupId = 0;
       }
       await this.reloadVault();
-      promptAction.showToast({ message: hadItems ? '分组及其当前资料已永久删除' : '分组已删除' });
+      this.getUIContext().getPromptAction().showToast({ message: hadItems ? '分组及其当前资料已永久删除' : '分组已删除' });
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
   private async chooseMedia(fromFile: boolean = false): Promise<void> {
+    try {
     try {
       if (!fromFile && this.newType === VaultItemType.Image) {
         const preselectedUris: string[] = [];
@@ -1002,11 +1148,16 @@ struct Index {
       this.pendingFiles = files;
       this.selectedFileCount = files.length;
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
   private async recognizePendingMedia(): Promise<void> {
+    try {
     if (this.pendingMedia.length === 0) { return; }
     const imageCount = this.pendingMedia.filter((media: PickedMedia): boolean =>
       media.type === VaultItemType.Image).length;
@@ -1031,6 +1182,10 @@ struct Index {
         this.recognizingMedia = false;
         this.recognitionProgressText = '';
       }
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -1065,6 +1220,7 @@ struct Index {
   }
 
   private async createItem(): Promise<void> {
+    try {
     if (this.savingNewItem) { return; }
     this.savingNewItem = true;
     this.saveProgress = 0;
@@ -1116,7 +1272,7 @@ struct Index {
         this.resetNewItem();
         this.closeNewItem();
         await this.reloadVault();
-        promptAction.showToast({ message: `已导入 ${importedCount} 项媒体` });
+        this.getUIContext().getPromptAction().showToast({ message: `已导入 ${importedCount} 项媒体` });
         return;
       }
       if (this.newType === VaultItemType.File) {
@@ -1155,7 +1311,7 @@ struct Index {
         this.resetNewItem();
         this.closeNewItem();
         await this.reloadVault();
-        promptAction.showToast({ message: `已导入 ${importedCount} 个文件` });
+        this.getUIContext().getPromptAction().showToast({ message: `已导入 ${importedCount} 个文件` });
         return;
       }
       const input: VaultItemInput = {
@@ -1173,12 +1329,16 @@ struct Index {
       this.resetNewItem();
       this.closeNewItem();
       await this.reloadVault();
-      promptAction.showToast({ message: '资料已保存' });
+      this.getUIContext().getPromptAction().showToast({ message: '资料已保存' });
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     } finally {
       this.savingNewItem = false;
       this.saveProgressText = '';
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -1195,6 +1355,7 @@ struct Index {
   }
 
   private async saveSelectedItem(): Promise<void> {
+    try {
     const item = this.selectedItem;
     if (!item) {
       return;
@@ -1217,13 +1378,18 @@ struct Index {
     try {
       await vaultRepository.updateItem(updated);
       await this.closeSelectedItem();
-      promptAction.showToast({ message: moved ? '资料已移动并保存' : '修改已保存，旧版本已归档' });
+      this.getUIContext().getPromptAction().showToast({ message: moved ? '资料已移动并保存' : '修改已保存，旧版本已归档' });
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
   private async trashSelectedItem(): Promise<void> {
+    try {
     const item = this.selectedItem;
     if (!item) {
       return;
@@ -1234,24 +1400,33 @@ struct Index {
       this.items = this.items.filter((value: VaultItem): boolean => value.id !== item.id);
       await this.closeSelectedItem();
       await this.refreshTrash();
-      promptAction.showToast({ message: '资料已移入回收站' });
+      this.getUIContext().getPromptAction().showToast({ message: '资料已移入回收站' });
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
   private async downloadAttachment(item: VaultItem): Promise<void> {
+    try {
     let data = new Uint8Array(0);
     try {
       data = await vaultRepository.readAttachment(item.id);
       if (data.length === 0) { throw new Error('此资料没有可导出的附件'); }
       const fileName = mediaPickerService.downloadName(item.title, item.attachmentUri, item.type);
       const saved = await mediaPickerService.saveCopy(data, fileName);
-      if (saved) { promptAction.showToast({ message: '已导出解密副本' }); }
+      if (saved) { this.getUIContext().getPromptAction().showToast({ message: '已导出解密副本' }); }
     } catch (error) {
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     } finally {
       data.fill(0);
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -1366,6 +1541,7 @@ struct Index {
   }
 
   private async chooseCategorySort(): Promise<void> {
+    try {
     const values: string[] = ['updated', 'created', 'name'];
     const buttons: [promptAction.Button, promptAction.Button, promptAction.Button] = [
       { text: `${this.categorySort === 'updated' ? '✓  ' : ''}最近修改`,
@@ -1377,10 +1553,14 @@ struct Index {
     ];
     try {
       const result: promptAction.ActionMenuSuccessResponse =
-        await promptAction.showActionMenu({ title: '选择排序方式', buttons: buttons });
+        await this.getUIContext().getPromptAction().showActionMenu({ title: '选择排序方式', buttons: buttons });
       if (result.index >= 0 && result.index < values.length) { this.categorySort = values[result.index]; }
     } catch (error) {
       // 用户关闭菜单时保持当前排序，不需要提示错误。
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -2012,6 +2192,7 @@ struct Index {
   }
 
   private async finishGroupDrag(): Promise<void> {
+    try {
     const sourceId = this.draggingGroupId;
     const accepted = this.groupDragAccepted && !this.groupDragCancelled;
     const originalGroups = this.groupsBeforeDrag.slice();
@@ -2037,7 +2218,11 @@ struct Index {
       await vaultRepository.reorderGroups(reordered.map((group: VaultGroup): number => group.id));
     } catch (error) {
       this.groups = originalGroups;
-      promptAction.showToast({ message: this.describeError(error) });
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 

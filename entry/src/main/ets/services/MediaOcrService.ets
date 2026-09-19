@@ -12,6 +12,7 @@ class MediaOcrService {
   private readonly maxDimension: number = 2560;
 
   async recognizeBatch(items: OcrMediaInput[], onProgress?: (completed: number, total: number) => void): Promise<string[]> {
+    try {
     const results: string[] = items.map((): string => '');
     const imageCount = items.filter((item: OcrMediaInput): boolean => item.type === VaultItemType.Image).length;
     if (imageCount === 0) { return results; }
@@ -38,9 +39,14 @@ class MediaOcrService {
       }
     }
     return results;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async recognizeImage(uri: string): Promise<string> {
+    try {
     let file: fs.File | undefined = undefined;
     let source: image.ImageSource | undefined = undefined;
     let pixelMap: image.PixelMap | undefined = undefined;
@@ -62,6 +68,10 @@ class MediaOcrService {
       if (pixelMap) { await pixelMap.release(); }
       if (source) { await source.release(); }
       if (file) { fs.closeSync(file); }
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 }

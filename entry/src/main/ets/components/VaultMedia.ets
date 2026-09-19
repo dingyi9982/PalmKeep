@@ -49,6 +49,7 @@ export struct VaultMedia {
   }
 
   private async releaseVideo(): Promise<void> {
+    try {
     const player = this.player;
     this.player = undefined;
     try { if (player) { await player.release(); } } finally {
@@ -58,9 +59,14 @@ export struct VaultMedia {
         this.videoPath = '';
       }
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async prepareVideo(): Promise<void> {
+    try {
     if (this.starting || !this.file || this.surfaceId.length === 0 || this.disposed) { return; }
     this.starting = true;
     try {
@@ -126,9 +132,14 @@ export struct VaultMedia {
       this.starting = false;
       if (!this.disposed) { this.message = '无法创建视频播放器'; }
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async handlePlayerError(failedPlayer: media.AVPlayer): Promise<void> {
+    try {
     if (this.disposed || this.player !== failedPlayer) { return; }
     this.player = undefined;
     this.ready = false;
@@ -144,21 +155,36 @@ export struct VaultMedia {
       return;
     }
     this.message = '视频暂时无法播放，请切换后重试';
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async waitForSurface(milliseconds: number): Promise<void> {
+    try {
     await new Promise<void>((resolve): void => {
       setTimeout((): void => { resolve(); }, milliseconds);
     });
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async togglePlayback(): Promise<void> {
     try {
+    try {
       if (this.playing) { await this.player?.pause(); } else { await this.player?.play(); }
     } catch (error) { this.message = '播放失败，请重新打开'; }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async openVideoFullScreen(): Promise<void> {
+    try {
     if (!this.ready || !this.requestFullScreen) { return; }
     const resumePlaying = this.playing;
     const resumeTime = this.playbackTime;
@@ -168,6 +194,10 @@ export struct VaultMedia {
       // Fullscreen can still resume from the last reported position.
     }
     this.requestFullScreen(resumeTime, resumePlaying);
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private formatTime(milliseconds: number): string {
@@ -178,6 +208,7 @@ export struct VaultMedia {
   }
 
   private async load(): Promise<void> {
+    try {
     let data: Uint8Array = new Uint8Array(0);
     try {
       if (this.mediaType === VaultItemType.Image) {
@@ -216,6 +247,10 @@ export struct VaultMedia {
         this.videoPath = '';
       }
     } finally { data.fill(0); }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   @Builder

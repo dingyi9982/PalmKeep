@@ -30,15 +30,21 @@ export struct VaultThumbnail {
   }
 
   private async imageThumbnail(data: Uint8Array): Promise<image.PixelMap> {
+    try {
     const source = image.createImageSource(data.buffer as ArrayBuffer);
     try {
       return await source.createPixelMap({ desiredSize: { width: 160, height: 160 } });
     } finally {
       await source.release();
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async videoThumbnail(data: Uint8Array): Promise<image.PixelMap> {
+    try {
     const path = `${AbilityContextHolder.getContext().cacheDir}/pv-thumb-${util.generateRandomUUID()}`;
     const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
     let generator: media.AVImageGenerator | undefined = undefined;
@@ -68,9 +74,14 @@ export struct VaultThumbnail {
       }
       fs.closeSync(file);
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async uriThumbnail(uri: string): Promise<image.PixelMap> {
+    try {
     const file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
     let generator: media.AVImageGenerator | undefined = undefined;
     let source: image.ImageSource | undefined = undefined;
@@ -88,9 +99,14 @@ export struct VaultThumbnail {
       if (source) { await source.release(); }
       fs.closeSync(file);
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async storedVideoThumbnail(): Promise<image.PixelMap> {
+    try {
     const path = `${AbilityContextHolder.getContext().cacheDir}/pv-thumb-${util.generateRandomUUID()}`;
     const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
     let generator: media.AVImageGenerator | undefined = undefined;
@@ -107,9 +123,14 @@ export struct VaultThumbnail {
       if (generator) { await generator.release(); }
       fs.closeSync(file);
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   private async load(): Promise<void> {
+    try {
     let data = new Uint8Array(0);
     let ownsData = false;
     try {
@@ -147,6 +168,10 @@ export struct VaultThumbnail {
       if (ownsData) {
         data.fill(0);
       }
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 

@@ -18,6 +18,7 @@ export class MediaPickerService {
   private readonly maxImportBytes: number = 256 * 1024 * 1024;
 
   async pickFile(type: VaultItemType): Promise<PickedMedia | undefined> {
+    try {
     const options = new picker.DocumentSelectOptions();
     options.maxSelectNumber = 1;
     if (type === VaultItemType.Video) {
@@ -28,9 +29,14 @@ export class MediaPickerService {
     const uris = await new picker.DocumentViewPicker().select(options);
     if (uris.length === 0) { return undefined; }
     return { uri: uris[0], type: type, data: this.readMedia(uris[0]), name: this.fileName(uris[0], type), ocrText: '' };
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async pickFiles(): Promise<PickedMedia[]> {
+    try {
     const options = new picker.DocumentSelectOptions();
     options.maxSelectNumber = 50;
     const uris = await new picker.DocumentViewPicker().select(options);
@@ -51,9 +57,14 @@ export class MediaPickerService {
       picked.forEach((file: PickedMedia): void => { file.data.fill(0); });
       throw new Error('文件导入失败，请确认所选文件完整且大小受支持');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async pickOne(preferredType: VaultItemType = VaultItemType.Image): Promise<PickedMedia | undefined> {
+    try {
     const options = new photoAccessHelper.PhotoSelectOptions();
     options.MIMEType = preferredType === VaultItemType.Video ?
       photoAccessHelper.PhotoViewMIMETypes.VIDEO_TYPE : photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
@@ -74,9 +85,14 @@ export class MediaPickerService {
       name: this.fileName(uri, isVideo ? VaultItemType.Video : VaultItemType.Image),
       ocrText: ''
     };
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async pickMany(preselectedUris: string[] = []): Promise<PickedMedia[]> {
+    try {
     const options = new photoAccessHelper.PhotoSelectOptions();
     options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_VIDEO_TYPE;
     options.maxSelectNumber = 50;
@@ -94,9 +110,14 @@ export class MediaPickerService {
       picked.forEach((media: PickedMedia): void => { media.data.fill(0); });
       throw new Error('媒体导入失败，请确认所选文件完整且受支持');
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async saveCopy(data: Uint8Array, suggestedName: string): Promise<boolean> {
+    try {
     const options = new picker.DocumentSaveOptions();
     options.newFileNames = [this.safeFileName(suggestedName)];
     const uris = await new picker.DocumentViewPicker().save(options);
@@ -116,14 +137,24 @@ export class MediaPickerService {
     } finally {
       if (file) { fs.closeSync(file); }
     }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async saveMediaToGallery(path: string, type: VaultItemType, title: string): Promise<string> {
+    try {
     const saved = await this.saveMediaBatchToGallery([path], [type], [title]);
     return saved.length > 0 ? saved[0] : '';
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   async saveMediaBatchToGallery(paths: string[], types: VaultItemType[], titles: string[]): Promise<string[]> {
+    try {
     if (paths.length === 0 || paths.length !== types.length || paths.length !== titles.length) { return []; }
     const helper = photoAccessHelper.getPhotoAccessHelper(AbilityContextHolder.getContext());
     const configs: photoAccessHelper.PhotoCreationConfig[] = [];
@@ -153,9 +184,14 @@ export class MediaPickerService {
       }
     }
     return albumUris;
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
   }
 
   isMediaInGallery(uri: string): boolean {
+    try {
     if (uri.length === 0) { return false; }
     let file: fs.File | undefined = undefined;
     try {
@@ -165,6 +201,10 @@ export class MediaPickerService {
       return false;
     } finally {
       if (file) { fs.closeSync(file); }
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -189,6 +229,7 @@ export class MediaPickerService {
   }
 
   private async detectMediaType(uri: string): Promise<VaultItemType> {
+    try {
     let file: fs.File | undefined = undefined;
     let source: image.ImageSource | undefined = undefined;
     try {
@@ -201,6 +242,10 @@ export class MediaPickerService {
     } finally {
       if (source) { await source.release(); }
       if (file) { fs.closeSync(file); }
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 
@@ -216,6 +261,7 @@ export class MediaPickerService {
   }
 
   private readMedia(uri: string): Uint8Array {
+    try {
     let file: fs.File | undefined = undefined;
     try {
       file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
@@ -236,6 +282,10 @@ export class MediaPickerService {
       if (file) {
         fs.closeSync(file);
       }
+    }
+      } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
     }
   }
 }
