@@ -5,6 +5,7 @@ import util from '@ohos.util';
 import { VaultItemType } from '../models/VaultModels';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { vaultRepository } from '../services/VaultRepository';
+import { normalizeError } from '../services/ErrorUtils';
 
 @Component
 export struct VaultThumbnail {
@@ -38,8 +39,7 @@ export struct VaultThumbnail {
       await source.release();
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -75,8 +75,7 @@ export struct VaultThumbnail {
       fs.closeSync(file);
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -100,8 +99,7 @@ export struct VaultThumbnail {
       fs.closeSync(file);
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -124,8 +122,7 @@ export struct VaultThumbnail {
       fs.closeSync(file);
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -170,8 +167,7 @@ export struct VaultThumbnail {
       }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 

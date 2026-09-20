@@ -1,6 +1,7 @@
 import image from '@ohos.multimedia.image';
 import media from '@ohos.multimedia.media';
 import fs from '@ohos.file.fs';
+import { normalizeError } from './ErrorUtils';
 import util from '@ohos.util';
 import { AbilityContextHolder } from './AbilityContextHolder';
 import { VaultItemType } from '../models/VaultModels';
@@ -21,8 +22,7 @@ class MediaCompressionService {
     if (onProgress) { onProgress(100); }
     return path;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -30,8 +30,7 @@ class MediaCompressionService {
     try {
     try { fs.unlinkSync(path); } catch (error) {}
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -75,8 +74,7 @@ class MediaCompressionService {
       if (output) { fs.closeSync(output); }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -94,8 +92,7 @@ class MediaCompressionService {
       throw new Error('视频导入失败，请确认文件完整且系统支持该编码');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -146,8 +143,7 @@ class MediaCompressionService {
     }
     return succeeded;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -177,8 +173,7 @@ class MediaCompressionService {
       try { if (file) { fs.closeSync(file); } } catch (error) {}
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -209,8 +204,7 @@ class MediaCompressionService {
       try { if (file) { fs.closeSync(file); } } catch (error) {}
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 }

@@ -3,6 +3,7 @@ import cryptoFramework from '@ohos.security.cryptoFramework';
 import huks from '@ohos.security.huks';
 import userAuth from '@ohos.userIAM.userAuth';
 import util from '@ohos.util';
+import { normalizeError } from './ErrorUtils';
 import common from '@ohos.app.ability.common';
 import { BusinessError } from '@ohos.base';
 
@@ -51,8 +52,7 @@ export class VaultSecurityService {
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     return store.getSync(KEY_INITIALIZED, false) as boolean;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -74,8 +74,7 @@ export class VaultSecurityService {
       autoLockMinutes: store.getSync(KEY_AUTO_LOCK_MINUTES, 10) as number
     };
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -98,8 +97,7 @@ export class VaultSecurityService {
     salt.fill(0);
     return databaseKey;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -148,8 +146,7 @@ export class VaultSecurityService {
     await store.flush();
     return databaseKey;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -176,8 +173,7 @@ export class VaultSecurityService {
     wrapped.fill(0);
     salt.fill(0);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -229,8 +225,7 @@ export class VaultSecurityService {
     if (lockedOut) { throw new Error('手势错误次数过多，请在 30 秒后重试'); }
     return databaseKey;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -250,8 +245,7 @@ export class VaultSecurityService {
     }
     await store.flush();
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -274,8 +268,7 @@ export class VaultSecurityService {
     nonce.fill(0);
     wrapped.fill(0);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -303,8 +296,7 @@ export class VaultSecurityService {
       wrapped.fill(0);
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -324,8 +316,7 @@ export class VaultSecurityService {
       await huks.deleteKeyItem(FINGERPRINT_KEY_ALIAS, {});
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -346,8 +337,7 @@ export class VaultSecurityService {
       nonce.fill(0);
       wrapped.fill(0);
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -373,8 +363,7 @@ export class VaultSecurityService {
         wrapped.fill(0);
       }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -394,8 +383,7 @@ export class VaultSecurityService {
         await huks.deleteKeyItem(FINGERPRINT_KEY_ALIAS, {});
       }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -405,8 +393,7 @@ export class VaultSecurityService {
       if (!currentKey) { throw new Error('当前密码不正确'); }
       return await this.replacePassword(currentKey, newPassword);
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -416,8 +403,7 @@ export class VaultSecurityService {
       return await this.replacePassword(authenticatedKey, newPassword);
     } catch (error) {
       authenticatedKey.fill(0);
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -432,8 +418,7 @@ export class VaultSecurityService {
         // Preferences are authoritative; stale hardware credentials can no longer be reached.
       }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -451,8 +436,7 @@ export class VaultSecurityService {
       await store.put(KEY_PREFERRED_UNLOCK_MODE, mode);
       await store.flush();
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -465,8 +449,7 @@ export class VaultSecurityService {
       await store.put(KEY_AUTO_LOCK_MINUTES, minutes);
       await store.flush();
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -515,8 +498,7 @@ export class VaultSecurityService {
       return databaseKey;
     } catch (error) {
       authenticatedKey.fill(0);
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -591,8 +573,7 @@ export class VaultSecurityService {
       }
     });
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -612,8 +593,7 @@ export class VaultSecurityService {
       ]
     });
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -662,8 +642,7 @@ export class VaultSecurityService {
       }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -708,8 +687,7 @@ export class VaultSecurityService {
     };
     return kdf.generateSecretSync(spec).data;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 

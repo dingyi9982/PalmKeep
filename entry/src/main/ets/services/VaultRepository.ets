@@ -1,6 +1,7 @@
 import relationalStore from '@ohos.data.relationalStore';
 import common from '@ohos.app.ability.common';
 import fs from '@ohos.file.fs';
+import { normalizeError } from './ErrorUtils';
 import {
   createVaultId,
   VaultAttachmentInput,
@@ -54,8 +55,7 @@ class VaultRepositoryImpl {
       await current.close();
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -94,8 +94,7 @@ class VaultRepositoryImpl {
     }
     return groups;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -117,8 +116,7 @@ class VaultRepositoryImpl {
     };
     return this.requireStore().insert('vault_groups', values);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -137,8 +135,7 @@ class VaultRepositoryImpl {
       throw new Error('调整分组顺序失败');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -149,8 +146,7 @@ class VaultRepositoryImpl {
     predicates.equalTo('id', id);
     await this.requireStore().update(values, predicates);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -180,8 +176,7 @@ class VaultRepositoryImpl {
       throw new Error('删除分组失败，数据未更改');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -216,8 +211,7 @@ class VaultRepositoryImpl {
     }
     return items;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -260,8 +254,7 @@ class VaultRepositoryImpl {
     } finally { result.close(); }
     return hits;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -297,8 +290,7 @@ class VaultRepositoryImpl {
     } finally { result.close(); }
     return entries;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -349,8 +341,7 @@ class VaultRepositoryImpl {
     await this.requireStore().insert('vault_items', values);
     return id;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -398,8 +389,7 @@ class VaultRepositoryImpl {
       throw new Error('资料保存失败，未写入任何附件');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -427,8 +417,7 @@ class VaultRepositoryImpl {
     } finally { result.close(); }
     return attachments;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -463,8 +452,7 @@ class VaultRepositoryImpl {
       throw new Error('媒体修改失败，原有媒体未更改');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -499,8 +487,7 @@ class VaultRepositoryImpl {
       throw new Error('附件导入失败，原有内容未更改');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -511,8 +498,7 @@ class VaultRepositoryImpl {
       [sourceUri, itemId, attachmentIndex]
     );
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -562,8 +548,7 @@ class VaultRepositoryImpl {
       throw new Error('删除附件失败，数据未更改');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -583,8 +568,7 @@ class VaultRepositoryImpl {
     predicates.equalTo('id', item.id);
     await this.requireStore().update(values, predicates);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -595,8 +579,7 @@ class VaultRepositoryImpl {
       [Date.now(), Date.now(), id]
     );
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -604,8 +587,7 @@ class VaultRepositoryImpl {
     try {
     await this.restoreTrashItems([id]);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -649,8 +631,7 @@ class VaultRepositoryImpl {
       throw new Error('批量恢复失败，数据未更改');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -658,8 +639,7 @@ class VaultRepositoryImpl {
     try {
     await this.permanentlyDeleteItems([id]);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -682,8 +662,7 @@ class VaultRepositoryImpl {
       throw new Error('永久删除失败，数据未更改');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -705,8 +684,7 @@ class VaultRepositoryImpl {
       throw new Error('清空回收站失败，数据未更改');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -739,8 +717,7 @@ class VaultRepositoryImpl {
       return data;
     } catch (error) { data.fill(0); throw new Error('附件读取失败，请重新解锁后再试'); }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -762,8 +739,7 @@ class VaultRepositoryImpl {
     } finally { attachmentParts.close(); }
     return total;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -780,8 +756,7 @@ class VaultRepositoryImpl {
     }
     return offset;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -797,8 +772,7 @@ class VaultRepositoryImpl {
     await this.ensureGroupSortOrderColumn();
     await store.executeSql('CREATE INDEX IF NOT EXISTS idx_vault_items_group ON vault_items(group_id, deleted_at, updated_at)');
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -818,8 +792,7 @@ class VaultRepositoryImpl {
       await this.requireStore().executeSql('UPDATE vault_groups SET sort_order = id');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -839,8 +812,7 @@ class VaultRepositoryImpl {
     await this.requireStore().executeSql('UPDATE vault_items SET ocr_text = ? WHERE id = ?',
       [values.join('\n'), itemId]);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -873,8 +845,7 @@ class VaultRepositoryImpl {
       if (file) { fs.closeSync(file); }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -915,8 +886,7 @@ class VaultRepositoryImpl {
     await store.executeSql('DELETE FROM vault_group_tombstones WHERE group_id = ?', [deletedGroupId]);
     return deletedGroupId;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -930,8 +900,7 @@ class VaultRepositoryImpl {
     await store.executeSql('DELETE FROM vault_item_attachments WHERE item_id = ?', [id]);
     await store.executeSql('DELETE FROM vault_items WHERE id = ?', [id]);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -953,8 +922,7 @@ class VaultRepositoryImpl {
     await this.createGroup('个人信息', '#75D7FF');
     await this.createGroup('家庭资料', '#F3C969');
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -974,8 +942,7 @@ class VaultRepositoryImpl {
       deletedAt: result.getLong(result.getColumnIndex('deleted_at'))
     };
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
+      throw normalizeError(error);
     }
   }
 

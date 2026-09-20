@@ -3,6 +3,7 @@ import picker from '@ohos.file.picker';
 import { VaultAttachmentInput, VaultAttachmentSummary, VaultItemType } from '../models/VaultModels';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { vaultRepository } from '../services/VaultRepository';
+import { normalizeError } from '../services/ErrorUtils';
 
 @Component
 export struct VaultFileGallery {
@@ -25,8 +26,7 @@ export struct VaultFileGallery {
     this.selectedIndexes = this.selectedIndexes.filter((index: number): boolean =>
       this.attachments.some((attachment: VaultAttachmentSummary): boolean => attachment.index === index));
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -102,8 +102,7 @@ export struct VaultFileGallery {
       this.progressText = '';
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -134,8 +133,7 @@ export struct VaultFileGallery {
       this.progressText = '';
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -167,8 +165,7 @@ export struct VaultFileGallery {
       this.progressText = '';
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 

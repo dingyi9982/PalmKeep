@@ -1,6 +1,5 @@
 import promptAction from '@ohos.promptAction';
 import pasteboard from '@ohos.pasteboard';
-import { BusinessError } from '@ohos.base';
 import { VERSION_CODE, VERSION_NAME } from 'BuildProfile';
 import { VaultLoadingScreen, VaultLockedScreen, VaultSetupScreen } from '../components/VaultAuthScreens';
 import { VaultSettingsPanel } from '../components/VaultSettingsPanel';
@@ -20,6 +19,7 @@ import { VaultAttachmentGallery } from '../components/VaultAttachmentGallery';
 import { VaultFileSummary } from '../components/VaultFileSummary';
 import { VaultFileGallery } from '../components/VaultFileGallery';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
+import { normalizeError } from '../services/ErrorUtils';
 import { QuickUnlockStatus, VaultSecurityService } from '../services/VaultSecurityService';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { mediaCompressionService } from '../services/MediaCompressionService';
@@ -211,8 +211,7 @@ struct Index {
       this.screen = 'setup';
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -253,8 +252,7 @@ struct Index {
       this.busy = false;
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -283,8 +281,7 @@ struct Index {
       this.busy = false;
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -354,8 +351,7 @@ struct Index {
     this.unlockMode = this.preferredUnlockMode();
     this.screen = 'locked';
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -371,8 +367,7 @@ struct Index {
       throw new Error(this.describeError(error));
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -381,8 +376,7 @@ struct Index {
     await AbilityContextHolder.setPrivacyMode(false);
     this.screen = 'vault';
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -466,8 +460,7 @@ struct Index {
     this.resetNewItem();
     this.closeNewItem();
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -509,8 +502,7 @@ struct Index {
     }
     this.applyNewItemType(type);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -528,8 +520,7 @@ struct Index {
     }
     if (refresh) { await this.refreshData(); }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -551,8 +542,7 @@ struct Index {
     this.preferredUnlock = status.preferredUnlockMode;
     this.autoLockMinutes = status.autoLockMinutes;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -627,8 +617,7 @@ struct Index {
       this.gestureSetupHint = this.describeError(error);
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -665,8 +654,7 @@ struct Index {
       this.busy = false;
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -686,8 +674,7 @@ struct Index {
       this.busy = false;
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -707,8 +694,7 @@ struct Index {
         this.busy = false;
       }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -736,8 +722,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -765,8 +750,7 @@ struct Index {
         this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
       }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -815,8 +799,7 @@ struct Index {
         this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
       }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -852,8 +835,7 @@ struct Index {
         this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
       }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -902,8 +884,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -950,8 +931,7 @@ struct Index {
         this.recoveryBusy = false;
       }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -990,8 +970,7 @@ struct Index {
         this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
       }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1028,8 +1007,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
     } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1044,8 +1022,7 @@ struct Index {
         `手势登录已关闭，已将${this.unlockModeLabel(this.preferredUnlock)}设为首选`
     });
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1079,8 +1056,7 @@ struct Index {
       this.items = activeItems.slice();
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1125,8 +1101,7 @@ struct Index {
     const visibleIds = new Set<string>(this.trashEntries.map((entry: VaultTrashEntry): string => entry.item.id));
     this.trashSelectedIds = this.trashSelectedIds.filter((id: string): boolean => visibleIds.has(id));
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1150,8 +1125,7 @@ struct Index {
     } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1205,8 +1179,7 @@ struct Index {
     } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1229,8 +1202,7 @@ struct Index {
     } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1255,8 +1227,7 @@ struct Index {
     } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1311,8 +1282,7 @@ struct Index {
     this.revealTrashPassword = false;
     await AbilityContextHolder.setPrivacyMode(false);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1330,8 +1300,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: '账号已复制' });
     } catch (error) { this.getUIContext().getPromptAction().showToast({ message: '复制失败' }); }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1351,8 +1320,7 @@ struct Index {
       this.items = [];
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1368,8 +1336,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1423,8 +1390,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1450,8 +1416,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1463,8 +1428,7 @@ struct Index {
     }
     await this.deleteGroup(group);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1486,8 +1450,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1527,8 +1490,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1560,8 +1522,7 @@ struct Index {
       }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1699,8 +1660,7 @@ struct Index {
       this.saveProgressText = '';
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1744,8 +1704,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1764,8 +1723,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -1795,14 +1753,7 @@ struct Index {
   }
 
   private describeError(error: Object): string {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    const businessError = error as BusinessError;
-    if (businessError.message) {
-      return businessError.code ? `${businessError.message}（${businessError.code}）` : businessError.message;
-    }
-    return `${error}`;
+    return normalizeError(error).message;
   }
 
   private countGroup(groupId: number): number {
@@ -1883,8 +1834,7 @@ struct Index {
       // 用户关闭菜单时保持当前排序，不需要提示错误。
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -2286,8 +2236,7 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 

@@ -4,6 +4,7 @@ import { VaultMedia } from './VaultMedia';
 import { VaultThumbnail } from './VaultThumbnail';
 import { VaultAttachmentInput, VaultAttachmentSummary, VaultItemType } from '../models/VaultModels';
 import { vaultRepository } from '../services/VaultRepository';
+import { normalizeError } from '../services/ErrorUtils';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
@@ -47,8 +48,7 @@ export struct VaultAttachmentGallery {
     this.selectedIndexes = this.selectedIndexes.filter((index: number): boolean =>
       this.attachments.some((attachment: VaultAttachmentSummary): boolean => attachment.index === index));
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -79,8 +79,7 @@ export struct VaultAttachmentGallery {
     try {
     return mediaPickerService.isMediaInGallery(attachment.sourceUri);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -138,8 +137,7 @@ export struct VaultAttachmentGallery {
       this.progressText = '';
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -213,8 +211,7 @@ export struct VaultAttachmentGallery {
       this.progressText = '';
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -283,8 +280,7 @@ export struct VaultAttachmentGallery {
       this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '删除媒体失败' });
     } finally { this.busy = false; }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 

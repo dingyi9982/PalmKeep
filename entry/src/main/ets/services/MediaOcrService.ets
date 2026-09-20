@@ -1,6 +1,7 @@
 import { textRecognition } from '@kit.CoreVisionKit';
 import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
+import { normalizeError } from './ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
 
 export interface OcrMediaInput {
@@ -40,8 +41,7 @@ class MediaOcrService {
     }
     return results;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -70,8 +70,7 @@ class MediaOcrService {
       if (file) { fs.closeSync(file); }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 }

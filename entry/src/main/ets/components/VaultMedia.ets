@@ -4,6 +4,7 @@ import util from '@ohos.util';
 import media from '@ohos.multimedia.media';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { vaultRepository } from '../services/VaultRepository';
+import { normalizeError } from '../services/ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
 import { VaultThumbnail } from './VaultThumbnail';
 
@@ -60,8 +61,7 @@ export struct VaultMedia {
       }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -133,8 +133,7 @@ export struct VaultMedia {
       if (!this.disposed) { this.message = '无法创建视频播放器'; }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -156,8 +155,7 @@ export struct VaultMedia {
     }
     this.message = '视频暂时无法播放，请切换后重试';
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -167,8 +165,7 @@ export struct VaultMedia {
       setTimeout((): void => { resolve(); }, milliseconds);
     });
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -178,8 +175,7 @@ export struct VaultMedia {
       if (this.playing) { await this.player?.pause(); } else { await this.player?.play(); }
     } catch (error) { this.message = '播放失败，请重新打开'; }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -195,8 +191,7 @@ export struct VaultMedia {
     }
     this.requestFullScreen(resumeTime, resumePlaying);
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -248,8 +243,7 @@ export struct VaultMedia {
       }
     } finally { data.fill(0); }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 

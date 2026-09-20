@@ -4,6 +4,7 @@ import picker from '@ohos.file.picker';
 import image from '@ohos.multimedia.image';
 import fileUri from '@ohos.file.fileuri';
 import { AbilityContextHolder } from './AbilityContextHolder';
+import { normalizeError } from './ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
 
 export interface PickedMedia {
@@ -35,8 +36,7 @@ export class MediaPickerService {
       throw new Error('文件导入失败，请确认所选文件完整且大小受支持');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -59,8 +59,7 @@ export class MediaPickerService {
       throw new Error('媒体导入失败，请确认所选文件完整且受支持');
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -69,8 +68,7 @@ export class MediaPickerService {
     const saved = await this.saveMediaBatchToGallery([path], [type], [title]);
     return saved.length > 0 ? saved[0] : '';
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -106,8 +104,7 @@ export class MediaPickerService {
     }
     return albumUris;
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -124,8 +121,7 @@ export class MediaPickerService {
       if (file) { fs.closeSync(file); }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
@@ -156,8 +152,7 @@ export class MediaPickerService {
       if (file) { fs.closeSync(file); }
     }
       } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
+      throw normalizeError(error);
     }
   }
 
