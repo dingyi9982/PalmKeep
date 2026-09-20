@@ -10,6 +10,7 @@ export default class EntryAbility extends UIAbility {
 
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     AbilityContextHolder.setContext(this.context);
+    AppStorage.setOrCreate<number>('vaultAutoLockMinutes', 10);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -30,6 +31,12 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    const autoLockMinutes = AppStorage.get<number>('vaultAutoLockMinutes') ?? 10;
+    if (autoLockMinutes === 0) {
+      this.lockForLifecycle();
+      this.backgroundAt = 0;
+      return;
+    }
     this.backgroundAt = Date.now();
   }
 
@@ -39,9 +46,14 @@ export default class EntryAbility extends UIAbility {
     }
     const backgroundDuration = Date.now() - this.backgroundAt;
     this.backgroundAt = 0;
-    if (backgroundDuration < 10 * 60 * 1000) {
+    const autoLockMinutes = AppStorage.get<number>('vaultAutoLockMinutes') ?? 10;
+    if (autoLockMinutes < 0 || backgroundDuration < autoLockMinutes * 60 * 1000) {
       return;
     }
+    this.lockForLifecycle();
+  }
+
+  private lockForLifecycle(): void {
     AppStorage.setOrCreate<boolean>('vaultLockedByLifecycle', true);
     vaultRepository.close().catch((error: Error): void => {
       console.warn(`PalmVault close warning: ${error.message}`);

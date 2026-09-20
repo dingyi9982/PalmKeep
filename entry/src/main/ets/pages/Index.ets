@@ -41,6 +41,8 @@ const COLOR_DANGER: string = '#E75561';
 struct Index {
   @StorageLink('vaultLockedByLifecycle') @Watch('handleLifecycleLock')
   private lifecycleLocked: boolean = false;
+  @StorageLink('vaultAutoLockMinutes')
+  private autoLockMinutes: number = 10;
   @State private screen: string = 'loading';
   @State private activeTab: number = 0;
   @State private masterPassword: string = '';
@@ -74,6 +76,9 @@ struct Index {
   @State private gestureEnabled: boolean = false;
   @State private fingerprintEnabled: boolean = false;
   @State private fingerprintAvailable: boolean = false;
+  @State private faceEnabled: boolean = false;
+  @State private faceAvailable: boolean = false;
+  @State private preferredUnlock: string = 'password';
   @State private unlockMode: string = 'password';
   @State private gestureFailures: number = 0;
   @State private gestureCooldownUntil: number = 0;
@@ -88,6 +93,20 @@ struct Index {
   @State private selectedItem?: VaultItem = undefined;
   @State private selectedAttachmentIndex: number = -1;
   @State private revealPassword: boolean = false;
+  @State private showChangePassword: boolean = false;
+  @State private currentPassword: string = '';
+  @State private changedPassword: string = '';
+  @State private changedPasswordConfirm: string = '';
+  @State private passwordChangeBusy: boolean = false;
+  @State private showResetVault: boolean = false;
+  @State private resetVaultConfirmText: string = '';
+  @State private resetVaultBusy: boolean = false;
+  @State private showRecoveryCenter: boolean = false;
+  @State private recoveryAuthenticated: boolean = false;
+  @State private recoveryAuthLabel: string = '';
+  @State private recoveryNewPassword: string = '';
+  @State private recoveryPasswordConfirm: string = '';
+  @State private recoveryBusy: boolean = false;
   @State private newType: VaultItemType = VaultItemType.Login;
   @State private newTitle: string = '';
   @State private newUsername: string = '';
@@ -132,6 +151,7 @@ struct Index {
   private groupDragLastReorderX: number = 0;
   private groupDragLastReorderY: number = 0;
   private sessionKey: Uint8Array = new Uint8Array(0);
+  private recoveryDatabaseKey: Uint8Array = new Uint8Array(0);
   private firstGesture: number[] = [];
 
   aboutToAppear(): void {
@@ -139,6 +159,18 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (this.showResetVault) {
+      this.closeResetVault();
+      return true;
+    }
+    if (this.showChangePassword) {
+      this.closeChangePassword();
+      return true;
+    }
+    if (this.showRecoveryCenter) {
+      this.closeRecoveryCenter();
+      return true;
+    }
     if (this.showNewItem) {
       this.requestCloseNewItem();
       return true;
@@ -168,7 +200,9 @@ struct Index {
         this.unlockMode = this.preferredUnlockMode();
       }
       this.screen = initialized ? 'locked' : 'setup';
-      if (initialized && this.unlockMode === 'fingerprint') {
+      if (initialized && this.unlockMode === 'face') {
+        this.unlockWithFace();
+      } else if (initialized && this.unlockMode === 'fingerprint') {
         this.unlockWithFingerprint();
       }
     } catch (error) {
@@ -209,6 +243,7 @@ struct Index {
       await this.openWithKey(key);
       this.masterPassword = '';
       this.confirmPassword = '';
+      await this.refreshQuickUnlockStatus();
       await this.reloadVault();
       await this.showVaultScreen();
     } catch (error) {
@@ -510,6 +545,10 @@ struct Index {
     this.gestureEnabled = status.gestureEnabled;
     this.fingerprintEnabled = status.fingerprintEnabled;
     this.fingerprintAvailable = status.fingerprintAvailable;
+    this.faceEnabled = status.faceEnabled;
+    this.faceAvailable = status.faceAvailable;
+    this.preferredUnlock = status.preferredUnlockMode;
+    this.autoLockMinutes = status.autoLockMinutes;
       } catch (error) {
       if (error instanceof Error) { throw error; }
       throw new Error('系统操作失败');
@@ -517,10 +556,14 @@ struct Index {
   }
 
   private preferredUnlockMode(): string {
-    if (this.fingerprintEnabled) {
+    if (this.preferredUnlock === 'fingerprint' && this.fingerprintEnabled && this.fingerprintAvailable) {
       return 'fingerprint';
     }
-    return this.gestureEnabled ? 'gesture' : 'password';
+    if (this.preferredUnlock === 'face' && this.faceEnabled && this.faceAvailable) {
+      return 'face';
+    }
+    if (this.preferredUnlock === 'gesture' && this.gestureEnabled) { return 'gesture'; }
+    return 'password';
   }
 
   private selectUnlockMode(mode: string): void {
@@ -531,6 +574,8 @@ struct Index {
     this.unlockMode = mode;
     if (mode === 'fingerprint') {
       this.unlockWithFingerprint();
+    } else if (mode === 'face') {
+      this.unlockWithFace();
     }
   }
 
@@ -570,10 +615,13 @@ struct Index {
     }
     try {
       const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const previousPreferred = this.preferredUnlock;
       await security.enableGesture(pattern, this.sessionKey);
       await this.refreshQuickUnlockStatus();
       this.closeGestureSetup();
-      this.getUIContext().getPromptAction().showToast({ message: '手势登录已启用' });
+      this.getUIContext().getPromptAction().showToast({
+        message: previousPreferred === this.preferredUnlock ? '手势登录已启用' : '手势登录已启用，已设为首选'
+      });
     } catch (error) {
       this.gestureSetupHint = this.describeError(error);
     }
@@ -642,18 +690,47 @@ struct Index {
     }
   }
 
+  private async unlockWithFace(): Promise<void> {
+    try {
+      this.busy = true;
+      this.errorMessage = '';
+      try {
+        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const key = await security.unlockWithFace();
+        await this.openWithKey(key);
+        await this.reloadVault();
+        await this.showVaultScreen();
+      } catch (error) {
+        this.errorMessage = this.describeError(error);
+      } finally {
+        this.busy = false;
+      }
+    } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
+  }
+
   private async toggleFingerprint(): Promise<void> {
     try {
     try {
       const security = new VaultSecurityService(AbilityContextHolder.getContext());
       if (this.fingerprintEnabled) {
+        const previousPreferred = this.preferredUnlock;
         await security.disableFingerprint();
-        this.getUIContext().getPromptAction().showToast({ message: '指纹登录已关闭' });
+        await this.refreshQuickUnlockStatus();
+        this.getUIContext().getPromptAction().showToast({
+          message: previousPreferred === this.preferredUnlock ? '指纹登录已关闭' :
+            `指纹登录已关闭，已将${this.unlockModeLabel(this.preferredUnlock)}设为首选`
+        });
       } else {
+        const previousPreferred = this.preferredUnlock;
         await security.enableFingerprint(this.sessionKey);
-        this.getUIContext().getPromptAction().showToast({ message: '指纹登录已启用' });
+        await this.refreshQuickUnlockStatus();
+        this.getUIContext().getPromptAction().showToast({
+          message: previousPreferred === this.preferredUnlock ? '指纹登录已启用' : '指纹登录已启用，已设为首选'
+        });
       }
-      await this.refreshQuickUnlockStatus();
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
@@ -663,12 +740,308 @@ struct Index {
     }
   }
 
+  private async toggleFace(): Promise<void> {
+    try {
+      try {
+        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        if (this.faceEnabled) {
+          const previousPreferred = this.preferredUnlock;
+          await security.disableFace();
+          await this.refreshQuickUnlockStatus();
+          this.getUIContext().getPromptAction().showToast({
+            message: previousPreferred === this.preferredUnlock ? '人脸登录已关闭' :
+              `人脸登录已关闭，已将${this.unlockModeLabel(this.preferredUnlock)}设为首选`
+          });
+        } else {
+          const previousPreferred = this.preferredUnlock;
+          await security.enableFace(this.sessionKey);
+          await this.refreshQuickUnlockStatus();
+          this.getUIContext().getPromptAction().showToast({
+            message: previousPreferred === this.preferredUnlock ? '人脸登录已启用' : '人脸登录已启用，已设为首选'
+          });
+        }
+      } catch (error) {
+        this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+      }
+    } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
+  }
+
+  private unlockModeLabel(mode: string): string {
+    if (mode === 'fingerprint') { return '指纹'; }
+    if (mode === 'face') { return '人脸'; }
+    if (mode === 'gesture') { return '手势'; }
+    return '密码';
+  }
+
+  private autoLockLabel(): string {
+    if (this.autoLockMinutes < 0) { return '永不自动锁定'; }
+    if (this.autoLockMinutes === 0) { return '切换到后台立即锁定'; }
+    return `${this.autoLockMinutes} 分钟`;
+  }
+
+  private async choosePreferredUnlock(): Promise<void> {
+    try {
+      const values: string[] = ['face', 'fingerprint', 'gesture', 'password'];
+      const buttons: [promptAction.Button, promptAction.Button, promptAction.Button, promptAction.Button] = [
+        { text: `${this.preferredUnlock === 'face' ? '✓  ' : ''}人脸${this.faceEnabled ? '' : '（未启用）'}`,
+          color: this.faceEnabled ? COLOR_TEXT : COLOR_MUTED },
+        { text: `${this.preferredUnlock === 'fingerprint' ? '✓  ' : ''}指纹${this.fingerprintEnabled ? '' : '（未启用）'}`,
+          color: this.fingerprintEnabled ? COLOR_TEXT : COLOR_MUTED },
+        { text: `${this.preferredUnlock === 'gesture' ? '✓  ' : ''}手势${this.gestureEnabled ? '' : '（未启用）'}`,
+          color: this.gestureEnabled ? COLOR_TEXT : COLOR_MUTED },
+        { text: `${this.preferredUnlock === 'password' ? '✓  ' : ''}密码`, color: COLOR_TEXT }
+      ];
+      let selectedIndex = -1;
+      try {
+        const result = await this.getUIContext().getPromptAction().showActionMenu({
+          title: '选择首选登录方式', buttons: buttons
+        });
+        selectedIndex = result.index;
+      } catch (_) {
+        return;
+      }
+      if (selectedIndex < 0 || selectedIndex >= values.length) { return; }
+      try {
+        const mode = values[selectedIndex];
+        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        await security.setPreferredUnlockMode(mode);
+        this.preferredUnlock = mode;
+        this.getUIContext().getPromptAction().showToast({ message: `已将${this.unlockModeLabel(mode)}设为首选` });
+      } catch (error) {
+        this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+      }
+    } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
+  }
+
+  private async chooseAutoLockTime(): Promise<void> {
+    try {
+      const values: number[] = [0, 5, 10, 30, -1];
+      const labels: string[] = ['立即锁定', '5 分钟', '10 分钟', '30 分钟', '永不自动锁定'];
+      const buttons: [promptAction.Button, promptAction.Button, promptAction.Button,
+        promptAction.Button, promptAction.Button] = [
+        { text: `${this.autoLockMinutes === values[0] ? '✓  ' : ''}${labels[0]}`, color: COLOR_TEXT },
+        { text: `${this.autoLockMinutes === values[1] ? '✓  ' : ''}${labels[1]}`, color: COLOR_TEXT },
+        { text: `${this.autoLockMinutes === values[2] ? '✓  ' : ''}${labels[2]}`, color: COLOR_TEXT },
+        { text: `${this.autoLockMinutes === values[3] ? '✓  ' : ''}${labels[3]}`, color: COLOR_TEXT },
+        { text: `${this.autoLockMinutes === values[4] ? '✓  ' : ''}${labels[4]}`, color: COLOR_TEXT }
+      ];
+      let selectedIndex = -1;
+      try {
+        const result = await this.getUIContext().getPromptAction().showActionMenu({
+          title: '自动锁定', buttons: buttons
+        });
+        selectedIndex = result.index;
+      } catch (_) {
+        return;
+      }
+      if (selectedIndex < 0 || selectedIndex >= values.length) { return; }
+      try {
+        const minutes = values[selectedIndex];
+        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        await security.setAutoLockMinutes(minutes);
+        this.autoLockMinutes = minutes;
+        this.getUIContext().getPromptAction().showToast({ message: `自动锁定已设为${labels[selectedIndex]}` });
+      } catch (error) {
+        this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+      }
+    } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
+  }
+
+  private openChangePassword(): void {
+    this.currentPassword = '';
+    this.changedPassword = '';
+    this.changedPasswordConfirm = '';
+    this.showChangePassword = true;
+  }
+
+  private closeChangePassword(): void {
+    if (this.passwordChangeBusy) { return; }
+    this.currentPassword = '';
+    this.changedPassword = '';
+    this.changedPasswordConfirm = '';
+    this.showChangePassword = false;
+  }
+
+  private async changePassword(): Promise<void> {
+    try {
+    if (this.currentPassword.length === 0) {
+      this.getUIContext().getPromptAction().showToast({ message: '请输入当前密码' });
+      return;
+    }
+    if (this.changedPassword.length < 8) {
+      this.getUIContext().getPromptAction().showToast({ message: '新密码至少需要 8 个字符' });
+      return;
+    }
+    if (this.changedPassword !== this.changedPasswordConfirm) {
+      this.getUIContext().getPromptAction().showToast({ message: '两次输入的新密码不一致' });
+      return;
+    }
+    this.passwordChangeBusy = true;
+    try {
+      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const key = await security.changePassword(this.currentPassword, this.changedPassword);
+      this.sessionKey.fill(0);
+      this.sessionKey = key.slice();
+      key.fill(0);
+      await this.refreshQuickUnlockStatus();
+      this.passwordChangeBusy = false;
+      this.closeChangePassword();
+      this.getUIContext().getPromptAction().showToast({ message: '密码已修改，请重新启用需要的快捷登录' });
+    } catch (error) {
+      this.passwordChangeBusy = false;
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+    } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
+  }
+
+  private openResetVault(): void {
+    this.resetVaultConfirmText = '';
+    this.showResetVault = true;
+  }
+
+  private openRecoveryCenter(): void {
+    this.recoveryDatabaseKey.fill(0);
+    this.recoveryDatabaseKey = new Uint8Array(0);
+    this.recoveryAuthenticated = false;
+    this.recoveryAuthLabel = '';
+    this.recoveryNewPassword = '';
+    this.recoveryPasswordConfirm = '';
+    this.showRecoveryCenter = true;
+  }
+
+  private closeRecoveryCenter(): void {
+    if (this.recoveryBusy) { return; }
+    this.recoveryDatabaseKey.fill(0);
+    this.recoveryDatabaseKey = new Uint8Array(0);
+    this.recoveryAuthenticated = false;
+    this.recoveryAuthLabel = '';
+    this.recoveryNewPassword = '';
+    this.recoveryPasswordConfirm = '';
+    this.showRecoveryCenter = false;
+  }
+
+  private async authenticateRecovery(mode: string): Promise<void> {
+    try {
+      this.recoveryBusy = true;
+      try {
+        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const key = mode === 'face' ? await security.unlockWithFace() : await security.unlockWithFingerprint();
+        this.recoveryDatabaseKey.fill(0);
+        this.recoveryDatabaseKey = key.slice();
+        key.fill(0);
+        this.recoveryAuthenticated = true;
+        this.recoveryAuthLabel = this.unlockModeLabel(mode);
+      } catch (error) {
+        this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+      } finally {
+        this.recoveryBusy = false;
+      }
+    } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
+  }
+
+  private async resetRecoveredPassword(): Promise<void> {
+    try {
+      if (!this.recoveryAuthenticated || this.recoveryDatabaseKey.length !== 32) {
+        this.getUIContext().getPromptAction().showToast({ message: '请先验证身份' });
+        return;
+      }
+      if (this.recoveryNewPassword.length < 8) {
+        this.getUIContext().getPromptAction().showToast({ message: '新密码至少需要 8 个字符' });
+        return;
+      }
+      if (this.recoveryNewPassword !== this.recoveryPasswordConfirm) {
+        this.getUIContext().getPromptAction().showToast({ message: '两次输入的新密码不一致' });
+        return;
+      }
+      this.recoveryBusy = true;
+      try {
+        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const key = await security.resetPasswordWithAuthenticatedKey(
+          this.recoveryDatabaseKey, this.recoveryNewPassword);
+        this.recoveryDatabaseKey = new Uint8Array(0);
+        await this.openWithKey(key);
+        await this.refreshQuickUnlockStatus();
+        await this.reloadVault();
+        this.recoveryBusy = false;
+        this.closeRecoveryCenter();
+        await this.showVaultScreen();
+        this.getUIContext().getPromptAction().showToast({ message: '密码已重设，快捷登录已关闭' });
+      } catch (error) {
+        this.recoveryDatabaseKey.fill(0);
+        this.recoveryDatabaseKey = new Uint8Array(0);
+        this.recoveryAuthenticated = false;
+        this.recoveryBusy = false;
+        this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+      }
+    } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
+  }
+
+  private closeResetVault(): void {
+    if (this.resetVaultBusy) { return; }
+    this.resetVaultConfirmText = '';
+    this.showResetVault = false;
+  }
+
+  private async resetVault(): Promise<void> {
+    try {
+    if (this.resetVaultConfirmText !== '清除全部数据') { return; }
+    this.resetVaultBusy = true;
+    try {
+      const context = AbilityContextHolder.getContext();
+      await AbilityContextHolder.setPrivacyMode(false);
+      await vaultRepository.destroy(context);
+      const security = new VaultSecurityService(context);
+      await security.resetSecurity();
+      this.autoLockMinutes = 10;
+      this.preferredUnlock = 'password';
+      this.sessionKey.fill(0);
+      this.sessionKey = new Uint8Array(0);
+      this.masterPassword = '';
+      this.confirmPassword = '';
+      this.errorMessage = '';
+      this.resetVaultBusy = false;
+      this.closeResetVault();
+      this.closeRecoveryCenter();
+      this.screen = 'setup';
+      this.getUIContext().getPromptAction().showToast({ message: '本地保险库已清除' });
+    } catch (error) {
+      this.resetVaultBusy = false;
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+    } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('系统操作失败');
+    }
+  }
+
   private async disableGesture(): Promise<void> {
     try {
     const security = new VaultSecurityService(AbilityContextHolder.getContext());
+    const previousPreferred = this.preferredUnlock;
     await security.disableGesture();
     await this.refreshQuickUnlockStatus();
-    this.getUIContext().getPromptAction().showToast({ message: '手势登录已关闭' });
+    this.getUIContext().getPromptAction().showToast({
+      message: previousPreferred === this.preferredUnlock ? '手势登录已关闭' :
+        `手势登录已关闭，已将${this.unlockModeLabel(this.preferredUnlock)}设为首选`
+    });
       } catch (error) {
       if (error instanceof Error) { throw error; }
       throw new Error('系统操作失败');
@@ -1690,13 +2063,6 @@ struct Index {
         .backgroundColor(COLOR_SURFACE)
         .borderRadius(22)
         .border({ width: 1, color: COLOR_BORDER })
-
-        Row({ space: 9 }) {
-          Text('✓').fontColor(COLOR_PRIMARY)
-          Text('登录验证 · 明文本机存储（开发模式）')
-            .fontSize(12)
-            .fontColor(COLOR_MUTED)
-        }
       }
       .width('100%')
       .padding({ left: 24, right: 24, top: 70, bottom: 40 })
@@ -1731,13 +2097,17 @@ struct Index {
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_TEXT)
           Text(this.unlockMode === 'gesture' ? '绘制手势解锁本地保险库' :
-            (this.unlockMode === 'fingerprint' ? '使用指纹验证身份' : '输入密码解锁本地保险库'))
+            (this.unlockMode === 'fingerprint' ? '使用指纹验证身份' :
+              (this.unlockMode === 'face' ? '使用人脸验证身份' : '输入密码解锁本地保险库')))
             .fontSize(14)
             .fontColor(COLOR_MUTED)
         }
         Column({ space: 12 }) {
-          if (this.fingerprintEnabled || this.gestureEnabled) {
+          if (this.fingerprintEnabled || this.faceEnabled || this.gestureEnabled) {
             Row({ space: 4 }) {
+              if (this.faceEnabled) {
+                this.unlockModeButton('face', '人脸')
+              }
               if (this.fingerprintEnabled) {
                 this.unlockModeButton('fingerprint', '指纹')
               }
@@ -1775,6 +2145,23 @@ struct Index {
             }
             .width('100%')
             .padding({ top: 18, bottom: 8 })
+          } else if (this.unlockMode === 'face' && this.faceEnabled) {
+            Column({ space: 14 }) {
+              Stack() {
+                Text('◉').fontSize(50).fontColor(COLOR_PRIMARY)
+              }.width(66).height(66)
+              Button(this.busy ? '正在验证…' : '验证人脸')
+                .width('100%')
+                .height(52)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_BG)
+                .backgroundColor(COLOR_PRIMARY)
+                .borderRadius(14)
+                .enabled(!this.busy)
+                .onClick((): void => { this.unlockWithFace(); })
+            }
+            .width('100%')
+            .padding({ top: 18, bottom: 8 })
           } else {
             TextInput({ placeholder: '密码', text: this.masterPassword })
               .type(InputType.Password)
@@ -1804,6 +2191,10 @@ struct Index {
         }
         .width('100%')
         .padding(16)
+        Button('无法解锁？')
+          .fontSize(12).fontColor(COLOR_MUTED).backgroundColor(Color.Transparent)
+          .enabled(!this.busy)
+          .onClick((): void => { this.openRecoveryCenter(); })
       }
       .width('100%')
       .padding({ left: 24, right: 24, top: 48, bottom: 36 })
@@ -2896,6 +3287,24 @@ struct Index {
             .fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
             .width('100%').padding(15)
           Row({ space: 12 }) {
+            Stack() {
+              Text('◉').fontSize(22).fontColor(COLOR_PRIMARY)
+            }
+            .width(44).height(44).borderRadius(14).backgroundColor('#183029')
+            Column({ space: 3 }) {
+              Text('人脸登录').fontSize(14).fontColor(COLOR_TEXT)
+              Text(this.faceEnabled ? '已启用 · 由系统人脸验证' :
+                (this.faceAvailable ? '未启用' : '设备未录入或不支持'))
+                .fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Button(this.faceEnabled ? '关闭' : '启用')
+              .height(38).fontColor(this.faceEnabled ? COLOR_DANGER : COLOR_PRIMARY)
+              .backgroundColor(COLOR_SURFACE_2)
+              .enabled(this.faceEnabled || this.faceAvailable)
+              .onClick((): void => { this.toggleFace(); })
+          }
+          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          Row({ space: 12 }) {
             Stack() { Text('◎').fontSize(22).fontColor(COLOR_PRIMARY) }
               .width(44).height(44).borderRadius(14).backgroundColor('#183029')
             Column({ space: 3 }) {
@@ -2935,6 +3344,45 @@ struct Index {
               })
           }
           .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          Row() {
+            Column({ space: 3 }) {
+              Text('首选登录方式').fontSize(14).fontColor(COLOR_TEXT)
+              Text('打开应用时优先使用').fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Text(this.unlockModeLabel(this.preferredUnlock)).fontSize(13).fontColor(COLOR_PRIMARY)
+            Text('›').fontSize(22).fontColor('#B2B8C2').margin({ left: 8 })
+          }
+          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          .onClick((): void => { this.choosePreferredUnlock(); })
+        }
+        .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
+        .border({ width: 1, color: COLOR_BORDER })
+        Column() {
+          Text('密码与安全')
+            .fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
+            .width('100%').padding(15)
+          Row({ space: 12 }) {
+            Stack() { Text('••').fontSize(18).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY) }
+              .width(44).height(44).borderRadius(14).backgroundColor('#183029')
+            Column({ space: 3 }) {
+              Text('修改密码').fontSize(14).fontColor(COLOR_TEXT)
+              Text('修改后快捷登录需要重新启用').fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Text('›').fontSize(22).fontColor('#B2B8C2')
+          }
+          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          .onClick((): void => { this.openChangePassword(); })
+          Row() {
+            Column({ space: 3 }) {
+              Text('自动锁定').fontSize(14).fontColor(COLOR_TEXT)
+              Text('应用切换到后台后').fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start)
+            Blank()
+            Text(this.autoLockLabel()).fontSize(12).fontColor(COLOR_PRIMARY)
+            Text('›').fontSize(22).fontColor('#B2B8C2').margin({ left: 8 })
+          }
+          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          .onClick((): void => { this.chooseAutoLockTime(); })
         }
         .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
         .border({ width: 1, color: COLOR_BORDER })
@@ -3103,9 +3551,120 @@ struct Index {
         this.detailOverlay(this.selectedItem as VaultItem)
       }
       if (this.showGestureSetup) { this.gestureSetupOverlay() }
+      if (this.showChangePassword) { this.changePasswordOverlay() }
+      if (this.showResetVault) { this.resetVaultOverlay() }
     }
     .width('100%')
     .height('100%')
+  }
+
+  @Builder
+  private changePasswordOverlay(): void {
+    Column() {
+      Column({ space: 10 }) {
+        this.modalHeader('修改密码', (): void => { this.closeChangePassword(); })
+        TextInput({ placeholder: '当前密码', text: this.currentPassword })
+          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+          .onChange((value: string): void => { this.currentPassword = value; })
+        TextInput({ placeholder: '新密码（至少 8 个字符）', text: this.changedPassword })
+          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+          .onChange((value: string): void => { this.changedPassword = value; })
+        TextInput({ placeholder: '再次输入新密码', text: this.changedPasswordConfirm })
+          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+          .onChange((value: string): void => { this.changedPasswordConfirm = value; })
+        Button(this.passwordChangeBusy ? '正在修改…' : '确认修改')
+          .width('100%').height(48).fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(12)
+          .enabled(!this.passwordChangeBusy)
+          .onClick((): void => { this.changePassword(); })
+      }
+      .width('88%').padding(18).backgroundColor(COLOR_SURFACE).borderRadius(22)
+    }
+    .width('100%').height('100%').justifyContent(FlexAlign.Center)
+    .backgroundColor('#99000000')
+  }
+
+  @Builder
+  private recoveryCenterOverlay(): void {
+    Column() {
+      Scroll() {
+        Column({ space: 10 }) {
+          this.modalHeader('恢复访问', (): void => { this.closeRecoveryCenter(); })
+          if (!this.recoveryAuthenticated) {
+            Text('使用已启用的本机生物认证验证身份，然后重设密码。')
+              .fontSize(13).fontColor(COLOR_MUTED).lineHeight(20).width('100%')
+            if (this.faceEnabled) {
+              Button(this.recoveryBusy ? '正在验证…' : '使用人脸验证')
+                .width('100%').height(48).fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(12)
+                .enabled(!this.recoveryBusy)
+                .onClick((): void => { this.authenticateRecovery('face'); })
+            }
+            if (this.fingerprintEnabled) {
+              Button(this.recoveryBusy ? '正在验证…' : '使用指纹验证')
+                .width('100%').height(48).fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(12)
+                .enabled(!this.recoveryBusy)
+                .onClick((): void => { this.authenticateRecovery('fingerprint'); })
+            }
+            if (!this.faceEnabled && !this.fingerprintEnabled) {
+              Text('没有已启用的生物认证，当前无法无损重设密码。')
+                .fontSize(13).fontColor(COLOR_MUTED).lineHeight(20).width('100%')
+                .padding(12).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+            }
+          } else {
+            Text(`已通过${this.recoveryAuthLabel}验证`)
+              .fontSize(13).fontColor(COLOR_PRIMARY).width('100%')
+            TextInput({ placeholder: '新密码（至少 8 个字符）', text: this.recoveryNewPassword })
+              .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+              .onChange((value: string): void => { this.recoveryNewPassword = value; })
+            TextInput({ placeholder: '再次输入新密码', text: this.recoveryPasswordConfirm })
+              .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+              .onChange((value: string): void => { this.recoveryPasswordConfirm = value; })
+            Button(this.recoveryBusy ? '正在重设…' : '重设密码并进入保险库')
+              .width('100%').height(48).fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(12)
+              .enabled(!this.recoveryBusy)
+              .onClick((): void => { this.resetRecoveredPassword(); })
+          }
+          Divider().color(COLOR_BORDER).margin({ top: 4, bottom: 2 })
+          Text('无法通过上述方式恢复？').fontSize(12).fontColor(COLOR_MUTED).width('100%')
+          Button('永久清除本地保险库')
+            .width('100%').height(44).fontSize(13).fontColor(COLOR_DANGER)
+            .backgroundColor('#FDEDEF').borderRadius(12)
+            .enabled(!this.recoveryBusy)
+            .onClick((): void => { this.openResetVault(); })
+        }
+        .width('100%').padding(18)
+      }
+      .width('88%').constraintSize({ maxHeight: '88%' }).scrollBar(BarState.Off)
+      .backgroundColor(COLOR_SURFACE).borderRadius(22)
+    }
+    .width('100%').height('100%').justifyContent(FlexAlign.Center)
+    .backgroundColor('#99000000')
+  }
+
+  @Builder
+  private resetVaultOverlay(): void {
+    Column() {
+      Column({ space: 10 }) {
+        this.modalHeader('清除本地保险库', (): void => { this.closeResetVault(); })
+        Text('此操作会永久删除全部资料、附件、分组和登录设置，且无法恢复。')
+          .fontSize(13).fontColor(COLOR_DANGER).lineHeight(20).width('100%')
+        Text('请输入“清除全部数据”以确认').fontSize(12).fontColor(COLOR_MUTED).width('100%')
+        TextInput({ placeholder: '清除全部数据', text: this.resetVaultConfirmText })
+          .height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+          .onChange((value: string): void => { this.resetVaultConfirmText = value; })
+        Button(this.resetVaultBusy ? '正在清除…' : '永久清除全部数据')
+          .width('100%').height(48).fontWeight(FontWeight.Bold)
+          .fontColor('#FFFFFF').backgroundColor(COLOR_DANGER).borderRadius(12)
+          .enabled(!this.resetVaultBusy && this.resetVaultConfirmText === '清除全部数据')
+          .onClick((): void => { this.resetVault(); })
+      }
+      .width('88%').padding(18).backgroundColor(COLOR_SURFACE).borderRadius(22)
+    }
+    .width('100%').height('100%').justifyContent(FlexAlign.Center)
+    .backgroundColor('#99000000')
   }
 
   @Builder
@@ -3793,7 +4352,11 @@ struct Index {
     } else if (this.screen === 'setup') {
       this.setupScreen()
     } else if (this.screen === 'locked') {
-      this.lockedScreen()
+      Stack() {
+        this.lockedScreen()
+        if (this.showRecoveryCenter) { this.recoveryCenterOverlay() }
+        if (this.showResetVault) { this.resetVaultOverlay() }
+      }.width('100%').height('100%')
     } else {
       this.vaultScreen()
     }

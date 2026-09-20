@@ -53,6 +53,16 @@ class VaultRepositoryImpl {
     }
   }
 
+  async destroy(context: common.UIAbilityContext): Promise<void> {
+    try {
+      await this.close();
+      await relationalStore.deleteRdbStore(context, DEVELOPMENT_DATABASE_NAME);
+    } catch (error) {
+      if (error instanceof Error) { throw error; }
+      throw new Error('清除本地数据失败');
+    }
+  }
+
   async listGroups(): Promise<VaultGroup[]> {
     try {
     const result = await this.requireStore().querySql(
