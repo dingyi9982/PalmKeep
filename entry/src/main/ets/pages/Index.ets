@@ -10,14 +10,25 @@ import {
   ChangePasswordDialog, GestureSetupDialog, RecoveryCenterDialog, ResetVaultDialog
 } from '../components/VaultSecurityDialogs';
 import {
-  COLOR_BG, COLOR_BORDER, COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SURFACE,
-  COLOR_SURFACE_2, COLOR_TEXT
+  COLOR_BG, COLOR_BORDER, COLOR_CARD_HIGHLIGHT, COLOR_CHEVRON, COLOR_DANGER,
+  COLOR_DANGER_DARK_SURFACE, COLOR_DANGER_TINT, COLOR_DANGER_WASH, COLOR_DANGER_WASH_STRONG,
+  COLOR_DARK_ACTION, COLOR_DARK_SURFACE, COLOR_DISABLED, COLOR_DIVIDER_SOFT, COLOR_GROUP_DRAG,
+  COLOR_HERO_MUTED, COLOR_HERO_PILL, COLOR_HERO_SURFACE, COLOR_HERO_TEXT, COLOR_HERO_TITLE,
+  COLOR_MUTED, COLOR_MUTED_LIGHT, COLOR_ON_DARK, COLOR_PLACEHOLDER, COLOR_PLACEHOLDER_LIGHT,
+  COLOR_PRIMARY, COLOR_PRIMARY_ALT_TINT, COLOR_PRIMARY_TINT, COLOR_PRIMARY_WASH, COLOR_SCRIM,
+  COLOR_SCRIM_STRONG, COLOR_SURFACE, COLOR_SURFACE_2, COLOR_TEXT, COLOR_TEXT_SECONDARY,
+  COLOR_TYPE_BADGE
 } from '../components/VaultTheme';
 import { VaultThumbnail } from '../components/VaultThumbnail';
 import { VaultAttachmentPreview } from '../components/VaultAttachmentPreview';
 import { VaultAttachmentGallery } from '../components/VaultAttachmentGallery';
 import { VaultFileSummary } from '../components/VaultFileSummary';
 import { VaultFileGallery } from '../components/VaultFileGallery';
+import { VaultDialogHeader } from '../components/VaultCommonComponents';
+import {
+  ACTION_CANCEL, ACTION_DELETE, ACTION_MANAGE, ACTION_SAVE, LABEL_CONTENT, LABEL_NAME, LABEL_NOTES,
+  TITLE_ITEM_DETAILS
+} from '../components/VaultCopy';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { normalizeError } from '../services/ErrorUtils';
 import { QuickUnlockStatus, VaultSecurityService } from '../services/VaultSecurityService';
@@ -1111,7 +1122,7 @@ struct Index {
     try {
       if (permanent) {
         const choice = await this.getUIContext().getPromptAction().showDialog({ title: '永久删除此资料？', message: '删除后无法恢复。',
-          buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '永久删除', color: COLOR_DANGER }] });
+          buttons: [{ text: ACTION_CANCEL, color: COLOR_MUTED }, { text: `永久${ACTION_DELETE}`, color: COLOR_DANGER }] });
         if (choice.index !== 1) { return; }
       }
       this.trashBusy = true;
@@ -1190,7 +1201,7 @@ struct Index {
     const choice = await this.getUIContext().getPromptAction().showDialog({
       title: `永久删除 ${count} 条资料？`,
       message: '资料和附件将被永久删除，且无法恢复。',
-      buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '永久删除', color: COLOR_DANGER }]
+      buttons: [{ text: ACTION_CANCEL, color: COLOR_MUTED }, { text: `永久${ACTION_DELETE}`, color: COLOR_DANGER }]
     });
     if (choice.index !== 1) { return; }
     this.trashBusy = true;
@@ -1215,7 +1226,7 @@ struct Index {
     const choice = await this.getUIContext().getPromptAction().showDialog({
       title: `清空回收站中的 ${allEntries.length} 条资料？`,
       message: '所有资料和附件将被永久删除，且无法恢复。',
-      buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '清空', color: COLOR_DANGER }]
+      buttons: [{ text: ACTION_CANCEL, color: COLOR_MUTED }, { text: '清空', color: COLOR_DANGER }]
     });
     if (choice.index !== 1) { return; }
     this.trashBusy = true;
@@ -1407,7 +1418,7 @@ struct Index {
       const choice = await this.getUIContext().getPromptAction().showDialog({
         title: `删除“${group.name}”？`,
         message: '确定删除该分组吗？',
-        buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '删除', color: COLOR_DANGER }]
+        buttons: [{ text: ACTION_CANCEL, color: COLOR_MUTED }, { text: ACTION_DELETE, color: COLOR_DANGER }]
       });
       if (choice.index === 1) {
         await this.deleteGroup(group);
@@ -1864,7 +1875,7 @@ struct Index {
             .placeholderFont({ size: 14, weight: FontWeight.Normal })
             .padding(0)
             .fontColor(COLOR_TEXT)
-            .placeholderColor('#9AA2B1')
+            .placeholderColor(COLOR_MUTED_LIGHT)
             .backgroundColor(Color.Transparent)
             .onChange((value: string): void => { this.applySearch(value); })
         } else {
@@ -1872,7 +1883,7 @@ struct Index {
             .layoutWeight(1)
             .fontSize(14)
             .fontWeight(FontWeight.Normal)
-            .fontColor(this.searchText.length > 0 ? COLOR_TEXT : '#9AA2B1')
+            .fontColor(this.searchText.length > 0 ? COLOR_TEXT : COLOR_MUTED_LIGHT)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -1930,7 +1941,7 @@ struct Index {
             Text('回收站')
               .fontSize(10).fontWeight(FontWeight.Medium).fontColor(COLOR_DANGER)
               .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-              .backgroundColor('#FDEDEF').borderRadius(7)
+              .backgroundColor(COLOR_DANGER_TINT).borderRadius(7)
             Text(originalGroupName.length > 0 ? `原分组 · ${originalGroupName}` : '已删除')
               .fontSize(10).fontColor(COLOR_MUTED).maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -1971,7 +1982,7 @@ struct Index {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      Text('›').fontSize(20).fontColor('#B2B8C2')
+      Text('›').fontSize(20).fontColor(COLOR_CHEVRON)
     }
     .width('100%')
     .constraintSize({ minHeight: item.type === VaultItemType.File ? 48 + (item.deletedAt > 0 ? 20 : 0) :
@@ -2022,7 +2033,7 @@ struct Index {
           Text('回收站')
             .fontSize(10).fontWeight(FontWeight.Medium).fontColor(COLOR_DANGER)
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .backgroundColor('#FDEDEF').borderRadius(7)
+            .backgroundColor(COLOR_DANGER_TINT).borderRadius(7)
           Text(`原分组 · ${hit.originalGroupName}`)
             .fontSize(10).fontColor(COLOR_MUTED).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -2248,16 +2259,16 @@ struct Index {
           Row() {
             Column({ space: 5 }) {
               Text('安全存储')
-                .fontSize(22).fontWeight(FontWeight.Bold).fontColor('#F4CA62')
+                .fontSize(22).fontWeight(FontWeight.Bold).fontColor(COLOR_HERO_TITLE)
               Text('所有资料只会存储在本地')
-                .fontSize(13).fontColor('#AAB5C8')
+                .fontSize(13).fontColor(COLOR_HERO_MUTED)
             }
             .alignItems(HorizontalAlign.Start)
             .layoutWeight(1)
             Column({ space: 2 }) {
               Text(`${this.totalItemCount}`)
-                .fontSize(28).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
-              Text('条资料').fontSize(11).fontColor('#AAB5C8')
+                .fontSize(28).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK)
+              Text('条资料').fontSize(11).fontColor(COLOR_HERO_MUTED)
             }
           }
           .width('100%')
@@ -2271,7 +2282,7 @@ struct Index {
         }
         .width('100%')
         .padding({ left: 15, right: 15, top: 13, bottom: 13 })
-        .backgroundColor('#17243A')
+        .backgroundColor(COLOR_HERO_SURFACE)
         .borderRadius(18)
 
         Row() {
@@ -2289,7 +2300,7 @@ struct Index {
             if (this.draggingGroupId >= 0) {
               Button('拖到这里取消')
                 .height(38).fontSize(12).fontColor(COLOR_DANGER)
-                .backgroundColor(this.groupDragCancelActive ? '#FFDDE1' : '#FFF0F2')
+                .backgroundColor(this.groupDragCancelActive ? COLOR_DANGER_WASH_STRONG : COLOR_DANGER_WASH)
                 .border({ width: this.groupDragCancelActive ? 2 : 1, color: COLOR_DANGER })
                 .borderRadius(12)
                 .onDragEnter((): void => { this.groupDragCancelActive = true; })
@@ -2302,7 +2313,7 @@ struct Index {
             } else {
               Button('+ 新建分组')
                 .height(38).fontSize(13).fontColor(COLOR_PRIMARY)
-                .backgroundColor('#E5F6F0').borderRadius(12)
+                .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(12)
                 .onClick((): void => { this.openNewGroup(); })
             }
           }
@@ -2350,9 +2361,9 @@ struct Index {
     Text(`${itemTypeLabel(type)} ${type === VaultItemType.Login ? this.loginCount :
       (type === VaultItemType.Note ? this.noteCount :
         (type === VaultItemType.File ? this.fileCount : this.mediaCount))}`)
-      .fontSize(11).fontColor('#CFD6E2')
+      .fontSize(11).fontColor(COLOR_HERO_TEXT)
       .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-      .backgroundColor('#28364D')
+      .backgroundColor(COLOR_HERO_PILL)
       .borderRadius(10)
   }
 
@@ -2371,7 +2382,7 @@ struct Index {
     .width('100%')
     .height(34)
     .padding({ left: 12, right: 12 })
-    .backgroundColor('#F5FBF9')
+    .backgroundColor(COLOR_CARD_HIGHLIGHT)
     .border({ width: { top: 1 }, color: COLOR_BORDER })
     .opacity(this.draggingGroupId === groupId ? 0 : 1)
     .onClick((): void => {
@@ -2409,12 +2420,12 @@ struct Index {
           }
         })
         .backgroundColor(this.groupDropTargetId === group.id && this.draggingGroupId !== group.id ?
-          '#E8F7F2' : Color.Transparent)
+          COLOR_PRIMARY_TINT : Color.Transparent)
         .borderRadius(11)
         Stack() {
           Text('+').fontSize(22).fontColor(COLOR_PRIMARY)
         }
-          .width(34).height(34).borderRadius(11).backgroundColor('#E8F7F2')
+          .width(34).height(34).borderRadius(11).backgroundColor(COLOR_PRIMARY_TINT)
           .opacity(this.draggingGroupId === group.id ? 0 : 1)
           .draggable(false)
           .onClick((): void => {
@@ -2453,7 +2464,7 @@ struct Index {
     }
     .width(fullWidth ? '100%' : '48.5%')
     .margin({ bottom: 3 })
-    .backgroundColor(this.draggingGroupId === group.id ? '#F3FBF8' : COLOR_SURFACE)
+    .backgroundColor(this.draggingGroupId === group.id ? COLOR_GROUP_DRAG : COLOR_SURFACE)
     .borderRadius(18)
     .border({ width: this.groupDropTargetId === group.id && this.draggingGroupId !== group.id ? 2 : 1,
       color: this.draggingGroupId === group.id ? COLOR_PRIMARY :
@@ -2545,9 +2556,9 @@ struct Index {
           Stack({ alignContent: Alignment.Center }) {
             Circle({ width: 22, height: 22 })
               .fill(this.trashIsSelected(entry.item.id) ? COLOR_PRIMARY : Color.Transparent)
-              .stroke(this.trashIsSelected(entry.item.id) ? COLOR_PRIMARY : '#B5BDC8').strokeWidth(1.5)
+              .stroke(this.trashIsSelected(entry.item.id) ? COLOR_PRIMARY : COLOR_DISABLED).strokeWidth(1.5)
             if (this.trashIsSelected(entry.item.id)) {
-              Text('✓').fontSize(13).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+              Text('✓').fontSize(13).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK)
             }
           }.width(26).height(32)
         }
@@ -2560,12 +2571,12 @@ struct Index {
           Row({ space: 6 }) {
             Text(itemTypeLabel(entry.item.type)).fontSize(10).fontColor(COLOR_PRIMARY)
               .padding({ left: 7, right: 7, top: 2, bottom: 2 })
-              .backgroundColor('#E5F6F0').borderRadius(8)
+              .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(8)
             Text(entry.originalGroupName).fontSize(11).fontColor(COLOR_MUTED)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }.width('100%')
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        Text(this.formatTrashTime(entry.item.deletedAt)).fontSize(10).fontColor('#9AA2B1')
+        Text(this.formatTrashTime(entry.item.deletedAt)).fontSize(10).fontColor(COLOR_MUTED_LIGHT)
       }.width('100%')
       if (entry.item.type === VaultItemType.Image || entry.item.type === VaultItemType.Video) {
         VaultAttachmentPreview({ itemId: entry.item.id, fallbackType: entry.item.type, maxVisibleCount: 5 })
@@ -2606,7 +2617,7 @@ struct Index {
         Text(`${this.trashEntries.length} 条资料`).fontSize(11).fontColor(COLOR_MUTED)
         Blank()
         if (!this.trashManaging) {
-          Button('管理').height(40).fontSize(12).fontColor(COLOR_PRIMARY)
+          Button(ACTION_MANAGE).height(40).fontSize(12).fontColor(COLOR_PRIMARY)
             .backgroundColor(COLOR_SURFACE).borderRadius(12)
             .onClick((): void => { this.openTrashManagement(); })
           Row({ space: 3 }) {
@@ -2635,7 +2646,7 @@ struct Index {
           Text('永久删除全部资料').fontSize(10).fontColor(COLOR_MUTED)
         }
         .width('100%').height(38).padding({ left: 12, right: 12 })
-        .backgroundColor('#FFF3F4').borderRadius(11)
+        .backgroundColor(COLOR_DANGER_WASH).borderRadius(11)
         .onClick((): void => { this.emptyTrash(); })
       }
       if (this.trashManaging) {
@@ -2645,7 +2656,7 @@ struct Index {
           Text(this.trashSelectedIds.length === this.trashEntries.length && this.trashEntries.length > 0 ? '取消全选' : '全选')
             .fontSize(12).fontColor(COLOR_PRIMARY).padding(6)
             .onClick((): void => { this.toggleSelectAllTrash(); })
-          Text('取消').fontSize(12).fontColor(COLOR_MUTED).padding(6)
+          Text(ACTION_CANCEL).fontSize(12).fontColor(COLOR_MUTED).padding(6)
             .onClick((): void => { this.closeTrashManagement(); })
         }.width('100%').height(34)
       }
@@ -2664,11 +2675,11 @@ struct Index {
       if (this.trashManaging) {
         Row({ space: 8 }) {
           Button('恢复')
-            .layoutWeight(1).height(44).fontColor(COLOR_PRIMARY).backgroundColor('#E7F7F2').borderRadius(13)
+            .layoutWeight(1).height(44).fontColor(COLOR_PRIMARY).backgroundColor(COLOR_PRIMARY_ALT_TINT).borderRadius(13)
             .enabled(this.trashSelectedIds.length > 0).opacity(this.trashSelectedIds.length > 0 ? 1 : 0.45)
             .onClick((): void => { this.restoreSelectedTrash(); })
           Button('永久删除')
-            .layoutWeight(1).height(44).fontColor(COLOR_DANGER).backgroundColor('#FDEDEF').borderRadius(13)
+            .layoutWeight(1).height(44).fontColor(COLOR_DANGER).backgroundColor(COLOR_DANGER_TINT).borderRadius(13)
             .enabled(this.trashSelectedIds.length > 0).opacity(this.trashSelectedIds.length > 0 ? 1 : 0.45)
             .onClick((): void => { this.permanentlyDeleteSelectedTrash(); })
         }.width('100%')
@@ -2830,7 +2841,7 @@ struct Index {
           Row({ space: 6 }) {
             Text(itemTypeLabel(entry.item.type)).fontSize(11).fontColor(COLOR_PRIMARY)
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .backgroundColor('#E5F6F0').borderRadius(9)
+              .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(9)
             Text(entry.originalGroupName).fontSize(11).fontColor(COLOR_MUTED)
             Blank()
             Text(this.formatTrashTime(entry.item.deletedAt)).fontSize(10).fontColor(COLOR_MUTED)
@@ -2854,7 +2865,7 @@ struct Index {
                     .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
                 }.layoutWeight(1).padding(10).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
                 Button('复制').height(44).fontSize(12).fontColor(COLOR_PRIMARY)
-                  .backgroundColor('#E5F6F0').borderRadius(11)
+                  .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(11)
                   .enabled(entry.item.username.length > 0)
                   .onClick((): void => { this.copyTrashUsername(entry.item.username); })
               }.width('100%')
@@ -2881,7 +2892,7 @@ struct Index {
               .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(13)
               .onClick((): void => { this.trashAction(entry.item, false); })
             Button('永久删除').layoutWeight(1).height(46).fontColor(COLOR_DANGER)
-              .backgroundColor('#FDEDEF').borderRadius(13)
+              .backgroundColor(COLOR_DANGER_TINT).borderRadius(13)
               .onClick((): void => { this.trashAction(entry.item, true); })
           }.width('100%')
         }
@@ -2890,25 +2901,12 @@ struct Index {
       .width('100%').constraintSize({ maxHeight: '94%' }).scrollBar(BarState.Off)
       .backgroundColor(COLOR_SURFACE).borderRadius({ topLeft: 24, topRight: 24 })
     }
-    .width('100%').height('100%').backgroundColor('#99000000')
+    .width('100%').height('100%').backgroundColor(COLOR_SCRIM)
   }
 
   @Builder
   private modalHeader(title: string, closeAction: () => void): void {
-    Row() {
-      Text(title).fontSize(19).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-      Blank()
-      Stack() {
-        Text('×')
-          .fontSize(22)
-          .lineHeight(24)
-          .fontColor(COLOR_MUTED)
-      }
-        .width(38).height(38)
-        .backgroundColor(COLOR_SURFACE_2).borderRadius(11)
-        .onClick(closeAction)
-    }
-    .width('100%')
+    VaultDialogHeader({ title: title, onClose: closeAction })
   }
 
   @Builder
@@ -2944,13 +2942,13 @@ struct Index {
   @Builder
   private detailHeader(type: VaultItemType, closeAction: () => void): void {
     Row({ space: 9 }) {
-      Text('资料详情').fontSize(19).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
+      Text(TITLE_ITEM_DETAILS).fontSize(19).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
       Row({ space: 4 }) {
         this.detailTypeIcon(type)
         Text(itemTypeLabel(type)).fontSize(11).fontColor(COLOR_PRIMARY)
       }
       .height(28).padding({ left: 7, right: 9 })
-      .backgroundColor('#1B332C').borderRadius(10)
+      .backgroundColor(COLOR_TYPE_BADGE).borderRadius(10)
       Blank()
       Stack() {
         Text('×').fontSize(22).lineHeight(24).fontColor(COLOR_MUTED)
@@ -2990,15 +2988,15 @@ struct Index {
               thumbnailSize: 72
             })
             if (media.type === VaultItemType.Video) {
-              Text('视频').fontSize(9).fontColor('#FFFFFF')
+              Text('视频').fontSize(9).fontColor(COLOR_ON_DARK)
                 .padding({ left: 5, right: 5, top: 2, bottom: 2 })
-                .backgroundColor('#99000000').borderRadius(7)
+                .backgroundColor(COLOR_SCRIM).borderRadius(7)
                 .position({ right: 5, bottom: 5 })
               }
             Text('×')
-              .fontSize(17).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+              .fontSize(17).fontWeight(FontWeight.Medium).fontColor(COLOR_ON_DARK)
               .textAlign(TextAlign.Center)
-              .width(24).height(24).backgroundColor('#B3000000').borderRadius(12)
+              .width(24).height(24).backgroundColor(COLOR_SCRIM_STRONG).borderRadius(12)
               .position({ right: 4, top: 4 }).zIndex(2)
               .hitTestBehavior(HitTestMode.Block)
               .enabled(!this.recognizingMedia && !this.savingNewItem)
@@ -3030,11 +3028,11 @@ struct Index {
           Text('识别文字').fontSize(12).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
           Text('只读').fontSize(9).fontColor(COLOR_PRIMARY)
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .backgroundColor('#DDF3EB').borderRadius(8)
+            .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(8)
         }.width('100%')
         Scroll() {
           Text(this.pendingMedia[this.selectedMediaPreviewIndex].ocrText)
-            .fontSize(12).fontColor('#52665F').lineHeight(19).width('100%')
+            .fontSize(12).fontColor(COLOR_TEXT_SECONDARY).lineHeight(19).width('100%')
             .textAlign(TextAlign.Start)
         }
         .width('100%')
@@ -3044,7 +3042,7 @@ struct Index {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
       .padding({ left: 11, right: 11, top: 9, bottom: 9 })
-      .backgroundColor('#F0F8F5')
+      .backgroundColor(COLOR_PRIMARY_WASH)
       .border({ width: { left: 3 }, color: COLOR_PRIMARY })
       .borderRadius(10)
     }
@@ -3067,13 +3065,13 @@ struct Index {
               Stack({ alignContent: Alignment.Center }) {
                 Text('▤').fontSize(17).fontColor(COLOR_PRIMARY)
               }
-              .width(30).height(30).borderRadius(9).backgroundColor('#E5F6F0')
+              .width(30).height(30).borderRadius(9).backgroundColor(COLOR_PRIMARY_TINT)
               Text(file.name)
                 .fontSize(12).fontColor(COLOR_TEXT).maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
               Text('×')
                 .fontSize(17).fontColor(COLOR_MUTED).textAlign(TextAlign.Center)
-                .width(30).height(30).borderRadius(10).backgroundColor('#E9EEEC')
+                .width(30).height(30).borderRadius(10).backgroundColor(COLOR_DIVIDER_SOFT)
                 .enabled(!this.savingNewItem)
                 .opacity(this.savingNewItem ? 0.45 : 1)
                 .onClick((): void => { this.removePendingFile(index); })
@@ -3092,7 +3090,7 @@ struct Index {
       .scrollBar(BarState.Auto)
     }
     .width('100%')
-    .backgroundColor('#F0F8F5')
+    .backgroundColor(COLOR_PRIMARY_WASH)
     .borderRadius(12)
   }
 
@@ -3112,7 +3110,7 @@ struct Index {
       }
     }
     .width(46).height(height)
-    .backgroundColor('#E5F6F0').borderRadius(11)
+    .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(11)
     .onClick(action)
   }
 
@@ -3123,14 +3121,14 @@ struct Index {
       Text('已禁止截屏').fontSize(11).fontColor(COLOR_PRIMARY)
     }
     .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-    .backgroundColor('#173128')
+    .backgroundColor(COLOR_DARK_ACTION)
     .borderRadius(12)
     .alignSelf(ItemAlign.Start)
   }
 
   @Builder
   private detailNotesEditor(type: VaultItemType): void {
-    TextArea({ placeholder: type === VaultItemType.Note ? '内容' : '备注', text: this.detailNotes })
+    TextArea({ placeholder: type === VaultItemType.Note ? LABEL_CONTENT : LABEL_NOTES, text: this.detailNotes })
       .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
       .height(type === VaultItemType.Login ? 42 :
         (type === VaultItemType.Note || this.detailNotes.trim().length > 0 ? 84 : 44))
@@ -3193,22 +3191,22 @@ struct Index {
             this.typeChip(VaultItemType.File)
           }
           .width('100%')
-          TextInput({ placeholder: '名称', text: this.newTitle })
+          TextInput({ placeholder: LABEL_NAME, text: this.newTitle })
             .id(this.newItemTitleInputId())
             .defaultFocus(true)
             .onAppear((): void => { this.requestNewItemTitleFocus(60); })
-            .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
+            .fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER).backgroundColor(COLOR_SURFACE_2)
             .height(48).borderRadius(12)
             .onChange((value: string): void => { this.newTitle = value; })
           if (this.newType === VaultItemType.Login) {
             TextInput({ placeholder: '账号', text: this.newUsername })
-              .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
+              .fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER).backgroundColor(COLOR_SURFACE_2)
               .height(48).borderRadius(12)
               .onChange((value: string): void => { this.newUsername = value; })
             TextInput({ placeholder: '密码', text: this.newPassword })
               .type(InputType.Password)
               .showPassword(this.revealNewPassword)
-              .width('100%').fontColor(COLOR_TEXT).placeholderColor('#607B72')
+              .width('100%').fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER)
               .backgroundColor(COLOR_SURFACE_2).height(48).borderRadius(12)
               .onChange((value: string): void => { this.newPassword = value; })
               .onSecurityStateChange((visible: boolean): void => {
@@ -3222,7 +3220,7 @@ struct Index {
           if (this.newType === VaultItemType.Image) {
             Button('从系统相册添加')
               .width('100%').height(48).fontColor(COLOR_PRIMARY)
-              .backgroundColor('#173128').borderRadius(12)
+              .backgroundColor(COLOR_DARK_ACTION).borderRadius(12)
               .enabled(!this.recognizingMedia && !this.savingNewItem)
               .onClick((): void => { this.chooseMedia(); })
             if (this.selectedMediaCount > 0) {
@@ -3238,15 +3236,15 @@ struct Index {
           } else if (this.newType === VaultItemType.File) {
             Button('从文件系统添加')
               .width('100%').height(48).fontColor(COLOR_PRIMARY)
-              .backgroundColor('#173128').borderRadius(12)
+              .backgroundColor(COLOR_DARK_ACTION).borderRadius(12)
               .enabled(!this.savingNewItem)
               .onClick((): void => { this.chooseMedia(true); })
             if (this.selectedFileCount > 0) {
               this.selectedFilesPreview()
             }
           }
-          TextArea({ placeholder: this.newType === VaultItemType.Note ? '内容' : '备注', text: this.newNotes })
-            .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
+          TextArea({ placeholder: this.newType === VaultItemType.Note ? LABEL_CONTENT : LABEL_NOTES, text: this.newNotes })
+            .fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER).backgroundColor(COLOR_SURFACE_2)
             .height(this.newType === VaultItemType.Login ? 46 : 92).borderRadius(12)
             .onChange((value: string): void => { this.newNotes = value; })
           if (this.savingNewItem) {
@@ -3260,7 +3258,7 @@ struct Index {
                 .width('100%').color(COLOR_PRIMARY).backgroundColor(COLOR_SURFACE_2)
             }.width('100%')
           }
-          Button(this.savingNewItem ? '正在保存…' : (this.recognizingMedia ? '正在识别图片文字…' : '保存'))
+          Button(this.savingNewItem ? '正在保存…' : (this.recognizingMedia ? '正在识别图片文字…' : ACTION_SAVE))
             .width('100%').height(50).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
             .backgroundColor(COLOR_PRIMARY).borderRadius(13)
             .enabled(!this.savingNewItem && !this.recognizingMedia)
@@ -3277,7 +3275,7 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#99000000')
+    .backgroundColor(COLOR_SCRIM)
   }
 
   @Builder
@@ -3289,7 +3287,7 @@ struct Index {
         TextInput({ placeholder: '分组名称', text: this.groupRenameName })
           .id('renameGroupInput')
           .defaultFocus(true)
-          .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
+          .fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER).backgroundColor(COLOR_SURFACE_2)
           .height(50).borderRadius(12)
           .onChange((value: string): void => { this.groupRenameName = value; })
         Button('保存修改')
@@ -3305,7 +3303,7 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#99000000')
+    .backgroundColor(COLOR_SCRIM)
   }
 
   @Builder
@@ -3326,16 +3324,16 @@ struct Index {
           Text('分组中当前显示的资料和附件会永久删除。回收站资料会保留，恢复时将自动重建原分组。')
             .fontSize(13).fontColor(COLOR_DANGER).lineHeight(20).width('100%')
         }
-        .width('100%').padding(12).backgroundColor('#FDEDEF').borderRadius(12)
+        .width('100%').padding(12).backgroundColor(COLOR_DANGER_TINT).borderRadius(12)
         Text(`请输入分组名称“${group.name}”以确认删除`)
           .fontSize(12).fontColor(COLOR_DANGER).width('100%')
         TextInput({ placeholder: group.name, text: this.groupDeleteConfirmName })
-          .fontColor(COLOR_TEXT).placeholderColor('#A7AFBC').backgroundColor(COLOR_SURFACE_2)
+          .fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER_LIGHT).backgroundColor(COLOR_SURFACE_2)
           .height(50).borderRadius(12)
           .onChange((value: string): void => { this.groupDeleteConfirmName = value; })
         Button('永久删除分组及当前资料')
           .width('100%').height(50).fontWeight(FontWeight.Bold)
-          .fontColor(this.groupDeleteConfirmName.trim() === group.name ? '#FFFFFF' : COLOR_MUTED)
+          .fontColor(this.groupDeleteConfirmName.trim() === group.name ? COLOR_ON_DARK : COLOR_MUTED)
           .backgroundColor(this.groupDeleteConfirmName.trim() === group.name ? COLOR_DANGER : COLOR_SURFACE_2)
           .borderRadius(13)
           .enabled(this.groupDeleteConfirmName.trim() === group.name)
@@ -3344,7 +3342,7 @@ struct Index {
       .width('100%').padding(20).backgroundColor(COLOR_SURFACE)
       .borderRadius({ topLeft: 24, topRight: 24 })
     }
-    .width('100%').height('100%').backgroundColor('#99000000')
+    .width('100%').height('100%').backgroundColor(COLOR_SCRIM)
   }
 
   @Builder
@@ -3356,7 +3354,7 @@ struct Index {
         TextInput({ placeholder: '分组名称', text: this.newGroupName })
           .id('newGroupInput')
           .defaultFocus(true)
-          .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
+          .fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER).backgroundColor(COLOR_SURFACE_2)
           .height(50).borderRadius(12)
           .onChange((value: string): void => { this.newGroupName = value; })
         Button('创建分组')
@@ -3372,7 +3370,7 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#99000000')
+    .backgroundColor(COLOR_SCRIM)
   }
 
   @Builder
@@ -3391,14 +3389,14 @@ struct Index {
             Column() {
               this.detailGroupPicker()
             }
-            .width('100%').padding(9).backgroundColor('#0C1714').borderRadius(15)
+            .width('100%').padding(9).backgroundColor(COLOR_DARK_SURFACE).borderRadius(15)
             Column({ space: 7 }) {
-              TextInput({ placeholder: '名称', text: this.detailTitle })
+              TextInput({ placeholder: LABEL_NAME, text: this.detailTitle })
                 .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(42).borderRadius(11)
                 .onChange((value: string): void => { this.detailTitle = value; })
               this.detailNotesEditor(item.type)
             }
-            .width('100%').padding(9).backgroundColor('#0C1714').borderRadius(15)
+            .width('100%').padding(9).backgroundColor(COLOR_DARK_SURFACE).borderRadius(15)
             Row({ space: 10 }) {
               Button('保存修改').fontSize(14).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
                 .layoutWeight(1).height(44)
@@ -3406,7 +3404,7 @@ struct Index {
                 .onClick((): void => { this.saveSelectedItem(); })
               Button('移入回收站').fontSize(14).fontColor(COLOR_DANGER)
                 .layoutWeight(1).height(44)
-                .backgroundColor('#2A1719').borderRadius(14)
+                .backgroundColor(COLOR_DANGER_DARK_SURFACE).borderRadius(14)
                 .onClick((): void => { this.trashSelectedItem(); })
             }
             .width('100%')
@@ -3419,7 +3417,7 @@ struct Index {
             if (item.type === VaultItemType.File) {
               VaultFileGallery({ itemId: item.id })
             }
-            TextInput({ placeholder: '名称', text: this.detailTitle })
+            TextInput({ placeholder: LABEL_NAME, text: this.detailTitle })
               .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)
               .onChange((value: string): void => { this.detailTitle = value; })
             if (item.type === VaultItemType.Login) {
@@ -3445,7 +3443,7 @@ struct Index {
               .onClick((): void => { this.saveSelectedItem(); })
             Button('移入回收站')
               .width('100%').height(44).fontColor(COLOR_DANGER)
-              .backgroundColor('#2A1719').borderRadius(12)
+              .backgroundColor(COLOR_DANGER_DARK_SURFACE).borderRadius(12)
               .onClick((): void => { this.trashSelectedItem(); })
           }
           .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 14 })
@@ -3459,7 +3457,7 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#99000000')
+    .backgroundColor(COLOR_SCRIM)
   }
 
   build() {

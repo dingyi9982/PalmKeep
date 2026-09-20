@@ -1,12 +1,17 @@
 import {
   COLOR_BORDER,
+  COLOR_CHEVRON,
+  COLOR_DARK_ACTION,
+  COLOR_DARK_TINT,
   COLOR_DANGER,
   COLOR_MUTED,
+  COLOR_PLACEHOLDER,
   COLOR_PRIMARY,
   COLOR_SURFACE,
   COLOR_SURFACE_2,
   COLOR_TEXT
 } from './VaultTheme';
+import { ACTION_CLOSE, ACTION_ENABLE } from './VaultCopy';
 
 @Component
 export struct VaultSettingsPanel {
@@ -36,28 +41,28 @@ export struct VaultSettingsPanel {
             .width('100%').padding(15)
           Row({ space: 12 }) {
             Stack() { Text('◉').fontSize(22).fontColor(COLOR_PRIMARY) }
-              .width(44).height(44).borderRadius(14).backgroundColor('#183029')
+              .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
             Column({ space: 3 }) {
               Text('人脸登录').fontSize(14).fontColor(COLOR_TEXT)
               Text(this.faceEnabled ? '已启用 · 由系统人脸验证' :
                 (this.faceAvailable ? '未启用' : '设备未录入或不支持'))
                 .fontSize(12).fontColor(COLOR_MUTED)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Button(this.faceEnabled ? '关闭' : '启用')
+            Button(this.faceEnabled ? ACTION_CLOSE : ACTION_ENABLE)
               .height(38).fontColor(this.faceEnabled ? COLOR_DANGER : COLOR_PRIMARY)
               .backgroundColor(COLOR_SURFACE_2).enabled(this.faceEnabled || this.faceAvailable)
               .onClick((): void => { this.onToggleFace(); })
           }.width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
           Row({ space: 12 }) {
             Stack() { Text('◎').fontSize(22).fontColor(COLOR_PRIMARY) }
-              .width(44).height(44).borderRadius(14).backgroundColor('#183029')
+              .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
             Column({ space: 3 }) {
               Text('指纹登录').fontSize(14).fontColor(COLOR_TEXT)
               Text(this.fingerprintEnabled ? '已启用 · 由系统指纹验证' :
                 (this.fingerprintAvailable ? '未启用' : '设备未录入或不支持'))
                 .fontSize(12).fontColor(COLOR_MUTED)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Button(this.fingerprintEnabled ? '关闭' : '启用')
+            Button(this.fingerprintEnabled ? ACTION_CLOSE : ACTION_ENABLE)
               .height(38).fontColor(this.fingerprintEnabled ? COLOR_DANGER : COLOR_PRIMARY)
               .backgroundColor(COLOR_SURFACE_2).enabled(this.fingerprintEnabled || this.fingerprintAvailable)
               .onClick((): void => { this.onToggleFingerprint(); })
@@ -70,13 +75,13 @@ export struct VaultSettingsPanel {
                 })
               }
               .columnsTemplate('1fr 1fr 1fr').columnsGap(3).rowsGap(3).width(18).height(18)
-            }.width(44).height(44).borderRadius(14).backgroundColor('#183029')
+            }.width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
             Column({ space: 3 }) {
               Text('手势登录').fontSize(14).fontColor(COLOR_TEXT)
               Text(this.gestureEnabled ? '已启用 · 九宫格快捷解锁' : '未启用 · 至少连接 4 个点')
                 .fontSize(12).fontColor(COLOR_MUTED)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Button(this.gestureEnabled ? '关闭' : '启用')
+            Button(this.gestureEnabled ? ACTION_CLOSE : ACTION_ENABLE)
               .height(38).fontColor(this.gestureEnabled ? COLOR_DANGER : COLOR_PRIMARY)
               .backgroundColor(COLOR_SURFACE_2).onClick((): void => { this.onToggleGesture(); })
           }.width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
@@ -86,7 +91,7 @@ export struct VaultSettingsPanel {
               Text('打开应用时优先使用').fontSize(12).fontColor(COLOR_MUTED)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
             Text(this.preferredUnlockLabel).fontSize(13).fontColor(COLOR_PRIMARY)
-            Text('›').fontSize(22).fontColor('#B2B8C2').margin({ left: 8 })
+            Text('›').fontSize(22).fontColor(COLOR_CHEVRON).margin({ left: 8 })
           }
           .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
           .onClick((): void => { this.onChoosePreferredUnlock(); })
@@ -99,12 +104,12 @@ export struct VaultSettingsPanel {
             .width('100%').padding(15)
           Row({ space: 12 }) {
             Stack() { Text('••').fontSize(18).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY) }
-              .width(44).height(44).borderRadius(14).backgroundColor('#183029')
+              .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
             Column({ space: 3 }) {
               Text('修改密码').fontSize(14).fontColor(COLOR_TEXT)
               Text('修改后快捷登录需要重新启用').fontSize(12).fontColor(COLOR_MUTED)
             }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Text('›').fontSize(22).fontColor('#B2B8C2')
+            Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
           }
           .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
           .onClick((): void => { this.onChangePassword(); })
@@ -115,7 +120,7 @@ export struct VaultSettingsPanel {
             }.alignItems(HorizontalAlign.Start)
             Blank()
             Text(this.autoLockLabel).fontSize(12).fontColor(COLOR_PRIMARY)
-            Text('›').fontSize(22).fontColor('#B2B8C2').margin({ left: 8 })
+            Text('›').fontSize(22).fontColor(COLOR_CHEVRON).margin({ left: 8 })
           }
           .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
           .onClick((): void => { this.onChooseAutoLock(); })
@@ -133,12 +138,12 @@ export struct VaultSettingsPanel {
                 }
               })
             }
-          }.width(44).height(44).borderRadius(14).backgroundColor('#183029')
+          }.width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
           Column({ space: 3 }) {
             Text('分组管理').fontSize(15).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
             Text('查看和删除自定义分组').fontSize(11).fontColor(COLOR_MUTED)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Text('›').fontSize(22).fontColor('#B2B8C2')
+          Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
         }
         .width('100%').padding(14).backgroundColor(COLOR_SURFACE).borderRadius(17)
         .border({ width: 1, color: COLOR_BORDER }).onClick((): void => { this.onOpenGroupManager(); })
@@ -152,7 +157,7 @@ export struct VaultSettingsPanel {
           Row() {
             Text('构建标识').fontSize(13).fontColor(COLOR_MUTED)
             Blank()
-            Text(this.buildLabel).fontSize(12).fontColor('#607B72').maxLines(1)
+            Text(this.buildLabel).fontSize(12).fontColor(COLOR_PLACEHOLDER).maxLines(1)
           }
           .width('100%').padding({ left: 15, right: 15, top: 12, bottom: 14 })
           .border({ width: { top: 1 }, color: COLOR_BORDER })
@@ -160,8 +165,8 @@ export struct VaultSettingsPanel {
         .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(17)
         .border({ width: 1, color: COLOR_BORDER })
         Button('立即锁定保险库').width('100%').height(50).fontColor(COLOR_PRIMARY)
-          .backgroundColor('#173128').borderRadius(14).onClick((): void => { this.onLockVault(); })
-        Text('掌心密匣 PalmVault').fontSize(12).fontColor('#607B72')
+          .backgroundColor(COLOR_DARK_ACTION).borderRadius(14).onClick((): void => { this.onLockVault(); })
+        Text('掌心密匣 PalmVault').fontSize(12).fontColor(COLOR_PLACEHOLDER)
           .width('100%').textAlign(TextAlign.Center)
       }
       .width('100%').padding({ left: 18, right: 18, top: 12, bottom: 105 })

@@ -7,6 +7,10 @@ import { vaultRepository } from '../services/VaultRepository';
 import { normalizeError } from '../services/ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
 import { VaultThumbnail } from './VaultThumbnail';
+import {
+  COLOR_DANGER, COLOR_MEDIA_CANVAS, COLOR_MEDIA_CONTROL, COLOR_MEDIA_SURFACE, COLOR_MUTED,
+  COLOR_ON_DARK, COLOR_OVERLAY, COLOR_OVERLAY_PRESSED, COLOR_PRIMARY_BRIGHT
+} from './VaultTheme';
 
 @Component
 export struct VaultMedia {
@@ -257,17 +261,17 @@ export struct VaultMedia {
           .objectFit(ImageFit.Contain)
       }
       Stack() {
-        Text('×').fontSize(28).fontColor('#FFFFFF')
+        Text('×').fontSize(28).fontColor(COLOR_ON_DARK)
       }
       .width(42).height(42)
       .margin({ top: 18, right: 16 })
-      .backgroundColor('#66000000')
+      .backgroundColor(COLOR_OVERLAY)
       .borderRadius(21)
       .onClick((): void => { this.showFullScreen = false; })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#000000')
+    .backgroundColor(COLOR_MEDIA_CANVAS)
   }
 
   build() {
@@ -280,17 +284,17 @@ export struct VaultMedia {
               .height('100%')
               .objectFit(ImageFit.Contain)
           } else if (this.message.length === 0) {
-            LoadingProgress().width(34).height(34).color('#2DD6A6')
+            LoadingProgress().width(34).height(34).color(COLOR_PRIMARY_BRIGHT)
               .align(Alignment.Center)
           }
           if (this.bitmap && !this.fullScreenMode) {
             Text('⛶')
               .fontSize(19)
-              .fontColor('#FFFFFF')
+              .fontColor(COLOR_ON_DARK)
               .width(38).height(38)
               .textAlign(TextAlign.Center)
               .margin(10)
-              .backgroundColor('#66000000')
+              .backgroundColor(COLOR_OVERLAY)
               .borderRadius(19)
           }
         }
@@ -298,7 +302,7 @@ export struct VaultMedia {
         .height(this.fullScreenMode ? '100%' : 286)
         .borderRadius(this.fullScreenMode ? 0 : 15)
         .clip(true)
-        .backgroundColor(this.fullScreenMode ? '#000000' : '#0A1210')
+        .backgroundColor(this.fullScreenMode ? COLOR_MEDIA_CANVAS : COLOR_MEDIA_SURFACE)
         .onClick((): void => {
           if (this.bitmap) {
             if (this.requestFullScreen) { this.requestFullScreen(0, false); } else { this.showFullScreen = true; }
@@ -320,34 +324,34 @@ export struct VaultMedia {
           }
           if (!this.ready && this.message.length === 0) {
             Progress({ value: 35, total: 100, type: ProgressType.Ring })
-              .width(34).height(34).color('#2DD6A6')
+              .width(34).height(34).color(COLOR_PRIMARY_BRIGHT)
           }
           if (this.ready && !this.playing) {
-            Text('▶').fontSize(25).fontColor('#FFFFFF').textAlign(TextAlign.Center)
+            Text('▶').fontSize(25).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
               .width(58).height(58).padding({ left: 4 })
-              .backgroundColor('#88000000').borderRadius(29)
+              .backgroundColor(COLOR_OVERLAY_PRESSED).borderRadius(29)
               .onClick((): void => { this.togglePlayback(); })
           }
         }
         .width('100%').height(this.fullScreenMode ? '76%' : 236)
-        .borderRadius(this.fullScreenMode ? 0 : 15).clip(true).backgroundColor('#020504')
+        .borderRadius(this.fullScreenMode ? 0 : 15).clip(true).backgroundColor(COLOR_MEDIA_CANVAS)
         Row({ space: 8 }) {
-          Text(this.playing ? 'Ⅱ' : '▶').fontSize(this.playing ? 18 : 16).fontColor('#FFFFFF')
+          Text(this.playing ? 'Ⅱ' : '▶').fontSize(this.playing ? 18 : 16).fontColor(COLOR_ON_DARK)
             .textAlign(TextAlign.Center).width(36).height(36).padding({ left: this.playing ? 0 : 2 })
-            .backgroundColor('#1D2D28').borderRadius(18).opacity(this.ready ? 1 : 0.4)
+            .backgroundColor(COLOR_MEDIA_CONTROL).borderRadius(18).opacity(this.ready ? 1 : 0.4)
             .onClick((): void => { if (this.ready) { this.togglePlayback(); } })
           Slider({ value: this.playbackTime, min: 0, max: Math.max(1, this.duration) })
-            .enabled(this.ready).layoutWeight(1).trackThickness(3).selectedColor('#2DD6A6')
+            .enabled(this.ready).layoutWeight(1).trackThickness(3).selectedColor(COLOR_PRIMARY_BRIGHT)
             .onChange((value: number, mode: SliderChangeMode): void => {
               if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
                 this.player?.seek(Math.round(value));
               }
             })
           Text(`${this.formatTime(this.playbackTime)} / ${this.formatTime(this.duration)}`)
-            .fontSize(10).fontColor('#91A9A0')
+            .fontSize(10).fontColor(COLOR_MUTED)
           if (!this.fullScreenMode) {
-            Text('⛶').fontSize(19).fontColor('#FFFFFF').textAlign(TextAlign.Center)
-              .width(36).height(36).backgroundColor('#1D2D28').borderRadius(18).opacity(this.ready ? 1 : 0.4)
+            Text('⛶').fontSize(19).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+              .width(36).height(36).backgroundColor(COLOR_MEDIA_CONTROL).borderRadius(18).opacity(this.ready ? 1 : 0.4)
               .onClick((): void => {
                 this.openVideoFullScreen();
               })
@@ -355,12 +359,12 @@ export struct VaultMedia {
         }.width('100%').padding({ left: 3, right: 3 })
       }
       if (this.message.length > 0) {
-        Text(this.message).fontSize(12).fontColor('#E68C93').padding({ left: 4, right: 4 })
+        Text(this.message).fontSize(12).fontColor(COLOR_DANGER).padding({ left: 4, right: 4 })
       }
     }
     .width('100%')
     .padding(this.fullScreenMode ? 0 : 6)
-    .backgroundColor(this.fullScreenMode ? '#000000' : '#0A1210')
+    .backgroundColor(this.fullScreenMode ? COLOR_MEDIA_CANVAS : COLOR_MEDIA_SURFACE)
     .borderRadius(this.fullScreenMode ? 0 : 17)
     .bindContentCover(this.showFullScreen, this.fullScreenImage)
   }

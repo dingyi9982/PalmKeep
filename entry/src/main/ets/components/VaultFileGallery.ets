@@ -4,6 +4,15 @@ import { VaultAttachmentInput, VaultAttachmentSummary, VaultItemType } from '../
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { vaultRepository } from '../services/VaultRepository';
 import { normalizeError } from '../services/ErrorUtils';
+import {
+  ACTION_ADD, ACTION_CANCEL, ACTION_DELETE, ACTION_DOWNLOAD, TITLE_FILES, managementAction
+} from './VaultCopy';
+import {
+  COLOR_DANGER, COLOR_DANGER_TINT, COLOR_MUTED, COLOR_MUTED_DARK, COLOR_ON_DARK,
+  COLOR_NEUTRAL_BORDER, COLOR_NEUTRAL_TINT, COLOR_PRIMARY, COLOR_PRIMARY_DARK,
+  COLOR_PRIMARY_SELECTED_BG, COLOR_PRIMARY_TINT, COLOR_SELECTION_BORDER, COLOR_SURFACE_2,
+  COLOR_SURFACE_WASH, COLOR_TEXT_DARK, COLOR_TRANSPARENT
+} from './VaultTheme';
 
 @Component
 export struct VaultFileGallery {
@@ -147,7 +156,7 @@ export struct VaultFileGallery {
     const result = await this.getUIContext().getPromptAction().showDialog({
       title: '删除所选文件？',
       message: `将永久删除 ${this.selectedIndexes.length} 个文件，此操作不可恢复。`,
-      buttons: [{ text: '取消', color: '#738078' }, { text: '删除', color: '#D95656' }]
+      buttons: [{ text: ACTION_CANCEL, color: COLOR_MUTED_DARK }, { text: ACTION_DELETE, color: COLOR_DANGER }]
     });
     if (result.index !== 1) { return; }
     this.busy = true;
@@ -174,26 +183,26 @@ export struct VaultFileGallery {
     Row({ space: 9 }) {
       if (this.managing) {
         Text(this.isSelected(attachment.index) ? '✓' : '')
-          .fontSize(13).fontWeight(FontWeight.Bold).fontColor('#FFFFFF').textAlign(TextAlign.Center)
+          .fontSize(13).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
           .width(24).height(24).borderRadius(12)
-          .backgroundColor(this.isSelected(attachment.index) ? '#24B88A' : '#D9E1DE')
+          .backgroundColor(this.isSelected(attachment.index) ? COLOR_PRIMARY : COLOR_SELECTION_BORDER)
       }
       Column({ space: 3 }) {
         Text(attachment.name.length > 0 ? attachment.name : '未命名文件')
-          .fontSize(13).fontWeight(FontWeight.Medium).fontColor('#23312C')
+          .fontSize(13).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT_DARK)
           .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-        Text(this.readableSize(attachment.sizeBytes)).fontSize(10).fontColor('#7D8696')
+        Text(this.readableSize(attachment.sizeBytes)).fontSize(10).fontColor(COLOR_MUTED)
       }
       .layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (!this.managing) {
-        Button('下载').height(32).fontSize(11).fontColor('#20A47D')
-          .backgroundColor('#E5F6F0').borderRadius(10)
+        Button(ACTION_DOWNLOAD).height(32).fontSize(11).fontColor(COLOR_PRIMARY_DARK)
+          .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(10)
           .enabled(!this.busy).onClick((): void => { this.download(attachment); })
       }
     }
     .width('100%')
     .padding({ left: 10, right: 10, top: 9, bottom: 9 })
-    .backgroundColor(this.isSelected(attachment.index) ? '#EAF7F2' : '#F0F2F6')
+    .backgroundColor(this.isSelected(attachment.index) ? COLOR_PRIMARY_SELECTED_BG : COLOR_SURFACE_2)
     .borderRadius(12)
     .onClick((): void => {
       if (this.managing && !this.busy) { this.toggleSelected(attachment.index); }
@@ -203,15 +212,15 @@ export struct VaultFileGallery {
   build() {
     Column({ space: 7 }) {
       Row({ space: 7 }) {
-        Text('文件').fontSize(14).fontWeight(FontWeight.Bold).fontColor('#23312C')
-        Text(`${this.attachments.length}`).fontSize(10).fontColor('#718078')
-          .padding({ left: 7, right: 7, top: 2, bottom: 2 }).backgroundColor('#EDF2F0').borderRadius(10)
+        Text(TITLE_FILES).fontSize(14).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT_DARK)
+        Text(`${this.attachments.length}`).fontSize(10).fontColor(COLOR_MUTED_DARK)
+          .padding({ left: 7, right: 7, top: 2, bottom: 2 }).backgroundColor(COLOR_NEUTRAL_TINT).borderRadius(10)
         Blank()
         if (!this.readOnly) {
-          Button('添加').height(32).fontSize(12).fontColor('#20A47D').backgroundColor('#00000000')
+          Button(ACTION_ADD).height(32).fontSize(12).fontColor(COLOR_PRIMARY_DARK).backgroundColor(COLOR_TRANSPARENT)
             .enabled(!this.busy).onClick((): void => { this.addFiles(); })
-          Button(this.managing ? '取消' : '管理').height(32).fontSize(12)
-            .fontColor(this.managing ? '#738078' : '#20A47D').backgroundColor('#00000000')
+          Button(managementAction(this.managing)).height(32).fontSize(12)
+            .fontColor(this.managing ? COLOR_MUTED_DARK : COLOR_PRIMARY_DARK).backgroundColor(COLOR_TRANSPARENT)
             .enabled(!this.busy).onClick((): void => { this.toggleManaging(); })
         }
       }.width('100%').height(34)
@@ -221,9 +230,9 @@ export struct VaultFileGallery {
       if (this.managing) {
         Row({ space: 8 }) {
           Text(`已选择 ${this.selectedIndexes.length} 项`)
-            .fontSize(11).fontColor('#738078').layoutWeight(1)
-          Button('删除所选').height(36).fontSize(12).fontColor('#D95656')
-            .backgroundColor('#FFF0F0').borderRadius(11)
+            .fontSize(11).fontColor(COLOR_MUTED_DARK).layoutWeight(1)
+          Button(`${ACTION_DELETE}所选`).height(36).fontSize(12).fontColor(COLOR_DANGER)
+            .backgroundColor(COLOR_DANGER_TINT).borderRadius(11)
             .enabled(this.selectedIndexes.length > 0 && !this.busy)
             .opacity(this.selectedIndexes.length > 0 ? 1 : 0.45)
             .onClick((): void => { this.deleteSelected(); })
@@ -232,20 +241,20 @@ export struct VaultFileGallery {
       if (this.busy && this.progressText.length > 0) {
         Column({ space: 5 }) {
           Row() {
-            Text(this.progressText).fontSize(11).fontColor('#738078').layoutWeight(1)
-            if (this.progress > 0) { Text(`${this.progress}%`).fontSize(11).fontColor('#20A47D') }
+            Text(this.progressText).fontSize(11).fontColor(COLOR_MUTED_DARK).layoutWeight(1)
+            if (this.progress > 0) { Text(`${this.progress}%`).fontSize(11).fontColor(COLOR_PRIMARY_DARK) }
           }.width('100%')
           if (this.progress > 0) {
             Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
-              .width('100%').height(4).color('#24B88A')
+              .width('100%').height(4).color(COLOR_PRIMARY)
           }
         }.width('100%')
       }
     }
     .width('100%')
     .padding(10)
-    .backgroundColor('#FAFCFB')
-    .border({ width: 1, color: '#E2E9E6' })
+    .backgroundColor(COLOR_SURFACE_WASH)
+    .border({ width: 1, color: COLOR_NEUTRAL_BORDER })
     .borderRadius(15)
   }
 }

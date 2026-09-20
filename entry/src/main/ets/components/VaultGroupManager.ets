@@ -1,7 +1,9 @@
 import { VaultGroup } from '../models/VaultModels';
 import {
-  COLOR_BORDER, COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SURFACE, COLOR_SURFACE_2, COLOR_TEXT
+  COLOR_BORDER, COLOR_DANGER, COLOR_DANGER_TINT, COLOR_MUTED, COLOR_PRIMARY,
+  COLOR_SURFACE, COLOR_SURFACE_2, COLOR_TEXT
 } from './VaultTheme';
+import { ACTION_DELETE } from './VaultCopy';
 
 @Component
 export struct VaultGroupManager {
@@ -30,8 +32,8 @@ export struct VaultGroupManager {
                 Button('重命名').height(36).fontSize(11).fontColor(COLOR_PRIMARY)
                   .backgroundColor(COLOR_SURFACE_2).borderRadius(10)
                   .onClick((): void => { this.onRename(group); })
-                Button('删除').height(36).fontSize(11).fontColor(COLOR_DANGER)
-                  .backgroundColor('#FDEDEF').borderRadius(10)
+                Button(ACTION_DELETE).height(36).fontSize(11).fontColor(COLOR_DANGER)
+                  .backgroundColor(COLOR_DANGER_TINT).borderRadius(10)
                   .onClick((): void => { this.onDelete(group); })
               }
             }

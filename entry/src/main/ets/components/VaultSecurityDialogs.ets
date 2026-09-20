@@ -1,18 +1,9 @@
 import { GestureGrid } from './GestureGrid';
+import { VaultDialogHeader } from './VaultCommonComponents';
 import {
-  COLOR_BG, COLOR_BORDER, COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY,
-  COLOR_SURFACE, COLOR_SURFACE_2, COLOR_TEXT
+  COLOR_BG, COLOR_BORDER, COLOR_DANGER, COLOR_DANGER_TINT, COLOR_MUTED, COLOR_ON_DARK,
+  COLOR_PRIMARY, COLOR_SCRIM, COLOR_SURFACE, COLOR_SURFACE_2, RADIUS_CONTROL, RADIUS_DIALOG
 } from './VaultTheme';
-
-@Builder
-function dialogHeader(title: string, closeAction: () => void): void {
-  Row() {
-    Text(title).fontSize(19).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-    Blank()
-    Stack() { Text('×').fontSize(22).lineHeight(24).fontColor(COLOR_MUTED) }
-      .width(38).height(38).backgroundColor(COLOR_SURFACE_2).borderRadius(11).onClick(closeAction)
-  }.width('100%')
-}
 
 @Component
 export struct ChangePasswordDialog {
@@ -26,23 +17,23 @@ export struct ChangePasswordDialog {
   build() {
     Column() {
       Column({ space: 10 }) {
-        dialogHeader('修改密码', this.onClose)
+        VaultDialogHeader({ title: '修改密码', onClose: this.onClose })
         TextInput({ placeholder: '当前密码', text: this.currentPassword })
-          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
           .onChange((value: string): void => { this.currentPassword = value; })
         TextInput({ placeholder: '新密码（至少 8 个字符）', text: this.newPassword })
-          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
           .onChange((value: string): void => { this.newPassword = value; })
         TextInput({ placeholder: '再次输入新密码', text: this.confirmPassword })
-          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
           .onChange((value: string): void => { this.confirmPassword = value; })
         Button(this.busy ? '正在修改…' : '确认修改')
           .width('100%').height(48).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
-          .backgroundColor(COLOR_PRIMARY).borderRadius(12).enabled(!this.busy)
+          .backgroundColor(COLOR_PRIMARY).borderRadius(RADIUS_CONTROL).enabled(!this.busy)
           .onClick((): void => { this.onConfirm(); })
-      }.width('88%').padding(18).backgroundColor(COLOR_SURFACE).borderRadius(22)
+      }.width('88%').padding(18).backgroundColor(COLOR_SURFACE).borderRadius(RADIUS_DIALOG)
     }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center).backgroundColor('#99000000')
+    .width('100%').height('100%').justifyContent(FlexAlign.Center).backgroundColor(COLOR_SCRIM)
   }
 }
 
@@ -65,51 +56,51 @@ export struct RecoveryCenterDialog {
     Column() {
       Scroll() {
         Column({ space: 10 }) {
-          dialogHeader('恢复访问', this.onClose)
+          VaultDialogHeader({ title: '恢复访问', onClose: this.onClose })
           if (!this.authenticated) {
             Text('使用已启用的本机生物认证验证身份，然后重设密码。')
               .fontSize(13).fontColor(COLOR_MUTED).lineHeight(20).width('100%')
             if (this.faceEnabled) {
               Button(this.busy ? '正在验证…' : '使用人脸验证')
                 .width('100%').height(48).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
-                .backgroundColor(COLOR_PRIMARY).borderRadius(12).enabled(!this.busy)
+                .backgroundColor(COLOR_PRIMARY).borderRadius(RADIUS_CONTROL).enabled(!this.busy)
                 .onClick((): void => { this.onAuthenticateFace(); })
             }
             if (this.fingerprintEnabled) {
               Button(this.busy ? '正在验证…' : '使用指纹验证')
                 .width('100%').height(48).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
-                .backgroundColor(COLOR_PRIMARY).borderRadius(12).enabled(!this.busy)
+                .backgroundColor(COLOR_PRIMARY).borderRadius(RADIUS_CONTROL).enabled(!this.busy)
                 .onClick((): void => { this.onAuthenticateFingerprint(); })
             }
             if (!this.faceEnabled && !this.fingerprintEnabled) {
               Text('没有已启用的生物认证，当前无法无损重设密码。')
                 .fontSize(13).fontColor(COLOR_MUTED).lineHeight(20).width('100%')
-                .padding(12).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+                .padding(12).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
             }
           } else {
             Text(`已通过${this.authLabel}验证`).fontSize(13).fontColor(COLOR_PRIMARY).width('100%')
             TextInput({ placeholder: '新密码（至少 8 个字符）', text: this.newPassword })
-              .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+              .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
               .onChange((value: string): void => { this.newPassword = value; })
             TextInput({ placeholder: '再次输入新密码', text: this.confirmPassword })
-              .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+              .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
               .onChange((value: string): void => { this.confirmPassword = value; })
             Button(this.busy ? '正在重设…' : '重设密码并进入保险库')
               .width('100%').height(48).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
-              .backgroundColor(COLOR_PRIMARY).borderRadius(12).enabled(!this.busy)
+              .backgroundColor(COLOR_PRIMARY).borderRadius(RADIUS_CONTROL).enabled(!this.busy)
               .onClick((): void => { this.onResetPassword(); })
           }
           Divider().color(COLOR_BORDER).margin({ top: 4, bottom: 2 })
           Text('无法通过上述方式恢复？').fontSize(12).fontColor(COLOR_MUTED).width('100%')
           Button('永久清除本地保险库').width('100%').height(44).fontSize(13).fontColor(COLOR_DANGER)
-            .backgroundColor('#FDEDEF').borderRadius(12).enabled(!this.busy)
+            .backgroundColor(COLOR_DANGER_TINT).borderRadius(RADIUS_CONTROL).enabled(!this.busy)
             .onClick((): void => { this.onClearVault(); })
         }.width('100%').padding(18)
       }
       .width('88%').constraintSize({ maxHeight: '88%' }).scrollBar(BarState.Off)
-      .backgroundColor(COLOR_SURFACE).borderRadius(22)
+      .backgroundColor(COLOR_SURFACE).borderRadius(RADIUS_DIALOG)
     }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center).backgroundColor('#99000000')
+    .width('100%').height('100%').justifyContent(FlexAlign.Center).backgroundColor(COLOR_SCRIM)
   }
 }
 
@@ -123,21 +114,21 @@ export struct ResetVaultDialog {
   build() {
     Column() {
       Column({ space: 10 }) {
-        dialogHeader('清除本地保险库', this.onClose)
+        VaultDialogHeader({ title: '清除本地保险库', onClose: this.onClose })
         Text('此操作会永久删除全部资料、附件、分组和登录设置，且无法恢复。')
           .fontSize(13).fontColor(COLOR_DANGER).lineHeight(20).width('100%')
         Text('请输入“清除全部数据”以确认').fontSize(12).fontColor(COLOR_MUTED).width('100%')
         TextInput({ placeholder: '清除全部数据', text: this.confirmation })
-          .height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
+          .height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
           .onChange((value: string): void => { this.confirmation = value; })
         Button(this.busy ? '正在清除…' : '永久清除全部数据')
-          .width('100%').height(48).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
-          .backgroundColor(COLOR_DANGER).borderRadius(12)
+          .width('100%').height(48).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK)
+          .backgroundColor(COLOR_DANGER).borderRadius(RADIUS_CONTROL)
           .enabled(!this.busy && this.confirmation === '清除全部数据')
           .onClick((): void => { this.onConfirm(); })
-      }.width('88%').padding(18).backgroundColor(COLOR_SURFACE).borderRadius(22)
+      }.width('88%').padding(18).backgroundColor(COLOR_SURFACE).borderRadius(RADIUS_DIALOG)
     }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center).backgroundColor('#99000000')
+    .width('100%').height('100%').justifyContent(FlexAlign.Center).backgroundColor(COLOR_SCRIM)
   }
 }
 
@@ -152,7 +143,7 @@ export struct GestureSetupDialog {
     Column() {
       Blank().onClick((): void => { this.onClose(); })
       Column({ space: 10 }) {
-        dialogHeader('设置手势登录', this.onClose)
+        VaultDialogHeader({ title: '设置手势登录', onClose: this.onClose })
         Text(this.step === 1 ? '第一步，共两步' : '第二步，共两步')
           .fontSize(12).fontColor(COLOR_PRIMARY).width('100%')
         GestureGrid({ hint: this.hint, onComplete: this.onComplete })
@@ -161,6 +152,6 @@ export struct GestureSetupDialog {
       }
       .padding(20).width('100%').backgroundColor(COLOR_SURFACE)
       .borderRadius({ topLeft: 24, topRight: 24 })
-    }.width('100%').height('100%').backgroundColor('#99000000')
+    }.width('100%').height('100%').backgroundColor(COLOR_SCRIM)
   }
 }

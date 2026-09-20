@@ -4,6 +4,7 @@ import {
   COLOR_BORDER,
   COLOR_DANGER,
   COLOR_MUTED,
+  COLOR_PLACEHOLDER,
   COLOR_PRIMARY,
   COLOR_SURFACE,
   COLOR_SURFACE_2,
@@ -49,11 +50,11 @@ export struct VaultSetupScreen {
         }
         Column({ space: 14 }) {
           TextInput({ placeholder: '至少 8 个字符', text: this.masterPassword })
-            .type(InputType.Password).height(52).fontColor(COLOR_TEXT).placeholderColor('#607B72')
+            .type(InputType.Password).height(52).fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER)
             .backgroundColor(COLOR_SURFACE_2).borderRadius(14)
             .onChange((value: string): void => { this.masterPassword = value; })
           TextInput({ placeholder: '再次输入密码', text: this.confirmPassword })
-            .type(InputType.Password).height(52).fontColor(COLOR_TEXT).placeholderColor('#607B72')
+            .type(InputType.Password).height(52).fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER)
             .backgroundColor(COLOR_SURFACE_2).borderRadius(14)
             .onChange((value: string): void => { this.confirmPassword = value; })
           if (this.errorMessage.length > 0) {
@@ -144,7 +145,7 @@ export struct VaultLockedScreen {
             }.width('100%').padding({ top: 18, bottom: 8 })
           } else {
             TextInput({ placeholder: '密码', text: this.masterPassword })
-              .type(InputType.Password).height(52).fontColor(COLOR_TEXT).placeholderColor('#607B72')
+              .type(InputType.Password).height(52).fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER)
               .backgroundColor(COLOR_SURFACE_2).borderRadius(14)
               .onChange((value: string): void => { this.masterPassword = value; })
               .onSubmit((): void => { this.onUnlockPassword(); })

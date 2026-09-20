@@ -9,6 +9,19 @@ import { mediaPickerService, PickedMedia } from '../services/MediaPickerService'
 import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
+import {
+  ACTION_ADD, ACTION_CANCEL, ACTION_DELETE, ACTION_DOWNLOAD, ACTION_MANAGE,
+  LABEL_READ_ONLY, TITLE_MEDIA, selectionAction
+} from './VaultCopy';
+import {
+  COLOR_DANGER, COLOR_DANGER_TINT, COLOR_MEDIA_CANVAS, COLOR_MEDIA_SURFACE,
+  COLOR_MUTED_DARK, COLOR_MUTED_ON_DARK, COLOR_NEUTRAL_TINT, COLOR_ON_DARK,
+  COLOR_OVERLAY, COLOR_OVERLAY_SOFT, COLOR_OVERLAY_STRONG, COLOR_PRIMARY,
+  COLOR_PRIMARY_BRIGHT, COLOR_PRIMARY_DARK, COLOR_PRIMARY_TINT, COLOR_PRIMARY_WASH,
+  COLOR_SELECTION_BORDER_LIGHT, COLOR_SUCCESS, COLOR_SURFACE_GLASS, COLOR_SURFACE_WASH,
+  COLOR_TEXT_DARK, COLOR_TEXT_DEEP, COLOR_TEXT_SECONDARY, COLOR_TEXT_SELECTED,
+  COLOR_TRANSPARENT, COLOR_WARNING
+} from './VaultTheme';
 
 @Component
 export struct VaultAttachmentGallery {
@@ -266,7 +279,7 @@ export struct VaultAttachmentGallery {
     const result = await this.getUIContext().getPromptAction().showDialog({
       title: '删除所选媒体？',
       message: `将从此资料中永久删除 ${this.selectedIndexes.length} 项媒体。`,
-      buttons: [{ text: '取消', color: '#738078' }, { text: '删除', color: '#D95656' }]
+      buttons: [{ text: ACTION_CANCEL, color: COLOR_MUTED_DARK }, { text: ACTION_DELETE, color: COLOR_DANGER }]
     });
     if (result.index !== 1) { return; }
     this.busy = true;
@@ -319,12 +332,12 @@ export struct VaultAttachmentGallery {
               VaultThumbnail({ itemId: this.itemId, mediaType: attachment.type,
                 attachmentIndex: attachment.index, thumbnailSize: 52 })
               Circle({ width: 9, height: 9 })
-                .fill(this.isInGallery(attachment) ? '#28C997' : '#F1B84B')
-                .stroke('#FFFFFF').strokeWidth(2).margin({ top: 5, left: 5 })
+                .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
+                .stroke(COLOR_ON_DARK).strokeWidth(2).margin({ top: 5, left: 5 })
             }
             .width(56).height(56).padding(2).borderRadius(13)
             .border({ width: index === this.currentIndex ? 2 : 0,
-              color: index === this.currentIndex ? '#2DD6A6' : '#00000000' })
+              color: index === this.currentIndex ? COLOR_PRIMARY_BRIGHT : COLOR_TRANSPARENT })
             .onClick((): void => {
               if (this.thumbnailLongPressTriggered) {
                 this.thumbnailLongPressTriggered = false;
@@ -350,14 +363,14 @@ export struct VaultAttachmentGallery {
       this.attachments[this.currentIndex].ocrText.trim().length > 0) {
       Column({ space: 6 }) {
         Row({ space: 6 }) {
-          Text('识别文字').fontSize(12).fontWeight(FontWeight.Medium).fontColor('#23312C')
-          Text('只读').fontSize(9).fontColor('#20A47D')
+          Text('识别文字').fontSize(12).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT_DARK)
+          Text(LABEL_READ_ONLY).fontSize(9).fontColor(COLOR_PRIMARY_DARK)
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .backgroundColor('#DDF3EB').borderRadius(8)
+            .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(8)
         }.width('100%')
         Scroll() {
           Text(this.attachments[this.currentIndex].ocrText)
-            .fontSize(12).fontColor('#52665F').lineHeight(19).width('100%')
+            .fontSize(12).fontColor(COLOR_TEXT_SECONDARY).lineHeight(19).width('100%')
             .textAlign(TextAlign.Start)
         }
         .width('100%')
@@ -367,8 +380,8 @@ export struct VaultAttachmentGallery {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
       .padding({ left: 11, right: 11, top: 9, bottom: 9 })
-      .backgroundColor('#F0F8F5')
-      .border({ width: { left: 3 }, color: '#20A47D' })
+      .backgroundColor(COLOR_PRIMARY_WASH)
+      .border({ width: { left: 3 }, color: COLOR_PRIMARY_DARK })
       .borderRadius(10)
     }
   }
@@ -378,11 +391,11 @@ export struct VaultAttachmentGallery {
     if (this.busy && this.progressText.length > 0) {
       Column({ space: 6 }) {
         Row() {
-          Text(this.progressText).fontSize(11).fontColor('#91A9A0').layoutWeight(1)
-          Text(`${this.progress}%`).fontSize(11).fontColor('#91A9A0')
+          Text(this.progressText).fontSize(11).fontColor(COLOR_MUTED_ON_DARK).layoutWeight(1)
+          Text(`${this.progress}%`).fontSize(11).fontColor(COLOR_MUTED_ON_DARK)
         }.width('100%')
         Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
-          .width('100%').height(4).color('#2DD6A6')
+          .width('100%').height(4).color(COLOR_PRIMARY_BRIGHT)
       }.width('100%')
     }
   }
@@ -390,12 +403,12 @@ export struct VaultAttachmentGallery {
   @Builder
   private fullScreenViewer(): void {
     Stack({ alignContent: Alignment.Center }) {
-      if (this.switchingMedia) { LoadingProgress().width(38).height(38).color('#2DD6A6') }
+      if (this.switchingMedia) { LoadingProgress().width(38).height(38).color(COLOR_PRIMARY_BRIGHT) }
       else { this.currentMedia(true) }
       Row() {
         if (this.currentIndex > 0) {
-          Text('‹').fontSize(38).fontColor('#FFFFFF').textAlign(TextAlign.Center)
-            .width(46).height(54).backgroundColor('#55000000').borderRadius(23)
+          Text('‹').fontSize(38).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+            .width(46).height(54).backgroundColor(COLOR_OVERLAY_SOFT).borderRadius(23)
             .onClick((): void => { this.move(-1); })
         } else {
           Blank().width(46).height(54)
@@ -403,22 +416,22 @@ export struct VaultAttachmentGallery {
         Blank()
         Stack({ alignContent: Alignment.Center }) {
           if (this.busy) {
-            Text('…').fontSize(22).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+            Text('…').fontSize(22).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK)
               .width(30).height(30).textAlign(TextAlign.Center)
           } else {
-            Text('↓').fontSize(21).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+            Text('↓').fontSize(21).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK)
               .width(30).height(30).textAlign(TextAlign.Center)
               .position({ left: 8, top: 5 })
-            Divider().width(16).strokeWidth(3).color('#FFFFFF').borderRadius(2)
+            Divider().width(16).strokeWidth(3).color(COLOR_ON_DARK).borderRadius(2)
               .position({ left: 15, bottom: 18 })
           }
         }
-        .width(46).height(54).backgroundColor('#66000000').borderRadius(23)
+        .width(46).height(54).backgroundColor(COLOR_OVERLAY).borderRadius(23)
         .onClick((): void => { this.saveCurrentToGallery(); })
         Blank()
         if (this.currentIndex < this.attachments.length - 1) {
-          Text('›').fontSize(38).fontColor('#FFFFFF').textAlign(TextAlign.Center)
-            .width(46).height(54).backgroundColor('#55000000').borderRadius(23)
+          Text('›').fontSize(38).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+            .width(46).height(54).backgroundColor(COLOR_OVERLAY_SOFT).borderRadius(23)
             .onClick((): void => { this.move(1); })
         } else {
           Blank().width(46).height(54)
@@ -428,17 +441,17 @@ export struct VaultAttachmentGallery {
       .alignItems(VerticalAlign.Bottom)
       .position({ left: 0, bottom: 24 }).zIndex(10)
       Stack({ alignContent: Alignment.Center }) {
-        Text('×').fontSize(28).fontColor('#FFFFFF').textAlign(TextAlign.Center)
-          .width(42).height(42).backgroundColor('#66000000').borderRadius(21)
+        Text('×').fontSize(28).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+          .width(42).height(42).backgroundColor(COLOR_OVERLAY).borderRadius(21)
       }
       .width(58).height(58).position({ top: 33, right: 6 }).zIndex(20)
       .hitTestBehavior(HitTestMode.Block)
       .priorityGesture(TapGesture().onAction((): void => { this.closeFullScreen(); }))
-      Text(`${this.currentIndex + 1} / ${this.attachments.length}`).fontSize(12).fontColor('#FFFFFF')
-        .padding({ left: 12, right: 12, top: 7, bottom: 7 }).backgroundColor('#66000000')
+      Text(`${this.currentIndex + 1} / ${this.attachments.length}`).fontSize(12).fontColor(COLOR_ON_DARK)
+        .padding({ left: 12, right: 12, top: 7, bottom: 7 }).backgroundColor(COLOR_OVERLAY)
         .borderRadius(16).position({ top: 47, left: 16 })
     }
-    .width('100%').height('100%').backgroundColor('#000000')
+    .width('100%').height('100%').backgroundColor(COLOR_MEDIA_CANVAS)
     .gesture(PanGesture({ direction: PanDirection.Horizontal, distance: 30 })
       .onActionEnd((event: GestureEvent): void => {
         if (event.offsetX < -60) { this.move(1); }
@@ -452,22 +465,22 @@ export struct VaultAttachmentGallery {
       VaultThumbnail({ itemId: this.itemId, mediaType: attachment.type,
         attachmentIndex: attachment.index, thumbnailSize: 104 })
       if (attachment.type === VaultItemType.Video) {
-        Text('▶').fontSize(15).fontColor('#FFFFFF').textAlign(TextAlign.Center)
-          .width(30).height(30).backgroundColor('#77000000').borderRadius(15).position({ left: 8, bottom: 8 })
+        Text('▶').fontSize(15).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+          .width(30).height(30).backgroundColor(COLOR_OVERLAY_STRONG).borderRadius(15).position({ left: 8, bottom: 8 })
       }
       Circle({ width: 11, height: 11 })
-        .fill(this.isInGallery(attachment) ? '#28C997' : '#F1B84B')
-        .stroke('#FFFFFF').strokeWidth(2).position({ left: 7, top: 7 })
+        .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
+        .stroke(COLOR_ON_DARK).strokeWidth(2).position({ left: 7, top: 7 })
       if (this.selectionMode) {
         Text(this.isSelected(attachment.index) ? '✓' : '').fontSize(15).fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF').textAlign(TextAlign.Center).width(26).height(26)
-          .backgroundColor(this.isSelected(attachment.index) ? '#22B98B' : '#66000000')
-          .border({ width: 2, color: '#FFFFFF' }).borderRadius(13).margin({ top: 7, right: 7 })
+          .fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center).width(26).height(26)
+          .backgroundColor(this.isSelected(attachment.index) ? COLOR_PRIMARY : COLOR_OVERLAY)
+          .border({ width: 2, color: COLOR_ON_DARK }).borderRadius(13).margin({ top: 7, right: 7 })
       }
     }
     .width('100%').aspectRatio(1).borderRadius(15).clip(true)
     .border({ width: this.isSelected(attachment.index) ? 3 : 1,
-      color: this.isSelected(attachment.index) ? '#2DD6A6' : '#DFE8E4' })
+      color: this.isSelected(attachment.index) ? COLOR_PRIMARY_BRIGHT : COLOR_SELECTION_BORDER_LIGHT })
     .onClick((): void => {
       if (this.thumbnailLongPressTriggered) {
         this.thumbnailLongPressTriggered = false;
@@ -489,32 +502,32 @@ export struct VaultAttachmentGallery {
     Stack() {
       Column() {
         Row({ space: 10 }) {
-        Text('×').fontSize(25).fontColor('#18231F').textAlign(TextAlign.Center)
-          .width(38).height(38).backgroundColor('#EEF3F1').borderRadius(19)
+        Text('×').fontSize(25).fontColor(COLOR_TEXT_DEEP).textAlign(TextAlign.Center)
+          .width(38).height(38).backgroundColor(COLOR_NEUTRAL_TINT).borderRadius(19)
           .onClick((): void => { if (!this.busy) { this.overlayMode = 'none'; } })
         Column({ space: 1 }) {
-          Text('媒体管理').fontSize(20).fontWeight(FontWeight.Bold).fontColor('#18231F')
-          Text(`${this.attachments.length} 项媒体`).fontSize(11).fontColor('#738078')
+          Text(`媒体${ACTION_MANAGE}`).fontSize(20).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT_DEEP)
+          Text(`${this.attachments.length} 项媒体`).fontSize(11).fontColor(COLOR_MUTED_DARK)
         }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Button('添加').height(36).fontSize(13).fontColor('#20A47D').backgroundColor('#E7F7F1')
+        Button(ACTION_ADD).height(36).fontSize(13).fontColor(COLOR_PRIMARY_DARK).backgroundColor(COLOR_PRIMARY_TINT)
           .borderRadius(18).enabled(!this.busy).onClick((): void => { this.importMedia(); })
-        Button(this.selectionMode ? '取消' : '选择').height(36).fontSize(13)
-          .fontColor(this.selectionMode ? '#738078' : '#20A47D').backgroundColor('#F0F4F2')
+        Button(selectionAction(this.selectionMode)).height(36).fontSize(13)
+          .fontColor(this.selectionMode ? COLOR_MUTED_DARK : COLOR_PRIMARY_DARK).backgroundColor(COLOR_NEUTRAL_TINT)
           .borderRadius(18).enabled(!this.busy).onClick((): void => { this.toggleSelectionMode(); })
         }.width('100%').padding({ left: 14, right: 14, top: 40, bottom: 10 })
         Row({ space: 7 }) {
-          Circle({ width: 8, height: 8 }).fill('#28C997')
-          Text('已在相册').fontSize(11).fontColor('#718078')
+          Circle({ width: 8, height: 8 }).fill(COLOR_SUCCESS)
+          Text('已在相册').fontSize(11).fontColor(COLOR_MUTED_DARK)
           Blank().width(7)
-          Circle({ width: 8, height: 8 }).fill('#F1B84B')
-          Text('未在相册').fontSize(11).fontColor('#718078')
+          Circle({ width: 8, height: 8 }).fill(COLOR_WARNING)
+          Text('未在相册').fontSize(11).fontColor(COLOR_MUTED_DARK)
         }.width('100%').padding({ left: 17, right: 17, bottom: 8 })
         if (this.selectionMode) {
           Row() {
-          Text(`已选择 ${this.selectedIndexes.length} 项`).fontSize(13).fontColor('#35443E')
+          Text(`已选择 ${this.selectedIndexes.length} 项`).fontSize(13).fontColor(COLOR_TEXT_SELECTED)
           Blank()
           Text(this.selectedIndexes.length === this.attachments.length ? '取消全选' : '全选')
-            .fontSize(13).fontColor('#20A47D').padding({ left: 12, right: 4, top: 8, bottom: 8 })
+            .fontSize(13).fontColor(COLOR_PRIMARY_DARK).padding({ left: 12, right: 4, top: 8, bottom: 8 })
             .onClick((): void => { this.toggleSelectAll(); })
           }.width('100%').padding({ left: 16, right: 16, bottom: 6 })
         }
@@ -529,44 +542,44 @@ export struct VaultAttachmentGallery {
         .scrollBar(BarState.Off)
         if (this.selectionMode) {
           Row({ space: 10 }) {
-          Button('删除').layoutWeight(1).height(44).fontSize(15).fontColor('#D95656')
-            .backgroundColor('#FFF0F0').borderRadius(15).enabled(this.selectedIndexes.length > 0 && !this.busy)
+          Button(ACTION_DELETE).layoutWeight(1).height(44).fontSize(15).fontColor(COLOR_DANGER)
+            .backgroundColor(COLOR_DANGER_TINT).borderRadius(15).enabled(this.selectedIndexes.length > 0 && !this.busy)
             .opacity(this.selectedIndexes.length > 0 ? 1 : 0.45).onClick((): void => { this.deleteSelected(); })
-          Button('下载到相册').layoutWeight(1).height(44).fontSize(15).fontColor('#FFFFFF')
-            .backgroundColor('#20B88A').borderRadius(15).enabled(this.selectedIndexes.length > 0 && !this.busy)
+          Button(`${ACTION_DOWNLOAD}到相册`).layoutWeight(1).height(44).fontSize(15).fontColor(COLOR_ON_DARK)
+            .backgroundColor(COLOR_PRIMARY).borderRadius(15).enabled(this.selectedIndexes.length > 0 && !this.busy)
             .opacity(this.selectedIndexes.length > 0 ? 1 : 0.45)
             .onClick((): void => { this.exportAttachments(this.selectedAttachments()); })
           }.width('100%').padding({ left: 14, right: 14, top: 8, bottom: 14 })
         }
-      }.width('100%').height('100%').backgroundColor('#F7FAF9')
+      }.width('100%').height('100%').backgroundColor(COLOR_SURFACE_WASH)
       if (this.busy) {
         Column({ space: 14 }) {
-          LoadingProgress().width(46).height(46).color('#2DD6A6')
+          LoadingProgress().width(46).height(46).color(COLOR_PRIMARY_BRIGHT)
           Text(this.progressText.length > 0 ? this.progressText : '正在处理媒体')
-            .fontSize(15).fontWeight(FontWeight.Medium).fontColor('#23312C')
+            .fontSize(15).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT_DARK)
           Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
-            .width('68%').height(5).color('#2DD6A6')
-          Text(`${this.progress}%`).fontSize(12).fontColor('#718078')
+            .width('68%').height(5).color(COLOR_PRIMARY_BRIGHT)
+          Text(`${this.progress}%`).fontSize(12).fontColor(COLOR_MUTED_DARK)
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-        .backgroundColor('#F2FFFFFF')
+        .backgroundColor(COLOR_SURFACE_GLASS)
       }
-    }.width('100%').height('100%').backgroundColor('#F7FAF9')
+    }.width('100%').height('100%').backgroundColor(COLOR_SURFACE_WASH)
   }
 
   build() {
     Column({ space: 9 }) {
       if (this.attachments.length > 0) {
         Row() {
-          Text('媒体').fontSize(15).fontWeight(FontWeight.Bold).fontColor('#23312C')
-          Text(`${this.attachments.length}`).fontSize(10).fontColor('#718078')
-            .padding({ left: 7, right: 7, top: 2, bottom: 2 }).backgroundColor('#EDF2F0').borderRadius(10)
+          Text(TITLE_MEDIA).fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT_DARK)
+          Text(`${this.attachments.length}`).fontSize(10).fontColor(COLOR_MUTED_DARK)
+            .padding({ left: 7, right: 7, top: 2, bottom: 2 }).backgroundColor(COLOR_NEUTRAL_TINT).borderRadius(10)
           Blank()
           if (!this.readOnly) {
-            Button('添加').height(32).fontSize(13).fontColor('#20A47D').backgroundColor('#00000000')
+            Button(ACTION_ADD).height(32).fontSize(13).fontColor(COLOR_PRIMARY_DARK).backgroundColor(COLOR_TRANSPARENT)
               .enabled(!this.busy).onClick((): void => { this.importMedia(); })
-            Button('管理').height(32).fontSize(13).fontColor('#20A47D').backgroundColor('#00000000')
+            Button(ACTION_MANAGE).height(32).fontSize(13).fontColor(COLOR_PRIMARY_DARK).backgroundColor(COLOR_TRANSPARENT)
               .enabled(!this.busy).onClick((): void => {
                 this.selectionMode = false; this.selectedIndexes = []; this.overlayMode = 'manager';
               })
@@ -574,21 +587,21 @@ export struct VaultAttachmentGallery {
         }.width('100%').height(34)
         Stack({ alignContent: Alignment.Center }) {
           if (this.switchingMedia) {
-            Stack() { LoadingProgress().width(34).height(34).color('#2DD6A6') }
-              .width('100%').height(298).backgroundColor('#0A1210').borderRadius(17)
+            Stack() { LoadingProgress().width(34).height(34).color(COLOR_PRIMARY_BRIGHT) }
+              .width('100%').height(298).backgroundColor(COLOR_MEDIA_SURFACE).borderRadius(17)
           } else { this.currentMedia(false) }
           if (this.currentIndex > 0) {
-            Text('‹').fontSize(32).fontColor('#FFFFFF').textAlign(TextAlign.Center)
-              .width(36).height(44).backgroundColor('#66000000').borderRadius(18)
+            Text('‹').fontSize(32).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+              .width(36).height(44).backgroundColor(COLOR_OVERLAY).borderRadius(18)
               .position({ left: 8, top: 121 }).onClick((): void => { this.move(-1); })
           }
           if (this.currentIndex < this.attachments.length - 1) {
-            Text('›').fontSize(32).fontColor('#FFFFFF').textAlign(TextAlign.Center)
-              .width(36).height(44).backgroundColor('#66000000').borderRadius(18)
+            Text('›').fontSize(32).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+              .width(36).height(44).backgroundColor(COLOR_OVERLAY).borderRadius(18)
               .position({ right: 8, top: 121 }).onClick((): void => { this.move(1); })
           }
-          Text(`${this.currentIndex + 1} / ${this.attachments.length}`).fontSize(11).fontColor('#FFFFFF')
-            .padding({ left: 9, right: 9, top: 5, bottom: 5 }).backgroundColor('#66000000')
+          Text(`${this.currentIndex + 1} / ${this.attachments.length}`).fontSize(11).fontColor(COLOR_ON_DARK)
+            .padding({ left: 9, right: 9, top: 5, bottom: 5 }).backgroundColor(COLOR_OVERLAY)
             .borderRadius(13).position({ top: 9, left: 9 })
         }
         .width('100%')

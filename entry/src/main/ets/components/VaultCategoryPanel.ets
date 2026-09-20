@@ -2,7 +2,9 @@ import { itemTypeLabel, VaultGroup, VaultItem, VaultItemType } from '../models/V
 import { VaultAttachmentPreview } from './VaultAttachmentPreview';
 import { VaultFileSummary } from './VaultFileSummary';
 import {
-  COLOR_BG, COLOR_BORDER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SURFACE, COLOR_TEXT
+  COLOR_BG, COLOR_BORDER, COLOR_CHEVRON, COLOR_MUTED, COLOR_MUTED_LIGHT, COLOR_ON_DARK,
+  COLOR_PRIMARY, COLOR_PRIMARY_BORDER, COLOR_PRIMARY_ON_DARK, COLOR_PRIMARY_TINT,
+  COLOR_SURFACE, COLOR_TEXT
 } from './VaultTheme';
 
 @Component
@@ -56,9 +58,9 @@ export struct VaultCategoryPanel {
   private typeSwitch(type: VaultItemType): void {
     Column({ space: 1 }) {
       Text(itemTypeLabel(type)).fontSize(12).fontWeight(FontWeight.Medium)
-        .fontColor(this.selectedType === type ? '#FFFFFF' : COLOR_TEXT)
+        .fontColor(this.selectedType === type ? COLOR_ON_DARK : COLOR_TEXT)
       Text(`${this.countType(type)}`).fontSize(10)
-        .fontColor(this.selectedType === type ? '#DDF8EF' : COLOR_MUTED)
+        .fontColor(this.selectedType === type ? COLOR_PRIMARY_ON_DARK : COLOR_MUTED)
     }
     .layoutWeight(1).height(48).justifyContent(FlexAlign.Center)
     .backgroundColor(this.selectedType === type ? COLOR_PRIMARY : COLOR_SURFACE).borderRadius(13)
@@ -71,8 +73,8 @@ export struct VaultCategoryPanel {
     Text(label).fontSize(11).maxLines(1)
       .fontColor(this.selectedGroupId === groupId ? COLOR_PRIMARY : COLOR_MUTED)
       .padding({ left: 11, right: 11, top: 7, bottom: 7 })
-      .backgroundColor(this.selectedGroupId === groupId ? '#E5F6F0' : COLOR_SURFACE).borderRadius(13)
-      .border({ width: 1, color: this.selectedGroupId === groupId ? '#BDE8DA' : COLOR_BORDER })
+      .backgroundColor(this.selectedGroupId === groupId ? COLOR_PRIMARY_TINT : COLOR_SURFACE).borderRadius(13)
+      .border({ width: 1, color: this.selectedGroupId === groupId ? COLOR_PRIMARY_BORDER : COLOR_BORDER })
       .onClick((): void => { this.onSelectGroup(groupId); })
   }
 
@@ -80,10 +82,10 @@ export struct VaultCategoryPanel {
   private itemMeta(item: VaultItem): void {
     Row({ space: 6 }) {
       Text(this.groupName(item.groupId)).fontSize(10).fontColor(COLOR_PRIMARY)
-        .padding({ left: 6, right: 6, top: 2, bottom: 2 }).backgroundColor('#E8F7F2')
+        .padding({ left: 6, right: 6, top: 2, bottom: 2 }).backgroundColor(COLOR_PRIMARY_TINT)
         .borderRadius(7).maxLines(1)
       Blank()
-      Text(this.formatTime(item.updatedAt)).fontSize(10).fontColor('#9AA2B1')
+      Text(this.formatTime(item.updatedAt)).fontSize(10).fontColor(COLOR_MUTED_LIGHT)
     }.width('100%')
   }
 
@@ -94,7 +96,7 @@ export struct VaultCategoryPanel {
         Row({ space: 8 }) {
           Text(item.title.length > 0 ? item.title : ' ').fontSize(14).fontWeight(FontWeight.Medium)
             .fontColor(COLOR_TEXT).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-          Text('›').fontSize(19).fontColor('#B2B8C2')
+          Text('›').fontSize(19).fontColor(COLOR_CHEVRON)
         }.width('100%')
         VaultAttachmentPreview({ itemId: item.id, fallbackType: item.type, maxVisibleCount: 6, thumbnailSize: 44 })
         this.itemMeta(item)
@@ -110,7 +112,7 @@ export struct VaultCategoryPanel {
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
             VaultFileSummary({ itemId: item.id })
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-          Text('›').fontSize(19).fontColor('#B2B8C2')
+          Text('›').fontSize(19).fontColor(COLOR_CHEVRON)
         }.width('100%')
         this.itemMeta(item)
       }
@@ -141,7 +143,7 @@ export struct VaultCategoryPanel {
                 .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
             }
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-          Text('›').fontSize(19).fontColor('#B2B8C2')
+          Text('›').fontSize(19).fontColor(COLOR_CHEVRON)
         }.width('100%')
         this.itemMeta(item)
       }

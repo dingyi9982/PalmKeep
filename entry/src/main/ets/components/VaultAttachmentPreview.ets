@@ -1,6 +1,7 @@
 import { VaultThumbnail } from './VaultThumbnail';
 import { VaultAttachmentSummary, VaultItemType } from '../models/VaultModels';
 import { vaultRepository } from '../services/VaultRepository';
+import { COLOR_ON_DARK, COLOR_PRIMARY, COLOR_SCRIM, COLOR_TRANSPARENT } from './VaultTheme';
 
 @Component
 export struct VaultAttachmentPreview {
@@ -40,16 +41,16 @@ export struct VaultAttachmentPreview {
           VaultThumbnail({ itemId: this.itemId, mediaType: this.attachments[0].type,
             attachmentIndex: this.attachments[0].index, thumbnailSize: this.thumbnailSize })
           if (this.attachments[0].type === VaultItemType.Video) {
-            Text('▶').fontSize(11).fontColor('#FFFFFF')
+            Text('▶').fontSize(11).fontColor(COLOR_ON_DARK)
               .width(25).height(25).textAlign(TextAlign.Center)
-              .backgroundColor('#99000000').borderRadius(13)
+              .backgroundColor(COLOR_SCRIM).borderRadius(13)
               .position({ left: 7, bottom: 7 })
           }
           if (this.attachments.length > 1) {
             Text(`${this.attachments.length}`)
-              .fontSize(10).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+              .fontSize(10).fontWeight(FontWeight.Medium).fontColor(COLOR_ON_DARK)
               .padding({ left: 7, right: 7, top: 3, bottom: 3 })
-              .backgroundColor('#99000000').borderRadius(10)
+              .backgroundColor(COLOR_SCRIM).borderRadius(10)
               .margin({ right: 7, bottom: 7 })
           }
         }
@@ -70,7 +71,7 @@ export struct VaultAttachmentPreview {
         }, (attachment: VaultAttachmentSummary): string => `${attachment.index}`)
         if (this.attachments.length > this.visibleCount()) {
           Text(`+${this.attachments.length - this.visibleCount()}`)
-            .fontSize(10).fontWeight(FontWeight.Medium).fontColor('#24B88A')
+            .fontSize(10).fontWeight(FontWeight.Medium).fontColor(COLOR_PRIMARY)
             .maxLines(1).margin({ left: -1 })
         }
       } else {
@@ -85,16 +86,16 @@ export struct VaultAttachmentPreview {
           }
           .padding(2)
           .border({ width: 2,
-            color: attachment.index === this.highlightAttachmentIndex ? '#24B88A' : '#00000000' })
+            color: attachment.index === this.highlightAttachmentIndex ? COLOR_PRIMARY : COLOR_TRANSPARENT })
           .borderRadius(10)
         }, (attachment: VaultAttachmentSummary): string => `${attachment.index}`)
         if (this.attachments.length > this.visibleCount()) {
           Text(`+${this.attachments.length - this.visibleCount()}`)
-            .fontSize(10).fontWeight(FontWeight.Medium).fontColor('#24B88A')
+            .fontSize(10).fontWeight(FontWeight.Medium).fontColor(COLOR_PRIMARY)
             .textAlign(TextAlign.Center)
             .width(this.thumbnailSize).height(this.thumbnailSize)
             .border({ width: this.highlightIsHidden() ? 2 : 0,
-              color: this.highlightIsHidden() ? '#24B88A' : '#00000000' })
+              color: this.highlightIsHidden() ? COLOR_PRIMARY : COLOR_TRANSPARENT })
             .borderRadius(9)
         }
       }

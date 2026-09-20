@@ -1,4 +1,4 @@
-import { COLOR_BORDER, COLOR_MUTED, COLOR_PRIMARY } from './VaultTheme';
+import { COLOR_BORDER, COLOR_MUTED, COLOR_ON_DARK, COLOR_PRIMARY, COLOR_SURFACE } from './VaultTheme';
 
 @Component
 export struct VaultBottomNavigation {
@@ -23,7 +23,7 @@ export struct VaultBottomNavigation {
       this.navItem(0, $r('app.media.nav_home'), '首页')
       this.navItem(1, $r('app.media.nav_category'), '分类')
       Column() {
-        Stack() { Text('+').fontSize(28).fontWeight(FontWeight.Medium).fontColor('#FFFFFF') }
+        Stack() { Text('+').fontSize(28).fontWeight(FontWeight.Medium).fontColor(COLOR_ON_DARK) }
           .width(48).height(48).borderRadius(16).backgroundColor(COLOR_PRIMARY)
       }
       .layoutWeight(1).height('100%').justifyContent(FlexAlign.Center).translate({ y: -4 })
@@ -32,6 +32,6 @@ export struct VaultBottomNavigation {
       this.navItem(3, $r('app.media.nav_settings'), '设置')
     }
     .width('100%').height(76).padding({ top: 6, bottom: 2 })
-    .backgroundColor('#FAFFFFFF').border({ width: { top: 1 }, color: COLOR_BORDER })
+    .backgroundColor(COLOR_SURFACE).border({ width: { top: 1 }, color: COLOR_BORDER })
   }
 }

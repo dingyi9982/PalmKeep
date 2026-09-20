@@ -14,11 +14,18 @@ import {
   VaultItemType
 } from '../models/VaultModels';
 
-const DEVELOPMENT_DATABASE_NAME: string = 'palmvault-development-plain-v2.db';
-const LEGACY_DATABASE_NAME: string = 'palmvault-development-plain.db';
+const DEVELOPMENT_DATABASE_NAME: string = 'palmvault-development-plain-v3.db';
+const LEGACY_DATABASE_NAME_V2: string = 'palmvault-development-plain-v2.db';
+const LEGACY_DATABASE_NAME_V1: string = 'palmvault-development-plain.db';
+
+interface StoredAttachment {
+  storageName: string;
+  sizeBytes: number;
+}
 
 class VaultRepositoryImpl {
   private store?: relationalStore.RdbStore;
+  private attachmentRoot: string = '';
 
   async open(context: common.UIAbilityContext, databaseKey: Uint8Array): Promise<void> {
     try {
@@ -27,11 +34,10 @@ class VaultRepositoryImpl {
         return;
       }
       databaseKey.fill(0);
-      try {
-        await relationalStore.deleteRdbStore(context, LEGACY_DATABASE_NAME);
-      } catch (error) {
-        // 新版不读取旧附件结构；旧数据库不存在时无需处理。
-      }
+      await this.deleteDatabaseIfExists(context, LEGACY_DATABASE_NAME_V2);
+      await this.deleteDatabaseIfExists(context, LEGACY_DATABASE_NAME_V1);
+      this.attachmentRoot = `${context.filesDir}/palmvault-attachments-v3`;
+      this.ensureAttachmentDirectory();
       const config: relationalStore.StoreConfig = {
         name: DEVELOPMENT_DATABASE_NAME,
         securityLevel: relationalStore.SecurityLevel.S4,
@@ -40,6 +46,7 @@ class VaultRepositoryImpl {
       this.store = await relationalStore.getRdbStore(context, config);
       await this.createSchema();
       await this.seedGroups();
+      await this.cleanupOrphanedAttachments();
     } catch (error) {
       databaseKey.fill(0);
       if (error instanceof Error) { throw error; }
@@ -63,11 +70,9 @@ class VaultRepositoryImpl {
     try {
       await this.close();
       await relationalStore.deleteRdbStore(context, DEVELOPMENT_DATABASE_NAME);
-      try {
-        await relationalStore.deleteRdbStore(context, LEGACY_DATABASE_NAME);
-      } catch (error) {
-        // 旧数据库可能已在首次打开新版时删除。
-      }
+      await this.deleteDatabaseIfExists(context, LEGACY_DATABASE_NAME_V2);
+      await this.deleteDatabaseIfExists(context, LEGACY_DATABASE_NAME_V1);
+      this.deleteAttachmentDirectory();
     } catch (error) {
       if (error instanceof Error) { throw error; }
       throw new Error('清除本地数据失败');
@@ -153,6 +158,13 @@ class VaultRepositoryImpl {
   async deleteGroup(id: number): Promise<void> {
     try {
     const store = this.requireStore();
+    const storageNames: string[] = [];
+    const attachmentResult = await store.querySql(
+      'SELECT storage_name FROM vault_item_attachments WHERE item_id IN ' +
+      '(SELECT id FROM vault_items WHERE group_id = ? AND deleted_at = 0)', [id]);
+    try {
+      while (attachmentResult.goToNextRow()) { storageNames.push(attachmentResult.getString(0)); }
+    } finally { attachmentResult.close(); }
     store.beginTransaction();
     try {
       await store.executeSql(
@@ -161,16 +173,13 @@ class VaultRepositoryImpl {
         [Date.now(), id]
       );
       await store.executeSql(
-        'DELETE FROM vault_attachment_parts WHERE item_id IN ' +
-        '(SELECT id FROM vault_items WHERE group_id = ? AND deleted_at = 0)', [id]
-      );
-      await store.executeSql(
         'DELETE FROM vault_item_attachments WHERE item_id IN ' +
         '(SELECT id FROM vault_items WHERE group_id = ? AND deleted_at = 0)', [id]
       );
       await store.executeSql('DELETE FROM vault_items WHERE group_id = ? AND deleted_at = 0', [id]);
       await store.executeSql('DELETE FROM vault_groups WHERE id = ?', [id]);
       store.commit();
+      this.deleteStoredAttachments(storageNames);
     } catch (error) {
       store.rollBack();
       throw new Error('删除分组失败，数据未更改');
@@ -350,9 +359,10 @@ class VaultRepositoryImpl {
     try {
     this.validateItemFields(input.type, input.title, input.username, input.password, input.notes);
     if (attachments.length === 0) { throw new Error('请先选择附件'); }
+    const storedAttachments = await this.storeAttachments(attachments, onProgress);
     const store = this.requireStore();
-    store.beginTransaction();
     try {
+      store.beginTransaction();
       const id = createVaultId();
       const now = Date.now();
       await store.insert('vault_items', {
@@ -376,17 +386,18 @@ class VaultRepositoryImpl {
           type: attachment.type,
           name: attachment.name,
           source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri,
-          ocr_text: attachment.ocrText
+          ocr_text: attachment.ocrText,
+          storage_name: storedAttachments[index].storageName,
+          size_bytes: storedAttachments[index].sizeBytes
         });
-        await this.importAttachmentParts(id, index, attachment.uri);
-        if (onProgress) { onProgress(index + 1, attachments.length); }
       }
       await this.refreshItemOcrText(id);
       store.commit();
       return id;
     } catch (error) {
       store.rollBack();
-      throw new Error('资料保存失败，未写入任何附件');
+      this.deleteStoredAttachments(storedAttachments.map((item: StoredAttachment): string => item.storageName));
+      throw new Error(`资料保存失败：${normalizeError(error).message}`);
     }
       } catch (error) {
       throw normalizeError(error);
@@ -396,9 +407,7 @@ class VaultRepositoryImpl {
   async listItemAttachments(itemId: string): Promise<VaultAttachmentSummary[]> {
     try {
     const result = await this.requireStore().querySql(
-      `SELECT a.attachment_index, a.type, a.name, a.source_uri, a.ocr_text,
-        COALESCE((SELECT SUM(length(p.data)) FROM vault_attachment_parts p
-          WHERE p.item_id = a.item_id AND p.attachment_index = a.attachment_index), 0)
+      `SELECT a.attachment_index, a.type, a.name, a.source_uri, a.ocr_text, a.size_bytes
         FROM vault_item_attachments a WHERE a.item_id = ? ORDER BY a.attachment_index ASC`,
       [itemId]
     );
@@ -425,10 +434,11 @@ class VaultRepositoryImpl {
     onProgress?: (completed: number, total: number) => void): Promise<void> {
     try {
     if (attachments.length === 0) { throw new Error('请先选择媒体'); }
+    const oldStorageNames = await this.listAttachmentStorageNames(itemId);
+    const storedAttachments = await this.storeAttachments(attachments, onProgress);
     const store = this.requireStore();
-    store.beginTransaction();
     try {
-      await store.executeSql('DELETE FROM vault_attachment_parts WHERE item_id = ?', [itemId]);
+      store.beginTransaction();
       await store.executeSql('DELETE FROM vault_item_attachments WHERE item_id = ?', [itemId]);
       for (let index = 0; index < attachments.length; index += 1) {
         const attachment = attachments[index];
@@ -438,18 +448,20 @@ class VaultRepositoryImpl {
           type: attachment.type,
           name: attachment.name,
           source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri,
-          ocr_text: attachment.ocrText
+          ocr_text: attachment.ocrText,
+          storage_name: storedAttachments[index].storageName,
+          size_bytes: storedAttachments[index].sizeBytes
         });
-        await this.importAttachmentParts(itemId, index, attachment.uri);
-        if (onProgress) { onProgress(index + 1, attachments.length); }
       }
       await store.executeSql('UPDATE vault_items SET type = ?, updated_at = ? WHERE id = ?',
         [VaultItemType.Image, Date.now(), itemId]);
       await this.refreshItemOcrText(itemId);
       store.commit();
+      this.deleteStoredAttachments(oldStorageNames);
     } catch (error) {
       store.rollBack();
-      throw new Error('媒体修改失败，原有媒体未更改');
+      this.deleteStoredAttachments(storedAttachments.map((item: StoredAttachment): string => item.storageName));
+      throw new Error(`媒体修改失败：${normalizeError(error).message}`);
     }
       } catch (error) {
       throw normalizeError(error);
@@ -462,9 +474,10 @@ class VaultRepositoryImpl {
     if (attachments.length === 0) { return; }
     const existing = await this.listItemAttachments(itemId);
     const startIndex = existing.length > 0 ? existing[existing.length - 1].index + 1 : 0;
+    const storedAttachments = await this.storeAttachments(attachments, onProgress);
     const store = this.requireStore();
-    store.beginTransaction();
     try {
+      store.beginTransaction();
       for (let index = 0; index < attachments.length; index += 1) {
         const attachment = attachments[index];
         const attachmentIndex = startIndex + index;
@@ -474,17 +487,18 @@ class VaultRepositoryImpl {
           type: attachment.type,
           name: attachment.name,
           source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri,
-          ocr_text: attachment.ocrText
+          ocr_text: attachment.ocrText,
+          storage_name: storedAttachments[index].storageName,
+          size_bytes: storedAttachments[index].sizeBytes
         });
-        await this.importAttachmentParts(itemId, attachmentIndex, attachment.uri);
-        if (onProgress) { onProgress(index + 1, attachments.length); }
       }
       await store.executeSql('UPDATE vault_items SET updated_at = ? WHERE id = ?', [Date.now(), itemId]);
       await this.refreshItemOcrText(itemId);
       store.commit();
     } catch (error) {
       store.rollBack();
-      throw new Error('附件导入失败，原有内容未更改');
+      this.deleteStoredAttachments(storedAttachments.map((item: StoredAttachment): string => item.storageName));
+      throw new Error(`附件导入失败：${normalizeError(error).message}`);
     }
       } catch (error) {
       throw normalizeError(error);
@@ -510,14 +524,17 @@ class VaultRepositoryImpl {
     const remaining = existing.filter((attachment: VaultAttachmentSummary): boolean => !selected.has(attachment.index));
     if (remaining.length === 0) { throw new Error('至少需要保留一个附件'); }
     const store = this.requireStore();
+    const storageNames: string[] = [];
+    for (let index = 0; index < attachmentIndexes.length; index += 1) {
+      const pathResult = await store.querySql(
+        'SELECT storage_name FROM vault_item_attachments WHERE item_id = ? AND attachment_index = ?',
+        [itemId, attachmentIndexes[index]]);
+      try { if (pathResult.goToFirstRow()) { storageNames.push(pathResult.getString(0)); } } finally { pathResult.close(); }
+    }
     store.beginTransaction();
     try {
       for (let index = 0; index < attachmentIndexes.length; index += 1) {
         const attachmentIndex = attachmentIndexes[index];
-        await store.executeSql(
-          'DELETE FROM vault_attachment_parts WHERE item_id = ? AND attachment_index = ?',
-          [itemId, attachmentIndex]
-        );
         await store.executeSql(
           'DELETE FROM vault_item_attachments WHERE item_id = ? AND attachment_index = ?',
           [itemId, attachmentIndex]
@@ -526,23 +543,17 @@ class VaultRepositoryImpl {
       await store.executeSql(
         'UPDATE vault_item_attachments SET attachment_index = -attachment_index - 1 WHERE item_id = ?', [itemId]
       );
-      await store.executeSql(
-        'UPDATE vault_attachment_parts SET attachment_index = -attachment_index - 1 WHERE item_id = ?', [itemId]
-      );
       for (let index = 0; index < remaining.length; index += 1) {
         const temporaryIndex = -remaining[index].index - 1;
         await store.executeSql(
           'UPDATE vault_item_attachments SET attachment_index = ? WHERE item_id = ? AND attachment_index = ?',
           [index, itemId, temporaryIndex]
         );
-        await store.executeSql(
-          'UPDATE vault_attachment_parts SET attachment_index = ? WHERE item_id = ? AND attachment_index = ?',
-          [index, itemId, temporaryIndex]
-        );
       }
       await store.executeSql('UPDATE vault_items SET updated_at = ? WHERE id = ?', [Date.now(), itemId]);
       await this.refreshItemOcrText(itemId);
       store.commit();
+      this.deleteStoredAttachments(storageNames);
     } catch (error) {
       store.rollBack();
       throw new Error('删除附件失败，数据未更改');
@@ -647,16 +658,19 @@ class VaultRepositoryImpl {
     try {
     if (ids.length === 0) { return; }
     const store = this.requireStore();
+    const storageNames: string[] = [];
     store.beginTransaction();
     try {
       for (let index = 0; index < ids.length; index += 1) {
-        await this.permanentlyDeleteTrashItem(store, ids[index]);
+        const deletedNames = await this.permanentlyDeleteTrashItem(store, ids[index]);
+        storageNames.push(...deletedNames);
       }
       await store.executeSql(
         'DELETE FROM vault_group_tombstones WHERE group_id NOT IN ' +
         '(SELECT DISTINCT group_id FROM vault_items WHERE deleted_at > 0)'
       );
       store.commit();
+      this.deleteStoredAttachments(storageNames);
     } catch (error) {
       store.rollBack();
       throw new Error('永久删除失败，数据未更改');
@@ -669,16 +683,19 @@ class VaultRepositoryImpl {
   async emptyTrash(): Promise<void> {
     try {
     const store = this.requireStore();
+    const storageNames: string[] = [];
     store.beginTransaction();
     try {
       const result = await store.querySql('SELECT id FROM vault_items WHERE deleted_at > 0');
       const ids: string[] = [];
       try { while (result.goToNextRow()) { ids.push(result.getString(0)); } } finally { result.close(); }
       for (let index = 0; index < ids.length; index += 1) {
-        await this.permanentlyDeleteTrashItem(store, ids[index]);
+        const deletedNames = await this.permanentlyDeleteTrashItem(store, ids[index]);
+        storageNames.push(...deletedNames);
       }
       await store.executeSql('DELETE FROM vault_group_tombstones');
       store.commit();
+      this.deleteStoredAttachments(storageNames);
     } catch (error) {
       store.rollBack();
       throw new Error('清空回收站失败，数据未更改');
@@ -690,32 +707,30 @@ class VaultRepositoryImpl {
 
   async readAttachment(id: string, attachmentIndex: number = 0): Promise<Uint8Array> {
     try {
-    const store = this.requireStore();
-    const partSizeResult = await store.querySql(
-      'SELECT COALESCE(SUM(length(data)), 0) FROM vault_attachment_parts WHERE item_id = ? AND attachment_index = ?',
-      [id, attachmentIndex]
-    );
-    let partSize = 0;
-    try { if (partSizeResult.goToFirstRow()) { partSize = partSizeResult.getLong(0); } } finally { partSizeResult.close(); }
-    if (partSize <= 0) { return new Uint8Array(0); }
-    const data = new Uint8Array(partSize);
+    const stored = await this.getStoredAttachment(id, attachmentIndex);
+    if (!stored || stored.sizeBytes <= 0) { return new Uint8Array(0); }
+    const data = new Uint8Array(stored.sizeBytes);
+    let file: fs.File | undefined = undefined;
     try {
       let offset = 0;
-      const parts = await store.querySql(
-        'SELECT data FROM vault_attachment_parts WHERE item_id = ? AND attachment_index = ? ORDER BY chunk_index ASC',
-        [id, attachmentIndex]
-      );
-      try {
-        while (parts.goToNextRow()) {
-          const bytes = parts.getBlob(0);
-          data.set(bytes, offset);
-          offset += bytes.length;
-          bytes.fill(0);
-        }
-      } finally { parts.close(); }
-      if (offset !== partSize) { throw new Error('附件数据不完整'); }
+      file = fs.openSync(this.storedAttachmentPath(stored.storageName), fs.OpenMode.READ_ONLY);
+      while (offset < stored.sizeBytes) {
+        const length = Math.min(1024 * 1024, stored.sizeBytes - offset);
+        const chunkBuffer = new ArrayBuffer(length);
+        const bytesRead = fs.readSync(file.fd, chunkBuffer, { length: length });
+        if (bytesRead <= 0) { throw new Error('附件数据不完整'); }
+        const bytes = new Uint8Array(chunkBuffer, 0, bytesRead);
+        data.set(bytes, offset);
+        bytes.fill(0);
+        offset += bytesRead;
+      }
       return data;
-    } catch (error) { data.fill(0); throw new Error('附件读取失败，请重新解锁后再试'); }
+    } catch (error) {
+      data.fill(0);
+      throw new Error(`附件读取失败：${normalizeError(error).message}`);
+    } finally {
+      if (file) { fs.closeSync(file); }
+    }
       } catch (error) {
       throw normalizeError(error);
     }
@@ -723,20 +738,26 @@ class VaultRepositoryImpl {
 
   async writeAttachmentToFd(id: string, targetFd: number, attachmentIndex: number = 0): Promise<number> {
     try {
-    const store = this.requireStore();
+    const stored = await this.getStoredAttachment(id, attachmentIndex);
+    if (!stored) { return 0; }
+    let source: fs.File | undefined = undefined;
     let total = 0;
-    const attachmentParts = await store.querySql(
-      'SELECT data FROM vault_attachment_parts WHERE item_id = ? AND attachment_index = ? ORDER BY chunk_index ASC',
-      [id, attachmentIndex]
-    );
     try {
-      while (attachmentParts.goToNextRow()) {
-        const bytes = attachmentParts.getBlob(0);
+      source = fs.openSync(this.storedAttachmentPath(stored.storageName), fs.OpenMode.READ_ONLY);
+      while (total < stored.sizeBytes) {
+        const length = Math.min(1024 * 1024, stored.sizeBytes - total);
+        const buffer = new ArrayBuffer(length);
+        const bytesRead = fs.readSync(source.fd, buffer, { length: length });
+        if (bytesRead <= 0) { throw new Error('附件数据不完整'); }
+        const bytes = new Uint8Array(buffer, 0, bytesRead);
         try {
           total += this.writeAllToFd(targetFd, bytes);
         } finally { bytes.fill(0); }
       }
-    } finally { attachmentParts.close(); }
+      if (total !== stored.sizeBytes) { throw new Error('附件写入不完整'); }
+    } finally {
+      if (source) { fs.closeSync(source); }
+    }
     return total;
       } catch (error) {
       throw normalizeError(error);
@@ -767,8 +788,7 @@ class VaultRepositoryImpl {
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_items (id TEXT PRIMARY KEY, type TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL, username TEXT NOT NULL DEFAULT \'\', password TEXT NOT NULL DEFAULT \'\', notes TEXT NOT NULL DEFAULT \'\', ocr_text TEXT NOT NULL DEFAULT \'\', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL DEFAULT 0)');
     await store.executeSql('DROP TABLE IF EXISTS vault_item_history');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_group_tombstones (group_id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT NOT NULL, created_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL)');
-    await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_attachments (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL, source_uri TEXT NOT NULL, ocr_text TEXT NOT NULL DEFAULT \'\', PRIMARY KEY (item_id, attachment_index))');
-    await store.executeSql('CREATE TABLE IF NOT EXISTS vault_attachment_parts (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, chunk_index INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (item_id, attachment_index, chunk_index))');
+    await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_attachments (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL, source_uri TEXT NOT NULL, ocr_text TEXT NOT NULL DEFAULT \'\', storage_name TEXT NOT NULL, size_bytes INTEGER NOT NULL, PRIMARY KEY (item_id, attachment_index))');
     await this.ensureGroupSortOrderColumn();
     await store.executeSql('CREATE INDEX IF NOT EXISTS idx_vault_items_group ON vault_items(group_id, deleted_at, updated_at)');
       } catch (error) {
@@ -816,37 +836,135 @@ class VaultRepositoryImpl {
     }
   }
 
-  private async importAttachmentParts(itemId: string, attachmentIndex: number, uri: string): Promise<void> {
+  private async storeAttachments(attachments: VaultAttachmentInput[],
+    onProgress?: (completed: number, total: number) => void): Promise<StoredAttachment[]> {
+    const stored: StoredAttachment[] = [];
     try {
-    let file: fs.File | undefined = undefined;
-    try {
-      file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
-      const size = fs.statSync(file.fd).size;
-      if (size <= 0) { throw new Error('所选附件为空'); }
-      let offset = 0;
-      let chunkIndex = 0;
-      while (offset < size) {
-        const length = Math.min(1024 * 1024, size - offset);
-        const buffer = new ArrayBuffer(length);
-        const bytesRead = fs.readSync(file.fd, buffer, { length: length });
-        if (bytesRead <= 0) { throw new Error('附件读取不完整'); }
-        const bytes = new Uint8Array(buffer, 0, bytesRead);
-        await this.requireStore().insert('vault_attachment_parts', {
-          item_id: itemId,
-          attachment_index: attachmentIndex,
-          chunk_index: chunkIndex,
-          data: bytes
-        });
-        bytes.fill(0);
-        offset += bytesRead;
-        chunkIndex += 1;
+      for (let index = 0; index < attachments.length; index += 1) {
+        stored.push(await this.storeAttachment(attachments[index].uri));
+        if (onProgress) { onProgress(index + 1, attachments.length); }
       }
-    } finally {
-      if (file) { fs.closeSync(file); }
-    }
-      } catch (error) {
+      return stored;
+    } catch (error) {
+      this.deleteStoredAttachments(stored.map((item: StoredAttachment): string => item.storageName));
       throw normalizeError(error);
     }
+  }
+
+  private async storeAttachment(uri: string): Promise<StoredAttachment> {
+    const storageName = createVaultId();
+    const targetPath = this.storedAttachmentPath(storageName);
+    let source: fs.File | undefined = undefined;
+    let target: fs.File | undefined = undefined;
+    let completed = false;
+    try {
+      source = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+      const size = fs.statSync(source.fd).size;
+      if (size <= 0) { throw new Error('所选附件为空'); }
+      target = fs.openSync(targetPath, fs.OpenMode.WRITE_ONLY | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      await fs.copyFile(source.fd, target.fd);
+      fs.fsyncSync(target.fd);
+      if (fs.statSync(target.fd).size !== size) { throw new Error('附件复制不完整'); }
+      completed = true;
+      return { storageName: storageName, sizeBytes: size };
+    } catch (error) {
+      throw normalizeError(error);
+    } finally {
+      this.closeFile(target);
+      this.closeFile(source);
+      if (!completed) { try { fs.unlinkSync(targetPath); } catch (_) {} }
+    }
+  }
+
+  private async listAttachmentStorageNames(itemId: string): Promise<string[]> {
+    try {
+    const result = await this.requireStore().querySql(
+      'SELECT storage_name FROM vault_item_attachments WHERE item_id = ?', [itemId]);
+    const names: string[] = [];
+    try { while (result.goToNextRow()) { names.push(result.getString(0)); } } finally { result.close(); }
+    return names;
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  private async getStoredAttachment(itemId: string, attachmentIndex: number): Promise<StoredAttachment | undefined> {
+    try {
+    const result = await this.requireStore().querySql(
+      'SELECT storage_name, size_bytes FROM vault_item_attachments WHERE item_id = ? AND attachment_index = ?',
+      [itemId, attachmentIndex]);
+    try {
+      if (!result.goToFirstRow()) { return undefined; }
+      return { storageName: result.getString(0), sizeBytes: result.getLong(1) };
+    } finally { result.close(); }
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  private storedAttachmentPath(storageName: string): string {
+    if (this.attachmentRoot.length === 0 || storageName.length === 0) { throw new Error('附件目录尚未初始化'); }
+    return `${this.attachmentRoot}/${storageName}`;
+  }
+
+  private ensureAttachmentDirectory(): void {
+    let pathExists = false;
+    try {
+      const stat = fs.statSync(this.attachmentRoot);
+      pathExists = true;
+      if (stat.isDirectory()) { return; }
+    } catch (_) {}
+    if (pathExists) { throw new Error('附件存储路径不是目录'); }
+    try {
+      fs.mkdirSync(this.attachmentRoot, true);
+    } catch (error) {
+      // Another initialization may have created the directory between stat and mkdir.
+      try {
+        if (fs.statSync(this.attachmentRoot).isDirectory()) { return; }
+      } catch (_) {}
+      throw normalizeError(error);
+    }
+  }
+
+  private deleteStoredAttachments(storageNames: string[]): void {
+    storageNames.forEach((storageName: string): void => {
+      try { fs.unlinkSync(this.storedAttachmentPath(storageName)); } catch (_) {}
+    });
+  }
+
+  private closeFile(file?: fs.File): void {
+    if (!file) { return; }
+    try { fs.closeSync(file); } catch (_) {}
+  }
+
+  private deleteAttachmentDirectory(): void {
+    if (this.attachmentRoot.length === 0) { return; }
+    try {
+      const names = fs.listFileSync(this.attachmentRoot);
+      this.deleteStoredAttachments(names);
+      fs.rmdirSync(this.attachmentRoot);
+    } catch (_) {}
+    this.attachmentRoot = '';
+  }
+
+  private async cleanupOrphanedAttachments(): Promise<void> {
+    try {
+    const referenced = new Set<string>();
+    const result = await this.requireStore().querySql('SELECT storage_name FROM vault_item_attachments');
+    try { while (result.goToNextRow()) { referenced.add(result.getString(0)); } } finally { result.close(); }
+    const names = fs.listFileSync(this.attachmentRoot);
+    names.forEach((name: string): void => {
+      if (!referenced.has(name)) {
+        try { fs.unlinkSync(this.storedAttachmentPath(name)); } catch (_) {}
+      }
+    });
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  private async deleteDatabaseIfExists(context: common.UIAbilityContext, name: string): Promise<void> {
+    try { await relationalStore.deleteRdbStore(context, name); } catch (_) {}
   }
 
   private async restoreDeletedGroup(store: relationalStore.RdbStore, deletedGroupId: number): Promise<number> {
@@ -890,15 +1008,19 @@ class VaultRepositoryImpl {
     }
   }
 
-  private async permanentlyDeleteTrashItem(store: relationalStore.RdbStore, id: string): Promise<void> {
+  private async permanentlyDeleteTrashItem(store: relationalStore.RdbStore, id: string): Promise<string[]> {
     try {
     const result = await store.querySql('SELECT id FROM vault_items WHERE id = ? AND deleted_at > 0', [id]);
     let exists = false;
     try { exists = result.goToFirstRow(); } finally { result.close(); }
-    if (!exists) { return; }
-    await store.executeSql('DELETE FROM vault_attachment_parts WHERE item_id = ?', [id]);
+    if (!exists) { return []; }
+    const pathResult = await store.querySql(
+      'SELECT storage_name FROM vault_item_attachments WHERE item_id = ?', [id]);
+    const storageNames: string[] = [];
+    try { while (pathResult.goToNextRow()) { storageNames.push(pathResult.getString(0)); } } finally { pathResult.close(); }
     await store.executeSql('DELETE FROM vault_item_attachments WHERE item_id = ?', [id]);
     await store.executeSql('DELETE FROM vault_items WHERE id = ?', [id]);
+    return storageNames;
       } catch (error) {
       throw normalizeError(error);
     }

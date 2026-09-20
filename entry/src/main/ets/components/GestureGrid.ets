@@ -1,6 +1,6 @@
-const GESTURE_PRIMARY: string = '#67E8C5';
-const GESTURE_MUTED: string = '#527068';
-const GESTURE_SURFACE: string = '#142621';
+import {
+  COLOR_AUTH_MUTED, COLOR_AUTH_PRIMARY, COLOR_AUTH_SELECTED, COLOR_AUTH_SURFACE
+} from './VaultTheme';
 
 @Component
 export struct GestureGrid {
@@ -55,7 +55,7 @@ export struct GestureGrid {
     Column({ space: 12 }) {
       Text(this.hint)
         .fontSize(13)
-        .fontColor(GESTURE_MUTED)
+        .fontColor(COLOR_AUTH_MUTED)
       Grid() {
         ForEach([0, 1, 2, 3, 4, 5, 6, 7, 8], (point: number): void => {
           GridItem() {
@@ -63,14 +63,14 @@ export struct GestureGrid {
               Circle()
                 .width(this.contains(point) ? 42 : 34)
                 .height(this.contains(point) ? 42 : 34)
-                .fill(this.contains(point) ? '#286F5C' : GESTURE_SURFACE)
-                .stroke(this.contains(point) ? GESTURE_PRIMARY : GESTURE_MUTED)
+                .fill(this.contains(point) ? COLOR_AUTH_SELECTED : COLOR_AUTH_SURFACE)
+                .stroke(this.contains(point) ? COLOR_AUTH_PRIMARY : COLOR_AUTH_MUTED)
                 .strokeWidth(this.contains(point) ? 3 : 2)
               if (this.contains(point)) {
                 Text(`${this.active.indexOf(point) + 1}`)
                   .fontSize(12)
                   .fontWeight(FontWeight.Bold)
-                  .fontColor(GESTURE_PRIMARY)
+                  .fontColor(COLOR_AUTH_PRIMARY)
               }
             }
             .width('100%')
@@ -85,7 +85,7 @@ export struct GestureGrid {
       .onTouch((event: TouchEvent): void => { this.handleTouch(event); })
       Text(this.active.length === 0 ? '连接至少 4 个点' : `已连接 ${this.active.length} 个点`)
         .fontSize(12)
-        .fontColor(this.active.length >= 4 ? GESTURE_PRIMARY : GESTURE_MUTED)
+        .fontColor(this.active.length >= 4 ? COLOR_AUTH_PRIMARY : COLOR_AUTH_MUTED)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)

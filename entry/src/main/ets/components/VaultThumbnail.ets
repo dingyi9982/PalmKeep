@@ -6,6 +6,7 @@ import { VaultItemType } from '../models/VaultModels';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { vaultRepository } from '../services/VaultRepository';
 import { normalizeError } from '../services/ErrorUtils';
+import { COLOR_ON_DARK, COLOR_PRIMARY, COLOR_PRIMARY_TINT, COLOR_SCRIM } from './VaultTheme';
 
 @Component
 export struct VaultThumbnail {
@@ -177,17 +178,17 @@ export struct VaultThumbnail {
         Image(this.bitmap).width('100%').height('100%').objectFit(ImageFit.Cover)
       } else {
         Text(this.mediaType === VaultItemType.Video ? '▶' : (this.mediaType === VaultItemType.File ? '▤' : '▧'))
-          .fontSize(15).fontColor('#24B88A')
+          .fontSize(15).fontColor(COLOR_PRIMARY)
       }
       if (this.mediaType === VaultItemType.Video && this.bitmap) {
         Stack() {
-          Text('▶').fontSize(10).fontColor('#FFFFFF')
+          Text('▶').fontSize(10).fontColor(COLOR_ON_DARK)
         }
-        .width(22).height(22).borderRadius(11).backgroundColor('#99000000')
+        .width(22).height(22).borderRadius(11).backgroundColor(COLOR_SCRIM)
       }
     }
     .width(this.fillContainer ? '100%' : this.thumbnailSize)
     .height(this.fillContainer ? '100%' : this.thumbnailSize)
-    .borderRadius(10).clip(true).backgroundColor('#E8F7F2')
+    .borderRadius(10).clip(true).backgroundColor(COLOR_PRIMARY_TINT)
   }
 }
