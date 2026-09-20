@@ -2,7 +2,18 @@ import promptAction from '@ohos.promptAction';
 import pasteboard from '@ohos.pasteboard';
 import { BusinessError } from '@ohos.base';
 import { VERSION_CODE, VERSION_NAME } from 'BuildProfile';
-import { GestureGrid } from '../components/GestureGrid';
+import { VaultLoadingScreen, VaultLockedScreen, VaultSetupScreen } from '../components/VaultAuthScreens';
+import { VaultSettingsPanel } from '../components/VaultSettingsPanel';
+import { VaultBottomNavigation } from '../components/VaultBottomNavigation';
+import { VaultGroupManager } from '../components/VaultGroupManager';
+import { VaultCategoryPanel } from '../components/VaultCategoryPanel';
+import {
+  ChangePasswordDialog, GestureSetupDialog, RecoveryCenterDialog, ResetVaultDialog
+} from '../components/VaultSecurityDialogs';
+import {
+  COLOR_BG, COLOR_BORDER, COLOR_DANGER, COLOR_MUTED, COLOR_PRIMARY, COLOR_SURFACE,
+  COLOR_SURFACE_2, COLOR_TEXT
+} from '../components/VaultTheme';
 import { VaultThumbnail } from '../components/VaultThumbnail';
 import { VaultAttachmentPreview } from '../components/VaultAttachmentPreview';
 import { VaultAttachmentGallery } from '../components/VaultAttachmentGallery';
@@ -26,15 +37,6 @@ import {
   VaultTrashEntry,
   VaultItemType
 } from '../models/VaultModels';
-
-const COLOR_BG: string = '#F5F6FA';
-const COLOR_SURFACE: string = '#FFFFFF';
-const COLOR_SURFACE_2: string = '#F0F2F6';
-const COLOR_PRIMARY: string = '#24B88A';
-const COLOR_TEXT: string = '#172033';
-const COLOR_MUTED: string = '#7D8696';
-const COLOR_BORDER: string = '#E6E9EF';
-const COLOR_DANGER: string = '#E75561';
 
 @Entry
 @Component
@@ -1847,10 +1849,6 @@ struct Index {
     return count;
   }
 
-  private countType(type: VaultItemType): number {
-    return this.allItems.filter((item: VaultItem): boolean => this.matchesCategory(item, type)).length;
-  }
-
   private matchesCategory(item: VaultItem, type: VaultItemType): boolean {
     if (type === VaultItemType.Image) {
       return item.type === VaultItemType.Image || item.type === VaultItemType.Video;
@@ -1894,12 +1892,6 @@ struct Index {
     return result;
   }
 
-  private categoryGroupName(groupId: number): string {
-    if (groupId === 0) { return '未分组'; }
-    const group = this.groups.find((value: VaultGroup): boolean => value.id === groupId);
-    return group ? group.name : '未分组';
-  }
-
   private categorySortLabel(): string {
     if (this.categorySort === 'created') { return '最近创建'; }
     if (this.categorySort === 'name') { return '名称'; }
@@ -1928,281 +1920,6 @@ struct Index {
       if (error instanceof Error) { throw error; }
       throw new Error('系统操作失败');
     }
-  }
-
-  private formatCategoryTime(value: number): string {
-    const date = new Date(value);
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    if (value >= today) {
-      return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-    }
-    if (date.getFullYear() === now.getFullYear()) { return `${date.getMonth() + 1}/${date.getDate()}`; }
-    return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
-  }
-
-  private typeColor(type: VaultItemType): string {
-    switch (type) {
-      case VaultItemType.Login:
-        return '#24B88A';
-      case VaultItemType.Note:
-        return '#E6A627';
-      case VaultItemType.Image:
-        return '#5078E8';
-      case VaultItemType.Video:
-        return '#8B62D9';
-      case VaultItemType.File:
-        return '#E3655B';
-      default:
-        return '#5794C8';
-    }
-  }
-
-  private typeBackground(type: VaultItemType): string {
-    switch (type) {
-      case VaultItemType.Login:
-        return '#E6F7F1';
-      case VaultItemType.Note:
-        return '#FFF5DC';
-      case VaultItemType.Image:
-        return '#EAF0FF';
-      case VaultItemType.Video:
-        return '#F2EBFF';
-      case VaultItemType.File:
-        return '#FDECEA';
-      default:
-        return '#EAF4FB';
-    }
-  }
-
-  @Builder
-  private brandMark(size: number = 54): void {
-    Image($r('app.media.launcher_icon'))
-    .width(size)
-    .height(size)
-    .objectFit(ImageFit.Cover)
-    .borderRadius(size * 0.24)
-  }
-
-  @Builder
-  private loadingScreen(): void {
-    Column({ space: 18 }) {
-      this.brandMark(66)
-      Text('正在开启掌心密匣')
-        .fontSize(20)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(COLOR_TEXT)
-      LoadingProgress()
-        .width(30)
-        .height(30)
-        .color(COLOR_PRIMARY)
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .backgroundColor(COLOR_BG)
-  }
-
-  @Builder
-  private setupScreen(): void {
-    Scroll() {
-      Column({ space: 22 }) {
-        Row() {
-          this.brandMark(58)
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.Center)
-
-        Column({ space: 7 }) {
-          Text('创建你的本地保险库')
-            .fontSize(28)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_TEXT)
-          Text('密码不会离开这台设备，也无法由我们找回。')
-            .fontSize(14)
-            .fontColor(COLOR_MUTED)
-            .textAlign(TextAlign.Center)
-        }
-
-        Column({ space: 14 }) {
-          TextInput({ placeholder: '至少 8 个字符', text: this.masterPassword })
-            .type(InputType.Password)
-            .height(52)
-            .fontColor(COLOR_TEXT)
-            .placeholderColor('#607B72')
-            .backgroundColor(COLOR_SURFACE_2)
-            .borderRadius(14)
-            .onChange((value: string): void => { this.masterPassword = value; })
-          TextInput({ placeholder: '再次输入密码', text: this.confirmPassword })
-            .type(InputType.Password)
-            .height(52)
-            .fontColor(COLOR_TEXT)
-            .placeholderColor('#607B72')
-            .backgroundColor(COLOR_SURFACE_2)
-            .borderRadius(14)
-            .onChange((value: string): void => { this.confirmPassword = value; })
-          if (this.errorMessage.length > 0) {
-            Text(this.errorMessage)
-              .fontSize(13)
-              .fontColor(COLOR_DANGER)
-              .width('100%')
-          }
-          Button(this.busy ? '正在创建…' : '创建本地保险库')
-            .width('100%')
-            .height(52)
-            .fontSize(16)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_BG)
-            .backgroundColor(COLOR_PRIMARY)
-            .borderRadius(14)
-            .enabled(!this.busy)
-            .onClick((): void => { this.createVault(); })
-        }
-        .padding(20)
-        .width('100%')
-        .backgroundColor(COLOR_SURFACE)
-        .borderRadius(22)
-        .border({ width: 1, color: COLOR_BORDER })
-      }
-      .width('100%')
-      .padding({ left: 24, right: 24, top: 70, bottom: 40 })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(COLOR_BG)
-  }
-
-  @Builder
-  private unlockModeButton(mode: string, label: string): void {
-    Button(label)
-      .layoutWeight(1)
-      .height(40)
-      .fontSize(13)
-      .fontWeight(this.unlockMode === mode ? FontWeight.Bold : FontWeight.Regular)
-      .fontColor(this.unlockMode === mode ? COLOR_BG : COLOR_MUTED)
-      .backgroundColor(this.unlockMode === mode ? COLOR_PRIMARY : Color.Transparent)
-      .borderRadius(12)
-      .enabled(!this.busy)
-      .onClick((): void => { this.selectUnlockMode(mode); })
-  }
-
-  @Builder
-  private lockedScreen(): void {
-    Scroll() {
-      Column({ space: 18 }) {
-        this.brandMark(66)
-        Column({ space: 7 }) {
-          Text('掌心密匣已锁定')
-            .fontSize(28)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_TEXT)
-          Text(this.unlockMode === 'gesture' ? '绘制手势解锁本地保险库' :
-            (this.unlockMode === 'fingerprint' ? '使用指纹验证身份' :
-              (this.unlockMode === 'face' ? '使用人脸验证身份' : '输入密码解锁本地保险库')))
-            .fontSize(14)
-            .fontColor(COLOR_MUTED)
-        }
-        Column({ space: 12 }) {
-          if (this.fingerprintEnabled || this.faceEnabled || this.gestureEnabled) {
-            Row({ space: 4 }) {
-              if (this.faceEnabled) {
-                this.unlockModeButton('face', '人脸')
-              }
-              if (this.fingerprintEnabled) {
-                this.unlockModeButton('fingerprint', '指纹')
-              }
-              if (this.gestureEnabled) {
-                this.unlockModeButton('gesture', '手势')
-              }
-              this.unlockModeButton('password', '密码')
-            }
-            .width('100%')
-            .padding(4)
-            .backgroundColor(COLOR_SURFACE_2)
-            .borderRadius(14)
-          }
-
-          if (this.unlockMode === 'gesture' && this.gestureEnabled) {
-            GestureGrid({
-              hint: this.busy ? '正在验证…' : '从任意点开始滑动',
-              disabled: this.busy,
-              onComplete: (pattern: number[]): void => { this.unlockWithGesture(pattern); }
-            })
-          } else if (this.unlockMode === 'fingerprint' && this.fingerprintEnabled) {
-            Column({ space: 14 }) {
-              Text('◎')
-                .fontSize(58)
-                .fontColor(COLOR_PRIMARY)
-              Button(this.busy ? '正在验证…' : '验证指纹')
-                .width('100%')
-                .height(52)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(COLOR_BG)
-                .backgroundColor(COLOR_PRIMARY)
-                .borderRadius(14)
-                .enabled(!this.busy)
-                .onClick((): void => { this.unlockWithFingerprint(); })
-            }
-            .width('100%')
-            .padding({ top: 18, bottom: 8 })
-          } else if (this.unlockMode === 'face' && this.faceEnabled) {
-            Column({ space: 14 }) {
-              Stack() {
-                Text('◉').fontSize(50).fontColor(COLOR_PRIMARY)
-              }.width(66).height(66)
-              Button(this.busy ? '正在验证…' : '验证人脸')
-                .width('100%')
-                .height(52)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(COLOR_BG)
-                .backgroundColor(COLOR_PRIMARY)
-                .borderRadius(14)
-                .enabled(!this.busy)
-                .onClick((): void => { this.unlockWithFace(); })
-            }
-            .width('100%')
-            .padding({ top: 18, bottom: 8 })
-          } else {
-            TextInput({ placeholder: '密码', text: this.masterPassword })
-              .type(InputType.Password)
-              .height(52)
-              .fontColor(COLOR_TEXT)
-              .placeholderColor('#607B72')
-              .backgroundColor(COLOR_SURFACE_2)
-              .borderRadius(14)
-              .onChange((value: string): void => { this.masterPassword = value; })
-              .onSubmit((): void => { this.unlockVault(); })
-            Button(this.busy ? '正在验证…' : '使用密码解锁')
-              .width('100%')
-              .height(52)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(COLOR_BG)
-              .backgroundColor(COLOR_PRIMARY)
-              .borderRadius(14)
-              .enabled(!this.busy)
-              .onClick((): void => { this.unlockVault(); })
-          }
-        if (this.errorMessage.length > 0) {
-          Text(this.errorMessage)
-            .fontSize(13)
-            .fontColor(COLOR_DANGER)
-            .width('100%')
-        }
-        }
-        .width('100%')
-        .padding(16)
-        Button('无法解锁？')
-          .fontSize(12).fontColor(COLOR_MUTED).backgroundColor(Color.Transparent)
-          .enabled(!this.busy)
-          .onClick((): void => { this.openRecoveryCenter(); })
-      }
-      .width('100%')
-      .padding({ left: 24, right: 24, top: 48, bottom: 36 })
-      .justifyContent(FlexAlign.Center)
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(COLOR_BG)
   }
 
   @Builder
@@ -2875,215 +2592,23 @@ struct Index {
   }
 
   @Builder
-  private categoryTypeIcon(type: VaultItemType): void {
-    if (type === VaultItemType.Image || type === VaultItemType.Video) {
-      Stack({ alignContent: Alignment.Center }) {
-        Stack() {
-          Circle({ width: 4, height: 4 }).fill(this.typeColor(type)).position({ left: 5, top: 4 })
-          Text('▶').fontSize(9).fontColor(this.typeColor(type))
-            .width(11).height(11).textAlign(TextAlign.Center).position({ right: 3, bottom: 2 })
-        }
-        .width(26).height(20).border({ width: 2, color: this.typeColor(type) }).borderRadius(5)
-      }.width(40).height(40)
-    } else if (type === VaultItemType.File) {
-      Stack({ alignContent: Alignment.Center }) {
-        Stack() {
-          Column({ space: 3 }) {
-            Divider().width(11).strokeWidth(2).color(this.typeColor(type)).borderRadius(1)
-            Divider().width(11).strokeWidth(2).color(this.typeColor(type)).borderRadius(1)
-            Divider().width(8).strokeWidth(2).color(this.typeColor(type)).borderRadius(1)
-          }
-          .alignItems(HorizontalAlign.Start).position({ left: 5, top: 8 })
-          Stack().width(7).height(7)
-            .border({ width: { left: 2, bottom: 2 }, color: this.typeColor(type) })
-            .position({ right: 0, top: 0 })
-        }
-        .width(22).height(26).border({ width: 2, color: this.typeColor(type) }).borderRadius(4)
-      }.width(40).height(40)
-    } else {
-      Text(itemTypeGlyph(type)).fontSize(22).fontColor(this.typeColor(type))
-    }
-  }
-
-  @Builder
-  private categoryTypeSwitch(type: VaultItemType): void {
-    Column({ space: 1 }) {
-      Text(itemTypeLabel(type)).fontSize(12).fontWeight(FontWeight.Medium)
-        .fontColor(this.selectedCategoryType === type ? '#FFFFFF' : COLOR_TEXT)
-      Text(`${this.countType(type)}`).fontSize(10)
-        .fontColor(this.selectedCategoryType === type ? '#DDF8EF' : COLOR_MUTED)
-    }
-    .layoutWeight(1).height(48).justifyContent(FlexAlign.Center)
-    .backgroundColor(this.selectedCategoryType === type ? COLOR_PRIMARY : COLOR_SURFACE)
-    .borderRadius(13)
-    .border({ width: 1, color: this.selectedCategoryType === type ? COLOR_PRIMARY : COLOR_BORDER })
-    .onClick((): void => { this.selectCategoryType(type); })
-  }
-
-  @Builder
-  private categoryGroupChip(groupId: number, label: string): void {
-    Text(label).fontSize(11).maxLines(1)
-      .fontColor(this.categoryGroupId === groupId ? COLOR_PRIMARY : COLOR_MUTED)
-      .padding({ left: 11, right: 11, top: 7, bottom: 7 })
-      .backgroundColor(this.categoryGroupId === groupId ? '#E5F6F0' : COLOR_SURFACE)
-      .borderRadius(13)
-      .border({ width: 1, color: this.categoryGroupId === groupId ? '#BDE8DA' : COLOR_BORDER })
-      .onClick((): void => { this.categoryGroupId = groupId; })
-  }
-
-  @Builder
-  private categoryItemMeta(item: VaultItem): void {
-    Row({ space: 6 }) {
-      Text(this.categoryGroupName(item.groupId)).fontSize(10).fontColor(COLOR_PRIMARY)
-        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-        .backgroundColor('#E8F7F2').borderRadius(7).maxLines(1)
-      Blank()
-      Text(this.formatCategoryTime(item.updatedAt)).fontSize(10).fontColor('#9AA2B1')
-    }.width('100%')
-  }
-
-  @Builder
-  private categoryAccountRow(item: VaultItem): void {
-    Column({ space: 5 }) {
-      Row({ space: 8 }) {
-        Column({ space: 2 }) {
-          Text(item.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-          if (item.username.length > 0) {
-            Text(item.username).fontSize(11).fontColor(COLOR_MUTED)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-          }
-        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        Text('›').fontSize(19).fontColor('#B2B8C2')
-      }.width('100%')
-      this.categoryItemMeta(item)
-    }
-    .width('100%').padding({ left: 11, right: 10, top: 8, bottom: 8 })
-    .backgroundColor(COLOR_SURFACE).borderRadius(14).border({ width: 1, color: COLOR_BORDER })
-    .onClick((): void => { this.openItem(item); })
-  }
-
-  @Builder
-  private categoryNoteRow(item: VaultItem): void {
-    Column({ space: 5 }) {
-      Text(item.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-      if (item.notes.length > 0) {
-        Text(item.notes).fontSize(11).lineHeight(16).fontColor(COLOR_MUTED)
-          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-      }
-      this.categoryItemMeta(item)
-    }
-    .width('100%').alignItems(HorizontalAlign.Start)
-    .padding({ left: 11, right: 11, top: 8, bottom: 8 })
-    .backgroundColor(COLOR_SURFACE).borderRadius(14).border({ width: 1, color: COLOR_BORDER })
-    .onClick((): void => { this.openItem(item); })
-  }
-
-  @Builder
-  private categoryFileRow(item: VaultItem): void {
-    Column({ space: 5 }) {
-      Row({ space: 8 }) {
-        Column({ space: 4 }) {
-          Text(item.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-          VaultFileSummary({ itemId: item.id })
-        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        Text('›').fontSize(19).fontColor('#B2B8C2')
-      }.width('100%')
-      this.categoryItemMeta(item)
-    }
-    .width('100%').padding({ left: 11, right: 10, top: 8, bottom: 8 })
-    .backgroundColor(COLOR_SURFACE).borderRadius(14).border({ width: 1, color: COLOR_BORDER })
-    .onClick((): void => { this.openItem(item); })
-  }
-
-  @Builder
-  private categoryMediaRow(item: VaultItem): void {
-    Column({ space: 5 }) {
-      Row({ space: 8 }) {
-        Text(item.title.length > 0 ? item.title : ' ')
-          .fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-        Text('›').fontSize(19).fontColor('#B2B8C2')
-      }.width('100%')
-      VaultAttachmentPreview({
-        itemId: item.id,
-        fallbackType: item.type,
-        maxVisibleCount: 6,
-        thumbnailSize: 44
-      })
-      this.categoryItemMeta(item)
-    }
-    .width('100%').padding({ left: 11, right: 10, top: 8, bottom: 8 })
-    .alignItems(HorizontalAlign.Start)
-    .backgroundColor(COLOR_SURFACE).borderRadius(14).border({ width: 1, color: COLOR_BORDER })
-    .onClick((): void => { this.openItem(item); })
-  }
-
-  @Builder
-  private categoryContent(): void {
-    if (this.categoryItems().length === 0) {
-      this.emptyState(`还没有${itemTypeLabel(this.selectedCategoryType)}`, '点击底部加号添加第一条资料')
-    } else if (this.selectedCategoryType === VaultItemType.Image) {
-      Column({ space: 5 }) {
-        ForEach(this.categoryItems(), (item: VaultItem): void => {
-          this.categoryMediaRow(item)
-        }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
-      }.width('100%')
-    } else {
-      Column({ space: 5 }) {
-        ForEach(this.categoryItems(), (item: VaultItem): void => {
-          if (this.selectedCategoryType === VaultItemType.Login) {
-            this.categoryAccountRow(item)
-          } else if (this.selectedCategoryType === VaultItemType.Note) {
-            this.categoryNoteRow(item)
-          } else {
-            this.categoryFileRow(item)
-          }
-        }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
-      }.width('100%')
-    }
-  }
-
-  @Builder
   private categoryTab(): void {
-    Column({ space: 8 }) {
-      Row({ space: 5 }) {
-        this.categoryTypeSwitch(VaultItemType.Login)
-        this.categoryTypeSwitch(VaultItemType.Note)
-        this.categoryTypeSwitch(VaultItemType.Image)
-        this.categoryTypeSwitch(VaultItemType.File)
-      }.width('100%')
-      Row({ space: 6 }) {
-        Scroll() {
-          Row({ space: 5 }) {
-            this.categoryGroupChip(-1, '全部分组')
-            ForEach(this.groups, (group: VaultGroup): void => {
-              if (this.countGroupByType(group.id, this.selectedCategoryType) > 0) {
-                this.categoryGroupChip(group.id, group.name)
-              }
-            }, (group: VaultGroup): string => `${group.id}-${group.name}`)
-            if (this.countGroupByType(0, this.selectedCategoryType) > 0) {
-              this.categoryGroupChip(0, '未分组')
-            }
-          }
-        }.layoutWeight(1).scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
-        Button(`${this.categorySortLabel()}  ▾`)
-          .height(31).fontSize(10).fontColor(COLOR_MUTED)
-          .padding({ left: 9, right: 9 }).backgroundColor(COLOR_SURFACE).borderRadius(12)
-          .border({ width: 1, color: COLOR_BORDER })
-          .onClick((): void => { this.chooseCategorySort(); })
-      }.width('100%')
-      Row() {
-        Text(`${this.categoryItems().length} 条资料`).fontSize(11).fontColor(COLOR_MUTED)
-      }.width('100%').padding({ left: 2 })
-      Scroll() {
-        this.categoryContent()
-      }.layoutWeight(1).width('100%').scrollBar(BarState.Off)
-    }
-    .width('100%').height('100%')
-    .padding({ left: 18, right: 18, top: 10, bottom: 92 })
+    VaultCategoryPanel({
+      selectedType: this.selectedCategoryType,
+      selectedGroupId: this.categoryGroupId,
+      sortLabel: this.categorySortLabel(),
+      groups: this.groups,
+      items: this.categoryItems(),
+      allItems: this.allItems,
+      loginCount: this.loginCount,
+      noteCount: this.noteCount,
+      mediaCount: this.mediaCount,
+      fileCount: this.fileCount,
+      onSelectType: (type: VaultItemType): void => { this.selectCategoryType(type); },
+      onSelectGroup: (groupId: number): void => { this.categoryGroupId = groupId; },
+      onChooseSort: (): void => { this.chooseCategorySort(); },
+      onOpenItem: (item: VaultItem): void => { this.openItem(item); }
+    })
   }
 
   @Builder
@@ -3240,267 +2765,55 @@ struct Index {
 
   @Builder
   private groupManagerTab(): void {
-    Column({ space: 16 }) {
-      Row({ space: 10 }) {
-        Button('‹')
-          .width(40).height(40).fontSize(26).fontColor(COLOR_TEXT)
-          .backgroundColor(COLOR_SURFACE).borderRadius(12)
-          .onClick((): void => { this.showGroupManager = false; })
-        Text('分组管理').fontSize(25).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT).layoutWeight(1)
-      }.width('100%')
-      List({ space: 10 }) {
-        ForEach(this.groups, (group: VaultGroup): void => {
-          ListItem() {
-            Row({ space: 12 }) {
-              Column({ space: 3 }) {
-                Text(group.name).fontSize(15).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-                Text(`${this.countGroup(group.id)} 条资料`).fontSize(11).fontColor(COLOR_MUTED)
-              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-              Row({ space: 6 }) {
-                Button('重命名')
-                  .height(36).fontSize(11).fontColor(COLOR_PRIMARY)
-                  .backgroundColor(COLOR_SURFACE_2).borderRadius(10)
-                  .onClick((): void => { this.requestRenameGroup(group); })
-                Button('删除')
-                  .height(36).fontSize(11).fontColor(COLOR_DANGER)
-                  .backgroundColor('#FDEDEF').borderRadius(10)
-                  .onClick((): void => { this.requestDeleteGroup(group); })
-              }
-            }
-            .width('100%').padding(14).backgroundColor(COLOR_SURFACE).borderRadius(17)
-            .border({ width: 1, color: COLOR_BORDER })
-          }
-        }, (group: VaultGroup): string => `${group.id}-${group.name}`)
-      }
-      .layoutWeight(1).width('100%').scrollBar(BarState.Off)
-    }
-    .width('100%').height('100%')
-    .padding({ left: 18, right: 18, top: 20, bottom: 92 })
-  }
-
-  @Builder
-  private settingsTab(): void {
-    Scroll() {
-      Column({ space: 16 }) {
-        Column() {
-          Text('快捷登录')
-            .fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-            .width('100%').padding(15)
-          Row({ space: 12 }) {
-            Stack() {
-              Text('◉').fontSize(22).fontColor(COLOR_PRIMARY)
-            }
-            .width(44).height(44).borderRadius(14).backgroundColor('#183029')
-            Column({ space: 3 }) {
-              Text('人脸登录').fontSize(14).fontColor(COLOR_TEXT)
-              Text(this.faceEnabled ? '已启用 · 由系统人脸验证' :
-                (this.faceAvailable ? '未启用' : '设备未录入或不支持'))
-                .fontSize(12).fontColor(COLOR_MUTED)
-            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Button(this.faceEnabled ? '关闭' : '启用')
-              .height(38).fontColor(this.faceEnabled ? COLOR_DANGER : COLOR_PRIMARY)
-              .backgroundColor(COLOR_SURFACE_2)
-              .enabled(this.faceEnabled || this.faceAvailable)
-              .onClick((): void => { this.toggleFace(); })
-          }
-          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
-          Row({ space: 12 }) {
-            Stack() { Text('◎').fontSize(22).fontColor(COLOR_PRIMARY) }
-              .width(44).height(44).borderRadius(14).backgroundColor('#183029')
-            Column({ space: 3 }) {
-              Text('指纹登录').fontSize(14).fontColor(COLOR_TEXT)
-              Text(this.fingerprintEnabled ? '已启用 · 由系统指纹验证' :
-                (this.fingerprintAvailable ? '未启用' : '设备未录入或不支持'))
-                .fontSize(12).fontColor(COLOR_MUTED)
-            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Button(this.fingerprintEnabled ? '关闭' : '启用')
-              .height(38).fontColor(this.fingerprintEnabled ? COLOR_DANGER : COLOR_PRIMARY)
-              .backgroundColor(COLOR_SURFACE_2)
-              .enabled(this.fingerprintEnabled || this.fingerprintAvailable)
-              .onClick((): void => { this.toggleFingerprint(); })
-          }
-          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
-          Row({ space: 12 }) {
-            Stack() {
-              Grid() {
-                ForEach([0, 1, 2, 3, 4, 5, 6, 7, 8], (): void => {
-                  GridItem() { Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY) }
-                })
-              }
-              .columnsTemplate('1fr 1fr 1fr').columnsGap(3).rowsGap(3)
-              .width(18).height(18)
-            }
-            .width(44).height(44).borderRadius(14).backgroundColor('#183029')
-            Column({ space: 3 }) {
-              Text('手势登录').fontSize(14).fontColor(COLOR_TEXT)
-              Text(this.gestureEnabled ? '已启用 · 九宫格快捷解锁' : '未启用 · 至少连接 4 个点')
-                .fontSize(12).fontColor(COLOR_MUTED)
-            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Button(this.gestureEnabled ? '关闭' : '启用')
-              .height(38).fontColor(this.gestureEnabled ? COLOR_DANGER : COLOR_PRIMARY)
-              .backgroundColor(COLOR_SURFACE_2)
-              .onClick((): void => {
-                if (this.gestureEnabled) { this.disableGesture(); } else { this.beginGestureSetup(); }
-              })
-          }
-          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
-          Row() {
-            Column({ space: 3 }) {
-              Text('首选登录方式').fontSize(14).fontColor(COLOR_TEXT)
-              Text('打开应用时优先使用').fontSize(12).fontColor(COLOR_MUTED)
-            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Text(this.unlockModeLabel(this.preferredUnlock)).fontSize(13).fontColor(COLOR_PRIMARY)
-            Text('›').fontSize(22).fontColor('#B2B8C2').margin({ left: 8 })
-          }
-          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
-          .onClick((): void => { this.choosePreferredUnlock(); })
-        }
-        .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
-        .border({ width: 1, color: COLOR_BORDER })
-        Column() {
-          Text('密码与安全')
-            .fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-            .width('100%').padding(15)
-          Row({ space: 12 }) {
-            Stack() { Text('••').fontSize(18).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY) }
-              .width(44).height(44).borderRadius(14).backgroundColor('#183029')
-            Column({ space: 3 }) {
-              Text('修改密码').fontSize(14).fontColor(COLOR_TEXT)
-              Text('修改后快捷登录需要重新启用').fontSize(12).fontColor(COLOR_MUTED)
-            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Text('›').fontSize(22).fontColor('#B2B8C2')
-          }
-          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
-          .onClick((): void => { this.openChangePassword(); })
-          Row() {
-            Column({ space: 3 }) {
-              Text('自动锁定').fontSize(14).fontColor(COLOR_TEXT)
-              Text('应用切换到后台后').fontSize(12).fontColor(COLOR_MUTED)
-            }.alignItems(HorizontalAlign.Start)
-            Blank()
-            Text(this.autoLockLabel()).fontSize(12).fontColor(COLOR_PRIMARY)
-            Text('›').fontSize(22).fontColor('#B2B8C2').margin({ left: 8 })
-          }
-          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
-          .onClick((): void => { this.chooseAutoLockTime(); })
-        }
-        .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
-        .border({ width: 1, color: COLOR_BORDER })
-        Row({ space: 12 }) {
-          Stack() {
-            Column({ space: 3 }) {
-              Row({ space: 4 }) {
-                Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY)
-                Divider().width(13).strokeWidth(3).color(COLOR_PRIMARY).borderRadius(2)
-              }
-              Row({ space: 4 }) {
-                Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY)
-                Divider().width(13).strokeWidth(3).color(COLOR_PRIMARY).borderRadius(2)
-              }
-              Row({ space: 4 }) {
-                Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY)
-                Divider().width(13).strokeWidth(3).color(COLOR_PRIMARY).borderRadius(2)
-              }
-            }
-          }
-          .width(44).height(44).borderRadius(14).backgroundColor('#183029')
-          Column({ space: 3 }) {
-            Text('分组管理').fontSize(15).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-            Text('查看和删除自定义分组').fontSize(11).fontColor(COLOR_MUTED)
-          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Text('›').fontSize(22).fontColor('#B2B8C2')
-        }
-        .width('100%').padding(14).backgroundColor(COLOR_SURFACE).borderRadius(17)
-        .border({ width: 1, color: COLOR_BORDER })
-        .onClick((): void => { this.showGroupManager = true; })
-        Column() {
-          Row() {
-            Text('版本与构建').fontSize(15).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-            Blank()
-            Text(`${VERSION_NAME}（${VERSION_CODE}）`).fontSize(12).fontColor(COLOR_MUTED)
-          }
-          .width('100%').padding({ left: 15, right: 15, top: 14, bottom: 12 })
-          Row() {
-            Text('构建标识').fontSize(13).fontColor(COLOR_MUTED)
-            Blank()
-            Text(BUILD_GIT_LABEL).fontSize(12).fontColor('#607B72').maxLines(1)
-          }
-          .width('100%').padding({ left: 15, right: 15, top: 12, bottom: 14 })
-          .border({ width: { top: 1 }, color: COLOR_BORDER })
-        }
-        .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(17)
-        .border({ width: 1, color: COLOR_BORDER })
-        Button('立即锁定保险库')
-          .width('100%').height(50).fontColor(COLOR_PRIMARY)
-          .backgroundColor('#173128').borderRadius(14)
-          .onClick((): void => { this.lockVault(); })
-        Text('掌心密匣 PalmVault')
-          .fontSize(12).fontColor('#607B72').width('100%').textAlign(TextAlign.Center)
-      }
-      .width('100%')
-      .padding({ left: 18, right: 18, top: 12, bottom: 105 })
-    }
-    .width('100%')
-    .height('100%')
-  }
-
-  @Builder
-  private bottomBar(): void {
-    Row() {
-      this.navItem(0, $r('app.media.nav_home'), '首页')
-      this.navItem(1, $r('app.media.nav_category'), '分类')
-      this.newItemNav()
-      this.navItem(2, $r('app.media.nav_trash'), '回收站')
-      this.navItem(3, $r('app.media.nav_settings'), '设置')
-    }
-    .width('100%')
-    .height(76)
-    .padding({ top: 6, bottom: 2 })
-    .backgroundColor('#FAFFFFFF')
-    .border({ width: { top: 1 }, color: COLOR_BORDER })
-  }
-
-  @Builder
-  private navItem(index: number, icon: Resource, label: string): void {
-    Column({ space: 5 }) {
-      Image(icon)
-        .width(24).height(24)
-        .fillColor(this.activeTab === index ? COLOR_PRIMARY : COLOR_MUTED)
-      Text(label)
-        .width('100%').height(18).lineHeight(18)
-        .fontSize(11).textAlign(TextAlign.Center)
-        .fontColor(this.activeTab === index ? COLOR_PRIMARY : COLOR_MUTED)
-    }
-    .layoutWeight(1)
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .padding({ top: 6, bottom: 4 })
-    .onClick((): void => {
-      this.activeTab = index;
-      if (index !== 2) {
-        this.closeTrashManagement();
-        this.showTrashMore = false;
-      }
-      if (index === 2) {
-        this.refreshTrash();
-      }
-      if (index === 3) {
-        this.showGroupManager = false;
-      }
+    VaultGroupManager({
+      groups: this.groups,
+      countGroup: (groupId: number): number => this.countGroup(groupId),
+      onBack: (): void => { this.showGroupManager = false; },
+      onRename: (group: VaultGroup): void => { this.requestRenameGroup(group); },
+      onDelete: (group: VaultGroup): void => { this.requestDeleteGroup(group); }
     })
   }
 
   @Builder
-  private newItemNav(): void {
-    Column() {
-      Stack() {
-        Text('+').fontSize(28).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
-      }
-      .width(48).height(48).borderRadius(16).backgroundColor(COLOR_PRIMARY)
-    }
-    .layoutWeight(1).height('100%').justifyContent(FlexAlign.Center)
-    .translate({ y: -4 })
-    .onClick((): void => { this.openNewItem(); })
+  private settingsTab(): void {
+    VaultSettingsPanel({
+      faceEnabled: this.faceEnabled,
+      faceAvailable: this.faceAvailable,
+      fingerprintEnabled: this.fingerprintEnabled,
+      fingerprintAvailable: this.fingerprintAvailable,
+      gestureEnabled: this.gestureEnabled,
+      preferredUnlockLabel: this.unlockModeLabel(this.preferredUnlock),
+      autoLockLabel: this.autoLockLabel(),
+      versionLabel: `${VERSION_NAME}（${VERSION_CODE}）`,
+      buildLabel: BUILD_GIT_LABEL,
+      onToggleFace: (): void => { this.toggleFace(); },
+      onToggleFingerprint: (): void => { this.toggleFingerprint(); },
+      onToggleGesture: (): void => {
+        if (this.gestureEnabled) { this.disableGesture(); } else { this.beginGestureSetup(); }
+      },
+      onChoosePreferredUnlock: (): void => { this.choosePreferredUnlock(); },
+      onChangePassword: (): void => { this.openChangePassword(); },
+      onChooseAutoLock: (): void => { this.chooseAutoLockTime(); },
+      onOpenGroupManager: (): void => { this.showGroupManager = true; },
+      onLockVault: (): void => { this.lockVault(); }
+    })
+  }
+
+  @Builder
+  private bottomBar(): void {
+    VaultBottomNavigation({
+      activeTab: this.activeTab,
+      onSelectTab: (index: number): void => {
+        this.activeTab = index;
+        if (index !== 2) {
+          this.closeTrashManagement();
+          this.showTrashMore = false;
+        }
+        if (index === 2) { this.refreshTrash(); }
+        if (index === 3) { this.showGroupManager = false; }
+      },
+      onNewItem: (): void => { this.openNewItem(); }
+    })
   }
 
   @Builder
@@ -3550,121 +2863,35 @@ struct Index {
       if (this.selectedItem) {
         this.detailOverlay(this.selectedItem as VaultItem)
       }
-      if (this.showGestureSetup) { this.gestureSetupOverlay() }
-      if (this.showChangePassword) { this.changePasswordOverlay() }
-      if (this.showResetVault) { this.resetVaultOverlay() }
+      if (this.showGestureSetup) {
+        GestureSetupDialog({
+          step: this.gestureSetupStep,
+          hint: this.gestureSetupHint,
+          onClose: (): void => { this.closeGestureSetup(); },
+          onComplete: (pattern: number[]): void => { this.handleGestureSetup(pattern); }
+        })
+      }
+      if (this.showChangePassword) {
+        ChangePasswordDialog({
+          currentPassword: $currentPassword,
+          newPassword: $changedPassword,
+          confirmPassword: $changedPasswordConfirm,
+          busy: this.passwordChangeBusy,
+          onClose: (): void => { this.closeChangePassword(); },
+          onConfirm: (): void => { this.changePassword(); }
+        })
+      }
+      if (this.showResetVault) {
+        ResetVaultDialog({
+          confirmation: $resetVaultConfirmText,
+          busy: this.resetVaultBusy,
+          onClose: (): void => { this.closeResetVault(); },
+          onConfirm: (): void => { this.resetVault(); }
+        })
+      }
     }
     .width('100%')
     .height('100%')
-  }
-
-  @Builder
-  private changePasswordOverlay(): void {
-    Column() {
-      Column({ space: 10 }) {
-        this.modalHeader('修改密码', (): void => { this.closeChangePassword(); })
-        TextInput({ placeholder: '当前密码', text: this.currentPassword })
-          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
-          .onChange((value: string): void => { this.currentPassword = value; })
-        TextInput({ placeholder: '新密码（至少 8 个字符）', text: this.changedPassword })
-          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
-          .onChange((value: string): void => { this.changedPassword = value; })
-        TextInput({ placeholder: '再次输入新密码', text: this.changedPasswordConfirm })
-          .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
-          .onChange((value: string): void => { this.changedPasswordConfirm = value; })
-        Button(this.passwordChangeBusy ? '正在修改…' : '确认修改')
-          .width('100%').height(48).fontWeight(FontWeight.Bold)
-          .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(12)
-          .enabled(!this.passwordChangeBusy)
-          .onClick((): void => { this.changePassword(); })
-      }
-      .width('88%').padding(18).backgroundColor(COLOR_SURFACE).borderRadius(22)
-    }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center)
-    .backgroundColor('#99000000')
-  }
-
-  @Builder
-  private recoveryCenterOverlay(): void {
-    Column() {
-      Scroll() {
-        Column({ space: 10 }) {
-          this.modalHeader('恢复访问', (): void => { this.closeRecoveryCenter(); })
-          if (!this.recoveryAuthenticated) {
-            Text('使用已启用的本机生物认证验证身份，然后重设密码。')
-              .fontSize(13).fontColor(COLOR_MUTED).lineHeight(20).width('100%')
-            if (this.faceEnabled) {
-              Button(this.recoveryBusy ? '正在验证…' : '使用人脸验证')
-                .width('100%').height(48).fontWeight(FontWeight.Bold)
-                .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(12)
-                .enabled(!this.recoveryBusy)
-                .onClick((): void => { this.authenticateRecovery('face'); })
-            }
-            if (this.fingerprintEnabled) {
-              Button(this.recoveryBusy ? '正在验证…' : '使用指纹验证')
-                .width('100%').height(48).fontWeight(FontWeight.Bold)
-                .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(12)
-                .enabled(!this.recoveryBusy)
-                .onClick((): void => { this.authenticateRecovery('fingerprint'); })
-            }
-            if (!this.faceEnabled && !this.fingerprintEnabled) {
-              Text('没有已启用的生物认证，当前无法无损重设密码。')
-                .fontSize(13).fontColor(COLOR_MUTED).lineHeight(20).width('100%')
-                .padding(12).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
-            }
-          } else {
-            Text(`已通过${this.recoveryAuthLabel}验证`)
-              .fontSize(13).fontColor(COLOR_PRIMARY).width('100%')
-            TextInput({ placeholder: '新密码（至少 8 个字符）', text: this.recoveryNewPassword })
-              .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
-              .onChange((value: string): void => { this.recoveryNewPassword = value; })
-            TextInput({ placeholder: '再次输入新密码', text: this.recoveryPasswordConfirm })
-              .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
-              .onChange((value: string): void => { this.recoveryPasswordConfirm = value; })
-            Button(this.recoveryBusy ? '正在重设…' : '重设密码并进入保险库')
-              .width('100%').height(48).fontWeight(FontWeight.Bold)
-              .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(12)
-              .enabled(!this.recoveryBusy)
-              .onClick((): void => { this.resetRecoveredPassword(); })
-          }
-          Divider().color(COLOR_BORDER).margin({ top: 4, bottom: 2 })
-          Text('无法通过上述方式恢复？').fontSize(12).fontColor(COLOR_MUTED).width('100%')
-          Button('永久清除本地保险库')
-            .width('100%').height(44).fontSize(13).fontColor(COLOR_DANGER)
-            .backgroundColor('#FDEDEF').borderRadius(12)
-            .enabled(!this.recoveryBusy)
-            .onClick((): void => { this.openResetVault(); })
-        }
-        .width('100%').padding(18)
-      }
-      .width('88%').constraintSize({ maxHeight: '88%' }).scrollBar(BarState.Off)
-      .backgroundColor(COLOR_SURFACE).borderRadius(22)
-    }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center)
-    .backgroundColor('#99000000')
-  }
-
-  @Builder
-  private resetVaultOverlay(): void {
-    Column() {
-      Column({ space: 10 }) {
-        this.modalHeader('清除本地保险库', (): void => { this.closeResetVault(); })
-        Text('此操作会永久删除全部资料、附件、分组和登录设置，且无法恢复。')
-          .fontSize(13).fontColor(COLOR_DANGER).lineHeight(20).width('100%')
-        Text('请输入“清除全部数据”以确认').fontSize(12).fontColor(COLOR_MUTED).width('100%')
-        TextInput({ placeholder: '清除全部数据', text: this.resetVaultConfirmText })
-          .height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(12)
-          .onChange((value: string): void => { this.resetVaultConfirmText = value; })
-        Button(this.resetVaultBusy ? '正在清除…' : '永久清除全部数据')
-          .width('100%').height(48).fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF').backgroundColor(COLOR_DANGER).borderRadius(12)
-          .enabled(!this.resetVaultBusy && this.resetVaultConfirmText === '清除全部数据')
-          .onClick((): void => { this.resetVault(); })
-      }
-      .width('88%').padding(18).backgroundColor(COLOR_SURFACE).borderRadius(22)
-    }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center)
-    .backgroundColor('#99000000')
   }
 
   @Builder
@@ -3750,29 +2977,6 @@ struct Index {
       }
       .width('100%').constraintSize({ maxHeight: '94%' }).scrollBar(BarState.Off)
       .backgroundColor(COLOR_SURFACE).borderRadius({ topLeft: 24, topRight: 24 })
-    }
-    .width('100%').height('100%').backgroundColor('#99000000')
-  }
-
-  @Builder
-  private gestureSetupOverlay(): void {
-    Column() {
-      Blank().onClick((): void => { this.closeGestureSetup(); })
-      Column({ space: 10 }) {
-        this.modalHeader('设置手势登录', (): void => {
-          this.closeGestureSetup();
-        })
-        Text(this.gestureSetupStep === 1 ? '第一步，共两步' : '第二步，共两步')
-          .fontSize(12).fontColor(COLOR_PRIMARY).width('100%')
-        GestureGrid({
-          hint: this.gestureSetupHint,
-          onComplete: (pattern: number[]): void => { this.handleGestureSetup(pattern); }
-        })
-        Text('手势只用于快捷登录，密码仍可随时解锁。')
-          .fontSize(12).fontColor(COLOR_MUTED).textAlign(TextAlign.Center).width('100%')
-      }
-      .padding(20).width('100%').backgroundColor(COLOR_SURFACE)
-      .borderRadius({ topLeft: 24, topRight: 24 })
     }
     .width('100%').height('100%').backgroundColor('#99000000')
   }
@@ -4348,14 +3552,56 @@ struct Index {
 
   build() {
     if (this.screen === 'loading') {
-      this.loadingScreen()
+      VaultLoadingScreen()
     } else if (this.screen === 'setup') {
-      this.setupScreen()
+      VaultSetupScreen({
+        masterPassword: $masterPassword,
+        confirmPassword: $confirmPassword,
+        busy: this.busy,
+        errorMessage: this.errorMessage,
+        onCreateVault: (): void => { this.createVault(); }
+      })
     } else if (this.screen === 'locked') {
       Stack() {
-        this.lockedScreen()
-        if (this.showRecoveryCenter) { this.recoveryCenterOverlay() }
-        if (this.showResetVault) { this.resetVaultOverlay() }
+        VaultLockedScreen({
+          masterPassword: $masterPassword,
+          unlockMode: this.unlockMode,
+          busy: this.busy,
+          errorMessage: this.errorMessage,
+          faceEnabled: this.faceEnabled,
+          fingerprintEnabled: this.fingerprintEnabled,
+          gestureEnabled: this.gestureEnabled,
+          onSelectMode: (mode: string): void => { this.selectUnlockMode(mode); },
+          onUnlockPassword: (): void => { this.unlockVault(); },
+          onUnlockFingerprint: (): void => { this.unlockWithFingerprint(); },
+          onUnlockFace: (): void => { this.unlockWithFace(); },
+          onUnlockGesture: (pattern: number[]): void => { this.unlockWithGesture(pattern); },
+          onOpenRecovery: (): void => { this.openRecoveryCenter(); }
+        })
+        if (this.showRecoveryCenter) {
+          RecoveryCenterDialog({
+            newPassword: $recoveryNewPassword,
+            confirmPassword: $recoveryPasswordConfirm,
+            faceEnabled: this.faceEnabled,
+            fingerprintEnabled: this.fingerprintEnabled,
+            authenticated: this.recoveryAuthenticated,
+            authLabel: this.recoveryAuthLabel,
+            busy: this.recoveryBusy,
+            onClose: (): void => { this.closeRecoveryCenter(); },
+            onAuthenticateFace: (): void => { this.authenticateRecovery('face'); },
+            onAuthenticateFingerprint: (): void => { this.authenticateRecovery('fingerprint'); },
+            onResetPassword: (): void => { this.resetRecoveredPassword(); },
+            onClearVault: (): void => { this.openResetVault(); }
+          })
+        }
+        if (this.showResetVault) {
+          ResetVaultDialog({
+            confirmation: $resetVaultConfirmText,
+            busy: this.resetVaultBusy,
+            onClose: (): void => { this.closeResetVault(); },
+            onConfirm: (): void => { this.resetVault(); }
+          })
+        }
       }.width('100%').height('100%')
     } else {
       this.vaultScreen()
