@@ -37,6 +37,7 @@ export struct VaultSetupScreen {
   @Prop busy: boolean = false;
   @Prop errorMessage: string = '';
   onCreateVault: () => void = (): void => {};
+  onRestoreBackup: () => void = (): void => {};
 
   build() {
     Scroll() {
@@ -49,7 +50,7 @@ export struct VaultSetupScreen {
             .fontSize(14).fontColor(COLOR_MUTED).textAlign(TextAlign.Center)
         }
         Column({ space: 14 }) {
-          TextInput({ placeholder: '至少 8 个字符', text: this.masterPassword })
+          TextInput({ placeholder: '请输入密码', text: this.masterPassword })
             .type(InputType.Password).height(52).fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER)
             .backgroundColor(COLOR_SURFACE_2).borderRadius(14)
             .onChange((value: string): void => { this.masterPassword = value; })
@@ -64,6 +65,10 @@ export struct VaultSetupScreen {
             .width('100%').height(52).fontSize(16).fontWeight(FontWeight.Bold)
             .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(14)
             .enabled(!this.busy).onClick((): void => { this.onCreateVault(); })
+          Button('从备份恢复')
+            .width('100%').height(46).fontSize(14).fontColor(COLOR_PRIMARY)
+            .backgroundColor(COLOR_SURFACE_2).borderRadius(14).enabled(!this.busy)
+            .onClick((): void => { this.onRestoreBackup(); })
         }
         .padding(20).width('100%').backgroundColor(COLOR_SURFACE).borderRadius(22)
         .border({ width: 1, color: COLOR_BORDER })

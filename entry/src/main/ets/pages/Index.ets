@@ -3,6 +3,7 @@ import pasteboard from '@ohos.pasteboard';
 import { VERSION_CODE, VERSION_NAME } from 'BuildProfile';
 import { VaultLoadingScreen, VaultLockedScreen, VaultSetupScreen } from '../components/VaultAuthScreens';
 import { VaultSettingsPanel } from '../components/VaultSettingsPanel';
+import { VaultBackupDialog } from '../components/VaultBackupDialog';
 import { VaultBottomNavigation } from '../components/VaultBottomNavigation';
 import { VaultGroupManager } from '../components/VaultGroupManager';
 import { VaultCategoryPanel } from '../components/VaultCategoryPanel';
@@ -36,6 +37,7 @@ import { mediaPickerService, PickedMedia } from '../services/MediaPickerService'
 import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
 import { vaultRepository } from '../services/VaultRepository';
+import { PreparedVaultBackup, VaultBackupService } from '../services/VaultBackupService';
 import { BUILD_GIT_LABEL } from '../generated/BuildMetadata';
 import {
   itemTypeGlyph,
@@ -48,6 +50,7 @@ import {
   VaultTrashEntry,
   VaultItemType
 } from '../models/VaultModels';
+import { BackupProgress, BackupRestoreResult, VaultRestoreMode } from '../models/VaultBackupModels';
 
 @Entry
 @Component
@@ -56,6 +59,8 @@ struct Index {
   private lifecycleLocked: boolean = false;
   @StorageLink('vaultAutoLockMinutes')
   private autoLockMinutes: number = 10;
+  @StorageLink('vaultLifecycleSuppressed')
+  private lifecycleLockSuppressed: boolean = false;
   @State private screen: string = 'loading';
   @State private activeTab: number = 0;
   @State private masterPassword: string = '';
@@ -147,6 +152,25 @@ struct Index {
   @State private detailPassword: string = '';
   @State private detailNotes: string = '';
   @State private detailGroupId: number = 0;
+  @State private showBackupDialog: boolean = false;
+  @State private backupAction: string = 'create';
+  @State private backupStage: string = 'password';
+  @State private backupPassword: string = '';
+  @State private backupBusy: boolean = false;
+  @State private backupError: string = '';
+  @State private backupProgressText: string = '';
+  @State private backupProgressValue: number = 0;
+  @State private backupDateText: string = '';
+  @State private backupItemCount: number = 0;
+  @State private backupAttachmentCount: number = 0;
+  @State private backupAttachmentSizeText: string = '';
+  @State private backupAddedCount: number = 0;
+  @State private backupUpdatedCount: number = 0;
+  @State private backupRetainedCount: number = 0;
+  @State private backupNewerCount: number = 0;
+  @State private backupConflictCount: number = 0;
+  @State private backupUnchangedCount: number = 0;
+  @State private backupDeletedCount: number = 0;
   @State private pendingMedia: PickedMedia[] = [];
   private pendingFiles: PickedMedia[] = [];
   private mediaRecognitionVersion: number = 0;
@@ -165,12 +189,19 @@ struct Index {
   private sessionKey: Uint8Array = new Uint8Array(0);
   private recoveryDatabaseKey: Uint8Array = new Uint8Array(0);
   private firstGesture: number[] = [];
+  private selectedBackupUri: string = '';
+  private preparedBackup?: PreparedVaultBackup = undefined;
+  private restoringFreshInstall: boolean = false;
 
   aboutToAppear(): void {
     this.initialize();
   }
 
   onBackPress(): boolean {
+    if (this.showBackupDialog && !this.backupBusy) {
+      this.closeBackupDialog();
+      return true;
+    }
     if (this.showResetVault) {
       this.closeResetVault();
       return true;
@@ -239,8 +270,8 @@ struct Index {
   private async createVault(): Promise<void> {
     try {
     this.errorMessage = '';
-    if (this.masterPassword.length < 8) {
-      this.errorMessage = '密码至少需要 8 个字符';
+    if (this.masterPassword.length === 0) {
+      this.errorMessage = '密码不能为空';
       return;
     }
     if (this.masterPassword !== this.confirmPassword) {
@@ -265,6 +296,217 @@ struct Index {
       } catch (error) {
       throw normalizeError(error);
     }
+  }
+
+  private openCreateBackup(): void {
+    this.resetBackupDialog();
+    this.backupAction = 'create';
+    this.backupStage = 'password';
+    this.showBackupDialog = true;
+  }
+
+  private async openRestoreBackup(freshInstall: boolean = false): Promise<void> {
+    this.lifecycleLockSuppressed = true;
+    try {
+      const service = new VaultBackupService(AbilityContextHolder.getContext());
+      const uri = await service.chooseBackupFile();
+      if (!uri) { return; }
+      this.resetBackupDialog();
+      this.selectedBackupUri = uri;
+      this.restoringFreshInstall = freshInstall;
+      this.backupAction = 'restore';
+      this.backupStage = 'password';
+      this.showBackupDialog = true;
+    } catch (error) {
+      try { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); } catch (_) {}
+    } finally {
+      this.lifecycleLockSuppressed = false;
+    }
+  }
+
+  private resetBackupDialog(): void {
+    if (this.preparedBackup) {
+      new VaultBackupService(AbilityContextHolder.getContext()).disposePreparedBackup(this.preparedBackup);
+    }
+    this.preparedBackup = undefined;
+    this.selectedBackupUri = '';
+    this.restoringFreshInstall = false;
+    this.backupPassword = '';
+    this.backupBusy = false;
+    this.backupError = '';
+    this.backupProgressText = '';
+    this.backupProgressValue = 0;
+    this.backupDateText = '';
+    this.backupItemCount = 0;
+    this.backupAttachmentCount = 0;
+    this.backupAttachmentSizeText = '';
+    this.backupAddedCount = 0;
+    this.backupUpdatedCount = 0;
+    this.backupRetainedCount = 0;
+    this.backupNewerCount = 0;
+    this.backupConflictCount = 0;
+    this.backupUnchangedCount = 0;
+    this.backupDeletedCount = 0;
+  }
+
+  private closeBackupDialog(): void {
+    if (this.backupBusy) { return; }
+    if (this.preparedBackup) {
+      new VaultBackupService(AbilityContextHolder.getContext()).disposePreparedBackup(this.preparedBackup);
+    }
+    this.preparedBackup = undefined;
+    this.backupPassword = '';
+    this.selectedBackupUri = '';
+    this.showBackupDialog = false;
+  }
+
+  private async handleBackupPrimary(): Promise<void> {
+    if (this.backupBusy) { return; }
+    if (this.backupAction === 'create') {
+      await this.createEncryptedBackup();
+    } else if (this.backupStage === 'password') {
+      await this.readSelectedBackup();
+    } else if (this.backupStage === 'preview') {
+      await this.restorePreparedBackup();
+    }
+  }
+
+  private updateBackupProgress(progress: BackupProgress): void {
+    this.backupProgressText = progress.phase;
+    this.backupProgressValue = Math.max(0, Math.min(100,
+      Math.round(progress.completed * 100 / Math.max(progress.total, 1))));
+  }
+
+  private async createEncryptedBackup(): Promise<void> {
+    this.backupError = '';
+    this.backupBusy = true;
+    this.backupStage = 'running';
+    this.lifecycleLockSuppressed = true;
+    try {
+      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      if (!await security.verifyPassword(this.backupPassword)) { throw new Error('密码不正确'); }
+      const service = new VaultBackupService(AbilityContextHolder.getContext());
+      const saved = await service.createBackup(this.backupPassword, `${VERSION_NAME} (${VERSION_CODE})`,
+        (progress: BackupProgress): void => { this.updateBackupProgress(progress); });
+      this.backupBusy = false;
+      if (!saved) {
+        this.backupStage = 'password';
+        return;
+      }
+      this.closeBackupDialog();
+      this.getUIContext().getPromptAction().showToast({ message: '加密备份已保存' });
+    } catch (error) {
+      this.backupBusy = false;
+      this.backupStage = 'password';
+      this.backupError = this.describeError(error);
+    } finally {
+      this.lifecycleLockSuppressed = false;
+    }
+  }
+
+  private async readSelectedBackup(): Promise<void> {
+    this.backupError = '';
+    this.backupBusy = true;
+    this.backupStage = 'running';
+    try {
+      const service = new VaultBackupService(AbilityContextHolder.getContext());
+      const prepared = await service.inspectBackup(this.selectedBackupUri, this.backupPassword,
+        VaultRestoreMode.Merge,
+        (progress: BackupProgress): void => { this.updateBackupProgress(progress); }, this.restoringFreshInstall);
+      this.preparedBackup = prepared;
+      this.applyBackupPreview(prepared);
+      this.backupStage = 'preview';
+    } catch (error) {
+      this.backupStage = 'password';
+      this.backupError = this.describeError(error);
+    } finally {
+      this.backupBusy = false;
+    }
+  }
+
+  private applyBackupPreview(prepared: PreparedVaultBackup): void {
+    this.backupDateText = this.formatBackupDate(prepared.manifest.createdAt);
+    this.backupItemCount = prepared.manifest.itemCount;
+    this.backupAttachmentCount = prepared.manifest.attachmentCount;
+    this.backupAttachmentSizeText = this.formatBackupSize(prepared.manifest.attachmentBytes);
+    this.backupAddedCount = prepared.preview.addedCount;
+    this.backupUpdatedCount = prepared.preview.updatedCount;
+    this.backupRetainedCount = prepared.preview.retainedCount;
+    this.backupNewerCount = prepared.preview.newerCount;
+    this.backupConflictCount = prepared.preview.conflictCount;
+    this.backupUnchangedCount = prepared.preview.unchangedCount;
+    this.backupDeletedCount = prepared.preview.deletedCount;
+  }
+
+  private async restorePreparedBackup(): Promise<void> {
+    if (!this.preparedBackup) { return; }
+    const prepared = this.preparedBackup;
+    this.backupBusy = true;
+    this.backupStage = 'running';
+    this.backupError = '';
+    let securityCreated = false;
+    try {
+      if (this.restoringFreshInstall) {
+        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const key = await security.createMasterPassword(this.backupPassword);
+        securityCreated = true;
+        await this.openWithKey(key);
+      }
+      const service = new VaultBackupService(AbilityContextHolder.getContext());
+      const result = await service.applyPreparedBackup(prepared,
+        VaultRestoreMode.Merge,
+        (progress: BackupProgress): void => { this.updateBackupProgress(progress); });
+      this.preparedBackup = undefined;
+      await this.refreshData(true);
+      if (this.restoringFreshInstall) {
+        await this.refreshQuickUnlockStatus();
+        await this.showVaultScreen();
+      }
+      this.backupBusy = false;
+      this.closeBackupDialog();
+      this.getUIContext().getPromptAction().showToast({
+        message: this.restoreResultText(result)
+      });
+    } catch (error) {
+      this.preparedBackup = undefined;
+      if (securityCreated) {
+        try {
+          await vaultRepository.destroy(AbilityContextHolder.getContext());
+          await new VaultSecurityService(AbilityContextHolder.getContext()).resetSecurity();
+          this.sessionKey.fill(0);
+          this.sessionKey = new Uint8Array(0);
+        } catch (_) {}
+      }
+      this.backupBusy = false;
+      this.backupStage = 'password';
+      this.backupError = this.describeError(error);
+    }
+  }
+
+  private formatBackupDate(timestamp: number): string {
+    const date = new Date(timestamp);
+    const two = (value: number): string => value.toString().padStart(2, '0');
+    return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ` +
+      `${two(date.getHours())}:${two(date.getMinutes())}`;
+  }
+
+  private restoreResultText(result: BackupRestoreResult): string {
+    const parts: string[] = [];
+    if (result.addedCount > 0) { parts.push(`新增 ${result.addedCount} 项`); }
+    if (result.updatedCount > 0) { parts.push(`恢复或更新 ${result.updatedCount} 项`); }
+    if (result.retainedCount > 0) { parts.push(`保留当前新增 ${result.retainedCount} 项`); }
+    if (result.conflictCount > 0) { parts.push(`创建冲突副本 ${result.conflictCount} 项`); }
+    if (result.newerCount > 0) { parts.push(`保留本机较新版本 ${result.newerCount} 项`); }
+    if (result.unchangedCount > 0) { parts.push(`无需变更 ${result.unchangedCount} 项`); }
+    if (result.deletedCount > 0) { parts.push(`同步删除 ${result.deletedCount} 项`); }
+    return parts.length > 0 ? `恢复完成：${parts.join('，')}` : '恢复完成，当前资料无需变更';
+  }
+
+  private formatBackupSize(bytes: number): string {
+    if (bytes < 1024) { return `${bytes} B`; }
+    if (bytes < 1024 * 1024) { return `${(bytes / 1024).toFixed(1)} KB`; }
+    if (bytes < 1024 * 1024 * 1024) { return `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
   }
 
   private async unlockVault(): Promise<void> {
@@ -372,6 +614,8 @@ struct Index {
     this.sessionKey = key.slice();
     try {
       await vaultRepository.open(AbilityContextHolder.getContext(), key);
+      const recovered = new VaultBackupService(AbilityContextHolder.getContext()).recoverInterruptedRestore();
+      if (recovered) { console.info('PalmVault completed interrupted restore cleanup'); }
     } catch (error) {
       this.sessionKey.fill(0);
       this.sessionKey = new Uint8Array(0);
@@ -871,8 +1115,8 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({ message: '请输入当前密码' });
       return;
     }
-    if (this.changedPassword.length < 8) {
-      this.getUIContext().getPromptAction().showToast({ message: '新密码至少需要 8 个字符' });
+    if (this.changedPassword.length === 0) {
+      this.getUIContext().getPromptAction().showToast({ message: '新密码不能为空' });
       return;
     }
     if (this.changedPassword !== this.changedPasswordConfirm) {
@@ -952,8 +1196,8 @@ struct Index {
         this.getUIContext().getPromptAction().showToast({ message: '请先验证身份' });
         return;
       }
-      if (this.recoveryNewPassword.length < 8) {
-        this.getUIContext().getPromptAction().showToast({ message: '新密码至少需要 8 个字符' });
+      if (this.recoveryNewPassword.length === 0) {
+        this.getUIContext().getPromptAction().showToast({ message: '新密码不能为空' });
         return;
       }
       if (this.recoveryNewPassword !== this.recoveryPasswordConfirm) {
@@ -2721,7 +2965,35 @@ struct Index {
       onChangePassword: (): void => { this.openChangePassword(); },
       onChooseAutoLock: (): void => { this.chooseAutoLockTime(); },
       onOpenGroupManager: (): void => { this.showGroupManager = true; },
+      onCreateBackup: (): void => { this.openCreateBackup(); },
+      onRestoreBackup: (): void => { this.openRestoreBackup(false); },
       onLockVault: (): void => { this.lockVault(); }
+    })
+  }
+
+  @Builder
+  private backupDialogOverlay(): void {
+    VaultBackupDialog({
+      password: $backupPassword,
+      action: this.backupAction,
+      stage: this.backupStage,
+      busy: this.backupBusy,
+      errorMessage: this.backupError,
+      progressText: this.backupProgressText,
+      progressValue: this.backupProgressValue,
+      backupDateText: this.backupDateText,
+      itemCount: this.backupItemCount,
+      attachmentCount: this.backupAttachmentCount,
+      attachmentSizeText: this.backupAttachmentSizeText,
+      addedCount: this.backupAddedCount,
+      updatedCount: this.backupUpdatedCount,
+      retainedCount: this.backupRetainedCount,
+      newerCount: this.backupNewerCount,
+      conflictCount: this.backupConflictCount,
+      unchangedCount: this.backupUnchangedCount,
+      deletedCount: this.backupDeletedCount,
+      onClose: (): void => { this.closeBackupDialog(); },
+      onPrimary: (): void => { this.handleBackupPrimary(); }
     })
   }
 
@@ -2814,6 +3086,9 @@ struct Index {
           onClose: (): void => { this.closeResetVault(); },
           onConfirm: (): void => { this.resetVault(); }
         })
+      }
+      if (this.showBackupDialog) {
+        this.backupDialogOverlay()
       }
     }
     .width('100%')
@@ -3464,13 +3739,19 @@ struct Index {
     if (this.screen === 'loading') {
       VaultLoadingScreen()
     } else if (this.screen === 'setup') {
-      VaultSetupScreen({
-        masterPassword: $masterPassword,
-        confirmPassword: $confirmPassword,
-        busy: this.busy,
-        errorMessage: this.errorMessage,
-        onCreateVault: (): void => { this.createVault(); }
-      })
+      Stack() {
+        VaultSetupScreen({
+          masterPassword: $masterPassword,
+          confirmPassword: $confirmPassword,
+          busy: this.busy,
+          errorMessage: this.errorMessage,
+          onCreateVault: (): void => { this.createVault(); },
+          onRestoreBackup: (): void => { this.openRestoreBackup(true); }
+        })
+        if (this.showBackupDialog) {
+          this.backupDialogOverlay()
+        }
+      }.width('100%').height('100%')
     } else if (this.screen === 'locked') {
       Stack() {
         VaultLockedScreen({

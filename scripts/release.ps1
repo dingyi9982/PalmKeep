@@ -61,6 +61,13 @@ try {
   if ($LASTEXITCODE -eq 0) {
     throw "Tag $tagName already exists."
   }
+  $profileBeforeRelease = Get-Content -Raw -Encoding UTF8 $appProfilePath | ConvertFrom-Json
+  $versionsBeforeRelease = @(
+    [string]$profileBeforeRelease.app.versionName,
+    [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'oh-package.json5') | ConvertFrom-Json).version),
+    [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'entry\oh-package.json5') | ConvertFrom-Json).version)
+  )
+  $versionAlreadyPrepared = @($versionsBeforeRelease | Where-Object { $_ -ne $VersionName }).Count -eq 0
 
   Write-Host '1/6 Running preflight...'
   Invoke-CheckedScript -Path $preflightScript -Arguments @(
@@ -69,31 +76,39 @@ try {
   )
   Assert-CleanRepository
 
-  Write-Host "2/6 Preparing version $VersionName..."
-  $versionArguments = @('-Action', 'Prepare', '-VersionName', $VersionName)
-  if ($VersionCode -gt 0) { $versionArguments += @('-VersionCode', [string]$VersionCode) }
-  Invoke-CheckedScript -Path $versionScript -Arguments $versionArguments
-  $prepared = $true
+  if ($versionAlreadyPrepared) {
+    if ($VersionCode -gt 0 -and $VersionCode -ne [int]$profileBeforeRelease.app.versionCode) {
+      throw "VersionCode $VersionCode does not match the prepared versionCode $($profileBeforeRelease.app.versionCode)."
+    }
+    Write-Host "2/6 Version $VersionName is already prepared; using the current clean commit."
+  } else {
+    Write-Host "2/6 Preparing version $VersionName..."
+    $versionArguments = @('-Action', 'Prepare', '-VersionName', $VersionName)
+    if ($VersionCode -gt 0) { $versionArguments += @('-VersionCode', [string]$VersionCode) }
+    Invoke-CheckedScript -Path $versionScript -Arguments $versionArguments
+    $prepared = $true
 
-  $changedFiles = @(Invoke-Git @('status', '--porcelain') | ForEach-Object { $_.Substring(3).Trim('"').Replace('\', '/') })
-  $unexpected = @($changedFiles | Where-Object { $versionFiles -notcontains $_ })
-  if ($unexpected.Count -gt 0 -or $changedFiles -notcontains 'AppScope/app.json5') {
-    throw "Unexpected version changes. Changed: $($changedFiles -join ', ')"
-  }
-  $appVersion = [string]((Get-Content -Raw -Encoding UTF8 $appProfilePath | ConvertFrom-Json).app.versionName)
-  $rootPackageVersion = [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'oh-package.json5') | ConvertFrom-Json).version)
-  $entryPackageVersion = [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'entry\oh-package.json5') | ConvertFrom-Json).version)
-  $actualVersions = @($appVersion, $rootPackageVersion, $entryPackageVersion)
-  if (@($actualVersions | Where-Object { $_ -ne $VersionName }).Count -gt 0) {
-    throw "Version files do not all contain $VersionName."
-  }
-  Invoke-Git @('diff', '--check') | Out-Null
+    $changedFiles = @(Invoke-Git @('status', '--porcelain') | ForEach-Object { $_.Substring(3).Trim('"').Replace('\', '/') })
+    $unexpected = @($changedFiles | Where-Object { $versionFiles -notcontains $_ })
+    if ($unexpected.Count -gt 0 -or $changedFiles -notcontains 'AppScope/app.json5') {
+      throw "Unexpected version changes. Changed: $($changedFiles -join ', ')"
+    }
+    $appVersion = [string]((Get-Content -Raw -Encoding UTF8 $appProfilePath | ConvertFrom-Json).app.versionName)
+    $rootPackageVersion = [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'oh-package.json5') | ConvertFrom-Json).version)
+    $entryPackageVersion = [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'entry\oh-package.json5') | ConvertFrom-Json).version)
+    $actualVersions = @($appVersion, $rootPackageVersion, $entryPackageVersion)
+    if (@($actualVersions | Where-Object { $_ -ne $VersionName }).Count -gt 0) {
+      throw "Version files do not all contain $VersionName."
+    }
+    Invoke-Git @('diff', '--check') | Out-Null
 
-  Write-Host '3/6 Creating release commit and tag...'
-  Invoke-Git (@('add', '--') + $versionFiles) | Out-Null
-  Invoke-Git @('commit', '-m', "发布 $VersionName 版本") | Out-Null
-  $committed = $true
-  Assert-CleanRepository
+    Invoke-Git (@('add', '--') + $versionFiles) | Out-Null
+    Invoke-Git @('commit', '-m', "发布 $VersionName 版本") | Out-Null
+    $committed = $true
+    Assert-CleanRepository
+  }
+
+  Write-Host '3/6 Creating release tag...'
   Invoke-CheckedScript -Path $versionScript -Arguments @('-Action', 'Tag')
   $tagged = $true
 

@@ -31,6 +31,8 @@ export struct VaultSettingsPanel {
   onChangePassword: () => void = (): void => {};
   onChooseAutoLock: () => void = (): void => {};
   onOpenGroupManager: () => void = (): void => {};
+  onCreateBackup: () => void = (): void => {};
+  onRestoreBackup: () => void = (): void => {};
   onLockVault: () => void = (): void => {};
 
   build() {
@@ -147,6 +149,33 @@ export struct VaultSettingsPanel {
         }
         .width('100%').padding(14).backgroundColor(COLOR_SURFACE).borderRadius(17)
         .border({ width: 1, color: COLOR_BORDER }).onClick((): void => { this.onOpenGroupManager(); })
+
+        Column() {
+          Text('备份与恢复').fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
+            .width('100%').padding(15)
+          Row({ space: 12 }) {
+            Stack() { Text('↓').fontSize(22).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY) }
+              .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
+            Column({ space: 3 }) {
+              Text('创建备份').fontSize(14).fontColor(COLOR_TEXT)
+              Text('导出密码加密的本地备份文件').fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
+          }.width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          .onClick((): void => { this.onCreateBackup(); })
+          Row({ space: 12 }) {
+            Stack() { Text('↺').fontSize(21).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY) }
+              .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
+            Column({ space: 3 }) {
+              Text('从备份恢复').fontSize(14).fontColor(COLOR_TEXT)
+              Text('默认合并恢复，不覆盖新增资料').fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
+          }.width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          .onClick((): void => { this.onRestoreBackup(); })
+        }
+        .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
+        .border({ width: 1, color: COLOR_BORDER })
 
         Column() {
           Row() {

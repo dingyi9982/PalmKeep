@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.palmvault.app",
     "vendor": "PalmVault",
-    "versionCode": 1000000,
-    "versionName": "0.1.0",
+    "versionCode": 1,
+    "versionName": "1.0.0",
     "icon": "$media:launcher_icon_layered",
     "label": "$string:app_name"
   }

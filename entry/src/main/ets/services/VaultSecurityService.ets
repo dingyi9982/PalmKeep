@@ -80,8 +80,8 @@ export class VaultSecurityService {
 
   async createMasterPassword(password: string): Promise<Uint8Array> {
     try {
-    if (password.length < 8) {
-      throw new Error('密码至少需要 8 个字符');
+    if (password.length === 0) {
+      throw new Error('密码不能为空');
     }
     const salt = cryptoFramework.createRandom().generateRandomSync(16).data;
     const material = this.derive(password, salt);
@@ -146,6 +146,17 @@ export class VaultSecurityService {
     await store.flush();
     return databaseKey;
       } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  async verifyPassword(password: string): Promise<boolean> {
+    try {
+      const key = await this.unlock(password);
+      if (!key) { return false; }
+      key.fill(0);
+      return true;
+    } catch (error) {
       throw normalizeError(error);
     }
   }
@@ -465,7 +476,7 @@ export class VaultSecurityService {
   private async replacePassword(authenticatedKey: Uint8Array, newPassword: string): Promise<Uint8Array> {
     try {
       authenticatedKey.fill(0);
-      if (newPassword.length < 8) { throw new Error('新密码至少需要 8 个字符'); }
+      if (newPassword.length === 0) { throw new Error('新密码不能为空'); }
       const salt = cryptoFramework.createRandom().generateRandomSync(16).data;
       const material = this.derive(newPassword, salt);
       const databaseKey = material.slice(0, 32);

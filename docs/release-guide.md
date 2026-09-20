@@ -4,19 +4,19 @@
 
 ## 一键发布
 
-发布前先提交本次所有代码，确保 `git status` 显示工作区干净，然后双击项目根目录的 `release.cmd`，输入新的三段式版本号，例如 `0.2.0`。
+发布前先提交本次所有代码，确保 `git status` 显示工作区干净，然后双击项目根目录的 `release.cmd`。首次发布输入已配置的 `1.0.0`；后续发布输入新的三段式版本号。
 
 也可以在 PowerShell 中执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 0.2.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 1.0.0
 ```
 
 脚本会依次完成：
 
 1. 检查工作区、版本号、资源 JSON 和本机构建工具。
 2. 执行一次 Debug 预检构建。
-3. 更新 `versionName`，并将 `versionCode` 自动增加 1。
+3. 首次发布直接使用已配置的 `1.0.0 / 1`；后续发布更新 `versionName` 并将 `versionCode` 自动增加 1。
 4. 同步 `AppScope/app.json5`、`oh-package.json5` 和 `entry/oh-package.json5`。
 5. 创建“发布 x.y.z 版本”提交和 `vx.y.z` Git 标签。
 6. 使用 `default + Release` 构建已签名 HAP。
@@ -26,20 +26,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 0.2.0
 产物名称格式为：
 
 ```text
-release/PalmVault-0.2.0-1000001.hap
-release/PalmVault-0.2.0-1000001.hap.sha256
+release/PalmVault-1.0.0-1.hap
+release/PalmVault-1.0.0-1.hap.sha256
 ```
 
 如果只想在本地生成版本，不推送远程仓库：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 0.2.0 -NoPush
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 1.0.0 -NoPush
 ```
 
 特殊情况下可以明确指定更大的 `versionCode`：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 0.2.0 -VersionCode 1000010
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 1.0.1 -VersionCode 2
 ```
 
 ## 版本与构建信息
@@ -78,11 +78,11 @@ Hvigor: D:\DevEco Studio\tools\hvigor\bin\hvigorw.js
 
 ## 版本规则
 
-- `versionName` 必须是 `x.y.z`，并且高于当前版本。
+- `versionName` 必须是 `x.y.z`。首次发布允许使用当前已配置且尚未创建标签的 `1.0.0`；之后必须高于当前版本。
 - 修复问题：`1.0.0 → 1.0.1`。
 - 增加一般功能：`1.0.1 → 1.1.0`。
 - 重大不兼容改版：`1.1.0 → 2.0.0`。
-- `versionCode` 必须大于应用市场已接收过的所有版本，脚本默认自动加 1。
+- 首次发布的 `versionCode` 为 `1`；后续版本必须大于应用市场已接收过的所有版本，脚本默认自动加 1。
 
 ## 失败处理
 

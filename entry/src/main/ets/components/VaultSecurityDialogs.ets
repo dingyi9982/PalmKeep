@@ -21,7 +21,7 @@ export struct ChangePasswordDialog {
         TextInput({ placeholder: '当前密码', text: this.currentPassword })
           .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
           .onChange((value: string): void => { this.currentPassword = value; })
-        TextInput({ placeholder: '新密码（至少 8 个字符）', text: this.newPassword })
+        TextInput({ placeholder: '新密码', text: this.newPassword })
           .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
           .onChange((value: string): void => { this.newPassword = value; })
         TextInput({ placeholder: '再次输入新密码', text: this.confirmPassword })
@@ -79,7 +79,7 @@ export struct RecoveryCenterDialog {
             }
           } else {
             Text(`已通过${this.authLabel}验证`).fontSize(13).fontColor(COLOR_PRIMARY).width('100%')
-            TextInput({ placeholder: '新密码（至少 8 个字符）', text: this.newPassword })
+            TextInput({ placeholder: '新密码', text: this.newPassword })
               .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
               .onChange((value: string): void => { this.newPassword = value; })
             TextInput({ placeholder: '再次输入新密码', text: this.confirmPassword })

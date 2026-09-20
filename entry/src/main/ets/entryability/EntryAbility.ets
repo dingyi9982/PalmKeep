@@ -11,6 +11,7 @@ export default class EntryAbility extends UIAbility {
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     AbilityContextHolder.setContext(this.context);
     AppStorage.setOrCreate<number>('vaultAutoLockMinutes', 10);
+    AppStorage.setOrCreate<boolean>('vaultLifecycleSuppressed', false);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -31,6 +32,10 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    if (AppStorage.get<boolean>('vaultLifecycleSuppressed') ?? false) {
+      this.backgroundAt = 0;
+      return;
+    }
     const autoLockMinutes = AppStorage.get<number>('vaultAutoLockMinutes') ?? 10;
     if (autoLockMinutes === 0) {
       this.lockForLifecycle();
