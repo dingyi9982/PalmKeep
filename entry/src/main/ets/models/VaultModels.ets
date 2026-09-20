@@ -21,7 +21,6 @@ export interface VaultItem {
   username: string;
   password: string;
   notes: string;
-  attachmentUri: string;
   ocrText: string;
   createdAt: number;
   updatedAt: number;
@@ -35,8 +34,6 @@ export interface VaultItemInput {
   username: string;
   password: string;
   notes: string;
-  attachmentUri: string;
-  attachmentData: Uint8Array;
 }
 
 export interface VaultAttachmentInput {
@@ -45,7 +42,6 @@ export interface VaultAttachmentInput {
   sourceUri?: string;
   name: string;
   ocrText: string;
-  data: Uint8Array;
 }
 
 export interface VaultAttachmentSummary {

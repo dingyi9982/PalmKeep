@@ -78,8 +78,7 @@ export struct VaultFileGallery {
         uri: file.uri,
         sourceUri: file.uri,
         name: file.name,
-        ocrText: '',
-        data: new Uint8Array(0)
+        ocrText: ''
       }));
       if (inputs.length > 0) {
         await vaultRepository.appendItemAttachments(this.itemId, inputs,
@@ -98,7 +97,6 @@ export struct VaultFileGallery {
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '添加文件失败' });
     } finally {
-      files.forEach((file: PickedMedia): void => { file.data.fill(0); });
       this.busy = false;
       this.progress = 0;
       this.progressText = '';

@@ -184,7 +184,7 @@ export struct VaultAttachmentGallery {
             });
           temporaryPaths.push(path);
           attachments.push({ type: mediaItem.type, uri: path, sourceUri: mediaItem.uri,
-            name: mediaItem.name, ocrText: mediaItem.ocrText, data: new Uint8Array(0) });
+            name: mediaItem.name, ocrText: mediaItem.ocrText });
         }
         if (attachments.length > 0) {
           this.progressText = '正在写入本地数据';
@@ -204,7 +204,6 @@ export struct VaultAttachmentGallery {
         this.getUIContext().getPromptAction().showToast({ message: message });
       } finally {
         temporaryPaths.forEach((path: string): void => { mediaCompressionService.removeTemporary(path); });
-        picked.forEach((mediaItem: PickedMedia): void => { mediaItem.data.fill(0); });
       }
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '媒体导入失败' });

@@ -115,7 +115,6 @@ struct Index {
   @State private newPassword: string = '';
   @State private revealNewPassword: boolean = false;
   @State private newNotes: string = '';
-  @State private newAttachmentUri: string = '';
   @State private selectedMediaCount: number = 0;
   @State private selectedMediaPreviewIndex: number = 0;
   @State private recognizingMedia: boolean = false;
@@ -137,7 +136,6 @@ struct Index {
   @State private detailPassword: string = '';
   @State private detailNotes: string = '';
   @State private detailGroupId: number = 0;
-  private pendingAttachment: Uint8Array = new Uint8Array(0);
   @State private pendingMedia: PickedMedia[] = [];
   private pendingFiles: PickedMedia[] = [];
   private mediaRecognitionVersion: number = 0;
@@ -446,7 +444,7 @@ struct Index {
 
   private hasUnsavedNewItem(): boolean {
     return this.newTitle.length > 0 || this.newUsername.length > 0 || this.newPassword.length > 0 ||
-      this.newNotes.length > 0 || this.pendingAttachment.length > 0 || this.pendingMedia.length > 0 ||
+      this.newNotes.length > 0 || this.pendingMedia.length > 0 ||
       this.pendingFiles.length > 0;
   }
 
@@ -1504,7 +1502,6 @@ struct Index {
           return;
         }
         if (this.screen !== 'vault') {
-          mediaItems.forEach((media: PickedMedia): void => { media.data.fill(0); });
           return;
         }
         this.clearPendingMedia();
@@ -1521,7 +1518,6 @@ struct Index {
         return;
       }
       if (this.screen !== 'vault') {
-        files.forEach((file: PickedMedia): void => { file.data.fill(0); });
         return;
       }
       this.clearPendingFiles();
@@ -1573,7 +1569,6 @@ struct Index {
     if (this.recognizingMedia || this.savingNewItem || index < 0 || index >= this.pendingMedia.length) {
       return;
     }
-    this.pendingMedia[index].data.fill(0);
     this.pendingMedia = this.pendingMedia.filter((media: PickedMedia, mediaIndex: number): boolean =>
       mediaIndex !== index);
     this.selectedMediaCount = this.pendingMedia.length;
@@ -1593,7 +1588,6 @@ struct Index {
 
   private removePendingFile(index: number): void {
     if (this.savingNewItem || index < 0 || index >= this.pendingFiles.length) { return; }
-    this.pendingFiles[index].data.fill(0);
     this.pendingFiles = this.pendingFiles.filter((file: PickedMedia, fileIndex: number): boolean =>
       fileIndex !== index);
     this.selectedFileCount = this.pendingFiles.length;
@@ -1625,8 +1619,7 @@ struct Index {
               uri: compressedPath,
               sourceUri: picked.uri,
               name: picked.name,
-              ocrText: picked.ocrText,
-              data: new Uint8Array(0)
+              ocrText: picked.ocrText
             });
           }
           this.saveProgressText = '正在写入本地数据';
@@ -1636,9 +1629,7 @@ struct Index {
             title: this.newTitle,
             username: '',
             password: '',
-            notes: this.newNotes,
-            attachmentUri: '',
-            attachmentData: new Uint8Array(0)
+            notes: this.newNotes
           };
           await vaultRepository.createItemWithAttachments(mediaInput, attachments,
             (completed: number, total: number): void => {
@@ -1665,8 +1656,7 @@ struct Index {
             type: VaultItemType.File,
             uri: file.uri,
             name: file.name,
-            ocrText: '',
-            data: new Uint8Array(0)
+            ocrText: ''
           });
         }
         this.saveProgressText = '正在写入本地数据';
@@ -1676,9 +1666,7 @@ struct Index {
           title: this.newTitle.trim(),
           username: '',
           password: '',
-          notes: this.newNotes,
-          attachmentUri: '',
-          attachmentData: new Uint8Array(0)
+          notes: this.newNotes
         };
         await vaultRepository.createItemWithAttachments(fileInput, attachments,
           (completed: number, total: number): void => {
@@ -1697,9 +1685,7 @@ struct Index {
         title: this.newTitle,
         username: this.newUsername,
         password: this.newPassword,
-        notes: this.newNotes,
-        attachmentUri: this.newAttachmentUri,
-        attachmentData: this.pendingAttachment
+        notes: this.newNotes
       };
       await vaultRepository.createItem(input);
       this.resetNewItem();
@@ -1745,7 +1731,6 @@ struct Index {
       username: this.detailUsername,
       password: this.detailPassword,
       notes: this.detailNotes,
-      attachmentUri: item.attachmentUri,
       ocrText: item.ocrText,
       createdAt: item.createdAt,
       updatedAt: Date.now(),
@@ -1784,26 +1769,6 @@ struct Index {
     }
   }
 
-  private async downloadAttachment(item: VaultItem): Promise<void> {
-    try {
-    let data = new Uint8Array(0);
-    try {
-      data = await vaultRepository.readAttachment(item.id);
-      if (data.length === 0) { throw new Error('此资料没有可导出的附件'); }
-      const fileName = mediaPickerService.downloadName(item.title, item.attachmentUri, item.type);
-      const saved = await mediaPickerService.saveCopy(data, fileName);
-      if (saved) { this.getUIContext().getPromptAction().showToast({ message: '已导出解密副本' }); }
-    } catch (error) {
-      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
-    } finally {
-      data.fill(0);
-    }
-      } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('系统操作失败');
-    }
-  }
-
   private resetNewItem(): void {
     this.newType = VaultItemType.Login;
     this.newTitle = '';
@@ -1811,16 +1776,12 @@ struct Index {
     this.newPassword = '';
     this.revealNewPassword = false;
     this.newNotes = '';
-    this.newAttachmentUri = '';
     this.clearPendingMedia();
     this.clearPendingFiles();
-    this.pendingAttachment.fill(0);
-    this.pendingAttachment = new Uint8Array(0);
   }
 
   private clearPendingMedia(): void {
     this.mediaRecognitionVersion += 1;
-    this.pendingMedia.forEach((media: PickedMedia): void => { media.data.fill(0); });
     this.pendingMedia = [];
     this.selectedMediaCount = 0;
     this.selectedMediaPreviewIndex = 0;
@@ -1829,7 +1790,6 @@ struct Index {
   }
 
   private clearPendingFiles(): void {
-    this.pendingFiles.forEach((file: PickedMedia): void => { file.data.fill(0); });
     this.pendingFiles = [];
     this.selectedFileCount = 0;
   }
@@ -2964,10 +2924,7 @@ struct Index {
               this.trashReadOnlyField(entry.item.type === VaultItemType.Note ? '内容' : '备注', entry.item.notes)
             }
             if (entry.item.type === VaultItemType.File) {
-              VaultAttachmentPreview({ itemId: entry.item.id, fallbackType: entry.item.type, maxVisibleCount: 5 })
-              Button('下载到本地').width('100%').height(44).fontColor(COLOR_PRIMARY)
-                .backgroundColor('#E5F6F0').borderRadius(12)
-                .onClick((): void => { this.downloadAttachment(entry.item); })
+              VaultFileGallery({ itemId: entry.item.id, readOnly: true })
             }
           }
           Row({ space: 8 }) {
