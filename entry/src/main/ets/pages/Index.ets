@@ -254,7 +254,7 @@ struct Index {
 
   private async lockVault(): Promise<void> {
     try {
-    AbilityContextHolder.setPrivacyMode(true);
+    AbilityContextHolder.setPrivacyMode(false);
     this.trashEntries = [];
     this.trashRefreshVersion += 1;
     this.trashLongPressTriggered = false;
@@ -547,7 +547,7 @@ struct Index {
     this.gestureSetupStep = 1;
     this.gestureSetupHint = '绘制新手势（至少 4 个点）';
     this.showGestureSetup = true;
-    AbilityContextHolder.setPrivacyMode(true);
+    AbilityContextHolder.setPrivacyMode(false);
   }
 
   private async handleGestureSetup(pattern: number[]): Promise<void> {
@@ -829,7 +829,7 @@ struct Index {
     const count = this.trashSelectedIds.length;
     const choice = await this.getUIContext().getPromptAction().showDialog({
       title: `永久删除 ${count} 条资料？`,
-      message: '资料、历史记录和附件将被永久删除，且无法恢复。',
+      message: '资料和附件将被永久删除，且无法恢复。',
       buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '永久删除', color: COLOR_DANGER }]
     });
     if (choice.index !== 1) { return; }
@@ -856,7 +856,7 @@ struct Index {
     if (allEntries.length === 0) { return; }
     const choice = await this.getUIContext().getPromptAction().showDialog({
       title: `清空回收站中的 ${allEntries.length} 条资料？`,
-      message: '所有资料、历史记录和附件将被永久删除，且无法恢复。',
+      message: '所有资料和附件将被永久删除，且无法恢复。',
       buttons: [{ text: '取消', color: COLOR_MUTED }, { text: '清空', color: COLOR_DANGER }]
     });
     if (choice.index !== 1) { return; }
@@ -909,7 +909,7 @@ struct Index {
     }
     this.selectedTrashEntry = entry;
     this.revealTrashPassword = false;
-    AbilityContextHolder.setPrivacyMode(entry.item.type !== VaultItemType.Login);
+    AbilityContextHolder.setPrivacyMode(false);
   }
 
   private openSearchResult(hit: VaultSearchHit): void {
@@ -1128,7 +1128,9 @@ struct Index {
         await this.recognizePendingMedia();
         return;
       }
+      const titleBeforeFilePicker = this.newTitle;
       const files = await mediaPickerService.pickFiles();
+      this.newTitle = titleBeforeFilePicker;
       if (files.length === 0) {
         return;
       }
@@ -1272,7 +1274,6 @@ struct Index {
           throw new Error('请先选择要导入的文件');
         }
         const attachments: VaultAttachmentInput[] = [];
-        const baseTitle = this.newTitle.trim();
         for (let index = 0; index < this.pendingFiles.length; index += 1) {
           const file = this.pendingFiles[index];
           attachments.push({
@@ -1287,7 +1288,7 @@ struct Index {
         const fileInput: VaultItemInput = {
           type: VaultItemType.File,
           groupId: this.newGroupId,
-          title: baseTitle.length > 0 ? baseTitle : (this.pendingFiles.length === 1 ? this.pendingFiles[0].name : `${this.pendingFiles.length} 个文件`),
+          title: this.newTitle.trim(),
           username: '',
           password: '',
           notes: this.newNotes,
@@ -1343,7 +1344,7 @@ struct Index {
     this.detailPassword = item.password;
     this.detailNotes = item.notes;
     this.revealPassword = false;
-    AbilityContextHolder.setPrivacyMode(item.type !== VaultItemType.Login);
+    AbilityContextHolder.setPrivacyMode(false);
   }
 
   private async saveSelectedItem(): Promise<void> {
@@ -1370,7 +1371,7 @@ struct Index {
     try {
       await vaultRepository.updateItem(updated);
       await this.closeSelectedItem();
-      this.getUIContext().getPromptAction().showToast({ message: moved ? '资料已移动并保存' : '修改已保存，旧版本已归档' });
+      this.getUIContext().getPromptAction().showToast({ message: moved ? '资料已移动并保存' : '修改已保存' });
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
@@ -1815,7 +1816,7 @@ struct Index {
 
   @Builder
   private topBar(): void {
-    Row({ space: 12 }) {
+    Row({ space: 4 }) {
       Row({ space: 10 }) {
         Stack() {
           Circle({ width: 12, height: 12 })
@@ -1949,11 +1950,12 @@ struct Index {
       Text('›').fontSize(20).fontColor('#B2B8C2')
     }
     .width('100%')
-    .height(item.type === VaultItemType.File ? 88 + (item.deletedAt > 0 ? 20 : 0) :
+    .constraintSize({ minHeight: item.type === VaultItemType.File ? 48 + (item.deletedAt > 0 ? 20 : 0) :
       (showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video) ?
         (highlightedAttachmentIndex >= 0 ? 52 : 48) + (item.deletedAt > 0 ? 20 : 0) :
-        42 + (item.deletedAt > 0 ? 20 : 0)))
-    .padding({ left: 8, right: 8 })
+        42 + (item.deletedAt > 0 ? 20 : 0)) })
+    .padding({ left: 8, right: 8, top: item.type === VaultItemType.File ? 5 : 0,
+      bottom: item.type === VaultItemType.File ? 5 : 0 })
     .backgroundColor(COLOR_SURFACE)
     .borderRadius(15)
     .onClick((): void => {
@@ -2048,6 +2050,8 @@ struct Index {
       const type = visibleItems[index].type;
       if (type === VaultItemType.Image || type === VaultItemType.Video) {
         height += visibleItems[index].title.length > 0 ? 62 : 48;
+      } else if (type === VaultItemType.File) {
+        height += 62;
       } else {
         height += 42;
       }
@@ -2404,7 +2408,10 @@ struct Index {
           .opacity(this.draggingGroupId === group.id ? 0 : 1)
       } else {
         Column({ space: 0 }) {
-          ForEach(this.homeItemsInGroup(group.id), (item: VaultItem): void => {
+          ForEach(this.homeItemsInGroup(group.id), (item: VaultItem, index: number): void => {
+            if (index > 0) {
+              Divider().strokeWidth(1).color(COLOR_BORDER).margin({ left: 8, right: 8 })
+            }
             if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
               this.homeMediaItemRow(item)
             } else {
@@ -2454,7 +2461,10 @@ struct Index {
         }
       })
       Column({ space: 0 }) {
-        ForEach(this.homeItemsInGroup(0), (item: VaultItem): void => {
+        ForEach(this.homeItemsInGroup(0), (item: VaultItem, index: number): void => {
+          if (index > 0) {
+            Divider().strokeWidth(1).color(COLOR_BORDER).margin({ left: 8, right: 8 })
+          }
           if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
             this.homeMediaItemRow(item)
           } else {
@@ -3371,8 +3381,6 @@ struct Index {
       Row() {
         Text(`已选择 ${this.selectedFileCount} 个文件`)
           .fontSize(12).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-        Blank()
-        Text('可单独移除').fontSize(10).fontColor(COLOR_MUTED)
       }
       .width('100%')
       .height(34)
@@ -3449,7 +3457,8 @@ struct Index {
   private detailNotesEditor(type: VaultItemType): void {
     TextArea({ placeholder: type === VaultItemType.Note ? '内容' : '备注', text: this.detailNotes })
       .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
-      .height(type === VaultItemType.Note || this.detailNotes.trim().length > 0 ? 84 : 44)
+      .height(type === VaultItemType.Login ? 42 :
+        (type === VaultItemType.Note || this.detailNotes.trim().length > 0 ? 84 : 44))
       .borderRadius(11)
       .onChange((value: string): void => { this.detailNotes = value; })
   }
@@ -3563,7 +3572,7 @@ struct Index {
           }
           TextArea({ placeholder: this.newType === VaultItemType.Note ? '内容' : '备注', text: this.newNotes })
             .fontColor(COLOR_TEXT).placeholderColor('#607B72').backgroundColor(COLOR_SURFACE_2)
-            .height(92).borderRadius(12)
+            .height(this.newType === VaultItemType.Login ? 46 : 92).borderRadius(12)
             .onChange((value: string): void => { this.newNotes = value; })
           if (this.savingNewItem) {
             Column({ space: 5 }) {
@@ -3639,7 +3648,7 @@ struct Index {
         Column({ space: 6 }) {
           Text(`将删除“${group.name}”及其中 ${this.groupPendingDeleteCount} 条资料`)
             .fontSize(14).fontWeight(FontWeight.Bold).fontColor(COLOR_DANGER).width('100%')
-          Text('分组中当前显示的资料、历史记录和附件会永久删除。回收站资料会保留，恢复时将自动重建原分组。')
+          Text('分组中当前显示的资料和附件会永久删除。回收站资料会保留，恢复时将自动重建原分组。')
             .fontSize(13).fontColor(COLOR_DANGER).lineHeight(20).width('100%')
         }
         .width('100%').padding(12).backgroundColor('#FDEDEF').borderRadius(12)

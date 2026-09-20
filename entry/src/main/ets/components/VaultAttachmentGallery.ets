@@ -120,7 +120,6 @@ export struct VaultAttachmentGallery {
         this.progress = Math.round(((index + 1) / pending.length) * 55);
       }
       this.progressText = '请选择保存到系统相册';
-      await AbilityContextHolder.setPrivacyMode(false);
       const savedUris = await mediaPickerService.saveMediaBatchToGallery(paths, types, titles);
       if (savedUris.length !== pending.length) { throw new Error('系统相册没有返回完整的保存结果'); }
       for (let index = 0; index < pending.length; index += 1) {
@@ -137,7 +136,6 @@ export struct VaultAttachmentGallery {
       this.busy = false;
       this.progress = 0;
       this.progressText = '';
-      await AbilityContextHolder.setPrivacyMode(true);
     }
       } catch (error) {
       if (error instanceof Error) { throw error; }

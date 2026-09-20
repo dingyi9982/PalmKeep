@@ -144,11 +144,6 @@ class VaultRepositoryImpl {
         [Date.now(), id]
       );
       await store.executeSql(
-        'DELETE FROM vault_item_history WHERE item_id IN ' +
-        '(SELECT id FROM vault_items WHERE group_id = ? AND deleted_at = 0)',
-        [id]
-      );
-      await store.executeSql(
         'DELETE FROM vault_attachment_chunks WHERE item_id IN ' +
         '(SELECT id FROM vault_items WHERE group_id = ? AND deleted_at = 0)',
         [id]
@@ -302,11 +297,24 @@ class VaultRepositoryImpl {
     return text.trim();
   }
 
-  async createItem(input: VaultItemInput): Promise<string> {
-    try {
-    if (input.title.trim().length === 0 && input.type !== VaultItemType.Image && input.type !== VaultItemType.Video) {
+  private validateItemFields(type: VaultItemType, title: string, username: string,
+    password: string, notes: string): void {
+    const titleRequired = type === VaultItemType.Login || type === VaultItemType.Note;
+    if (titleRequired && title.trim().length === 0) {
       throw new Error('名称不能为空');
     }
+    if (type === VaultItemType.Login) {
+      if (username.trim().length === 0) { throw new Error('账号不能为空'); }
+      if (password.trim().length === 0) { throw new Error('密码不能为空'); }
+    }
+    if (type === VaultItemType.Note && notes.trim().length === 0) {
+      throw new Error('内容不能为空');
+    }
+  }
+
+  async createItem(input: VaultItemInput): Promise<string> {
+    try {
+    this.validateItemFields(input.type, input.title, input.username, input.password, input.notes);
     if ((input.type === VaultItemType.Image || input.type === VaultItemType.Video || input.type === VaultItemType.File) &&
       input.attachmentData.length === 0 && input.attachmentUri.length === 0) {
       throw new Error('请先选择要保存的文件');
@@ -365,6 +373,7 @@ class VaultRepositoryImpl {
   async createItemWithAttachments(input: VaultItemInput, attachments: VaultAttachmentInput[],
     onProgress?: (completed: number, total: number) => void): Promise<string> {
     try {
+    this.validateItemFields(input.type, input.title, input.username, input.password, input.notes);
     if (attachments.length === 0) { throw new Error('请先选择附件'); }
     const store = this.requireStore();
     store.beginTransaction();
@@ -581,10 +590,7 @@ class VaultRepositoryImpl {
 
   async updateItem(item: VaultItem): Promise<void> {
     try {
-    if (item.title.trim().length === 0 && item.type !== VaultItemType.Image && item.type !== VaultItemType.Video) {
-      throw new Error('名称不能为空');
-    }
-    await this.saveHistory(item.id);
+    this.validateItemFields(item.type, item.title, item.username, item.password, item.notes);
     const values: relationalStore.ValuesBucket = {
       type: item.type,
       group_id: item.groupId,
@@ -873,7 +879,7 @@ class VaultRepositoryImpl {
     const store = this.requireStore();
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL, created_at INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0)');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_items (id TEXT PRIMARY KEY, type TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL, username TEXT NOT NULL DEFAULT \'\', password TEXT NOT NULL DEFAULT \'\', notes TEXT NOT NULL DEFAULT \'\', attachment_uri TEXT NOT NULL DEFAULT \'\', attachment_data BLOB NOT NULL DEFAULT X\'\', ocr_text TEXT NOT NULL DEFAULT \'\', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL DEFAULT 0)');
-    await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_history (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, snapshot TEXT NOT NULL, created_at INTEGER NOT NULL)');
+    await store.executeSql('DROP TABLE IF EXISTS vault_item_history');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_group_tombstones (group_id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT NOT NULL, created_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL)');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_attachment_chunks (item_id TEXT NOT NULL, chunk_index INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (item_id, chunk_index))');
     await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_attachments (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL, source_uri TEXT NOT NULL, ocr_text TEXT NOT NULL DEFAULT \'\', PRIMARY KEY (item_id, attachment_index))');
@@ -1065,7 +1071,6 @@ class VaultRepositoryImpl {
     let exists = false;
     try { exists = result.goToFirstRow(); } finally { result.close(); }
     if (!exists) { return; }
-    await store.executeSql('DELETE FROM vault_item_history WHERE item_id = ?', [id]);
     await store.executeSql('DELETE FROM vault_attachment_parts WHERE item_id = ?', [id]);
     await store.executeSql('DELETE FROM vault_item_attachments WHERE item_id = ?', [id]);
     await store.executeSql('DELETE FROM vault_attachment_chunks WHERE item_id = ?', [id]);
@@ -1093,41 +1098,6 @@ class VaultRepositoryImpl {
     await this.createGroup('账号密码', '#67E8C5');
     await this.createGroup('个人信息', '#75D7FF');
     await this.createGroup('家庭资料', '#F3C969');
-      } catch (error) {
-      if (error instanceof Error) { throw error; }
-      throw new Error('本地数据操作失败');
-    }
-  }
-
-  private async saveHistory(id: string): Promise<void> {
-    try {
-    const result = await this.requireStore().querySql(
-      'SELECT type, group_id, title, username, password, notes, attachment_uri, ocr_text, updated_at FROM vault_items WHERE id = ?',
-      [id]
-    );
-    try {
-      if (!result.goToFirstRow()) {
-        return;
-      }
-      const snapshot = JSON.stringify({
-        type: result.getString(result.getColumnIndex('type')),
-        groupId: result.getLong(result.getColumnIndex('group_id')),
-        title: result.getString(result.getColumnIndex('title')),
-        username: result.getString(result.getColumnIndex('username')),
-        password: result.getString(result.getColumnIndex('password')),
-        notes: result.getString(result.getColumnIndex('notes')),
-        attachmentUri: result.getString(result.getColumnIndex('attachment_uri')),
-        ocrText: result.getString(result.getColumnIndex('ocr_text')),
-        updatedAt: result.getLong(result.getColumnIndex('updated_at'))
-      });
-      await this.requireStore().insert('vault_item_history', {
-        item_id: id,
-        snapshot: snapshot,
-        created_at: Date.now()
-      });
-    } finally {
-      result.close();
-    }
       } catch (error) {
       if (error instanceof Error) { throw error; }
       throw new Error('本地数据操作失败');
