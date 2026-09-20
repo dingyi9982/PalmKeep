@@ -142,6 +142,7 @@ struct Index {
   private pendingFiles: PickedMedia[] = [];
   private mediaRecognitionVersion: number = 0;
   private searchVersion: number = 0;
+  private vaultRefreshVersion: number = 0;
   private trashRefreshVersion: number = 0;
   private trashLongPressTriggered: boolean = false;
   private groupDragClickSuppressed: boolean = false;
@@ -246,7 +247,7 @@ struct Index {
       this.masterPassword = '';
       this.confirmPassword = '';
       await this.refreshQuickUnlockStatus();
-      await this.reloadVault();
+      await this.refreshData();
       await this.showVaultScreen();
     } catch (error) {
       this.errorMessage = this.describeError(error);
@@ -276,7 +277,7 @@ struct Index {
       }
       await this.openWithKey(key);
       this.masterPassword = '';
-      await this.reloadVault();
+      await this.refreshData();
       await this.showVaultScreen();
     } catch (error) {
       this.errorMessage = this.describeError(error);
@@ -515,7 +516,7 @@ struct Index {
     }
   }
 
-  private async closeSelectedItem(): Promise<void> {
+  private async closeSelectedItem(refresh: boolean = true): Promise<void> {
     try {
     this.selectedItem = undefined;
     this.selectedAttachmentIndex = -1;
@@ -527,7 +528,7 @@ struct Index {
     } catch (error) {
       // 页面数据刷新不应被窗口隐私模式恢复失败阻断。
     }
-    await this.reloadVault();
+    if (refresh) { await this.refreshData(); }
       } catch (error) {
       if (error instanceof Error) { throw error; }
       throw new Error('系统操作失败');
@@ -658,7 +659,7 @@ struct Index {
       }
       await this.openWithKey(key);
       this.gestureFailures = 0;
-      await this.reloadVault();
+      await this.refreshData();
       await this.showVaultScreen();
     } catch (error) {
       this.errorMessage = this.describeError(error);
@@ -679,7 +680,7 @@ struct Index {
       const security = new VaultSecurityService(AbilityContextHolder.getContext());
       const key = await security.unlockWithFingerprint();
       await this.openWithKey(key);
-      await this.reloadVault();
+      await this.refreshData();
       await this.showVaultScreen();
     } catch (error) {
       this.errorMessage = this.describeError(error);
@@ -700,7 +701,7 @@ struct Index {
         const security = new VaultSecurityService(AbilityContextHolder.getContext());
         const key = await security.unlockWithFace();
         await this.openWithKey(key);
-        await this.reloadVault();
+        await this.refreshData();
         await this.showVaultScreen();
       } catch (error) {
         this.errorMessage = this.describeError(error);
@@ -978,7 +979,7 @@ struct Index {
         this.recoveryDatabaseKey = new Uint8Array(0);
         await this.openWithKey(key);
         await this.refreshQuickUnlockStatus();
-        await this.reloadVault();
+        await this.refreshData();
         this.recoveryBusy = false;
         this.closeRecoveryCenter();
         await this.showVaultScreen();
@@ -1052,17 +1053,32 @@ struct Index {
 
   private async reloadVault(): Promise<void> {
     try {
-    this.groups = await vaultRepository.listGroups();
-    this.applyActiveItems(await vaultRepository.listItems());
+    const version = ++this.vaultRefreshVersion;
+    const searchVersion = this.searchVersion;
+    const searchText = this.searchText.trim();
+    const groupsRequest: Promise<VaultGroup[]> = vaultRepository.listGroups();
+    const itemsRequest: Promise<VaultItem[]> = vaultRepository.listItems();
+    let searchHits: VaultSearchHit[] = [];
+    let searchRequest: Promise<VaultSearchHit[]> | undefined = undefined;
+    if (searchText.length > 0) {
+      searchRequest = vaultRepository.searchItems(searchText);
+    }
+    const groups = await groupsRequest;
+    const activeItems = await itemsRequest;
+    if (searchRequest) { searchHits = await searchRequest; }
+    if (version !== this.vaultRefreshVersion) { return; }
+    this.groups = groups;
+    this.applyActiveItems(activeItems);
     if (this.groups.length > 0 && this.newGroupId === 0) {
       this.newGroupId = this.groups[0].id;
     }
-    if (this.searchText.trim().length > 0) {
-      this.searchHits = await vaultRepository.searchItems(this.searchText);
+    if (searchVersion !== this.searchVersion || searchText !== this.searchText.trim()) { return; }
+    if (searchText.length > 0) {
+      this.searchHits = searchHits;
       this.items = [];
     } else {
       this.searchHits = [];
-      this.items = await vaultRepository.listItems('', -1);
+      this.items = activeItems.slice();
     }
       } catch (error) {
       if (error instanceof Error) { throw error; }
@@ -1070,34 +1086,34 @@ struct Index {
     }
   }
 
+  private async refreshData(includeTrash: boolean = false): Promise<void> {
+    if (includeTrash) {
+      const vaultRequest: Promise<void> = this.reloadVault();
+      const trashRequest: Promise<void> = this.refreshTrash();
+      await vaultRequest;
+      await trashRequest;
+      return;
+    }
+    await this.reloadVault();
+  }
+
   private applyActiveItems(items: VaultItem[]): void {
     this.allItems = items;
     this.totalItemCount = items.length;
-    this.loginCount = items.filter((item: VaultItem): boolean => item.type === VaultItemType.Login).length;
-    this.noteCount = items.filter((item: VaultItem): boolean => item.type === VaultItemType.Note).length;
-    this.mediaCount = items.filter((item: VaultItem): boolean =>
-      item.type === VaultItemType.Image || item.type === VaultItemType.Video).length;
-    this.fileCount = items.filter((item: VaultItem): boolean => item.type === VaultItemType.File).length;
-  }
-
-  private addCreatedItemToView(id: string, input: VaultItemInput): void {
-    const now = Date.now();
-    const item: VaultItem = {
-      id: id,
-      type: input.type,
-      groupId: input.groupId,
-      title: input.title.trim(),
-      username: input.username.trim(),
-      password: input.password,
-      notes: input.notes,
-      attachmentUri: input.attachmentUri,
-      ocrText: '',
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: 0
-    };
-    this.applyActiveItems([item, ...this.allItems]);
-    if (this.searchText.trim().length === 0) { this.items = [item, ...this.items]; }
+    let loginCount = 0;
+    let noteCount = 0;
+    let mediaCount = 0;
+    let fileCount = 0;
+    items.forEach((item: VaultItem): void => {
+      if (item.type === VaultItemType.Login) { loginCount += 1; }
+      else if (item.type === VaultItemType.Note) { noteCount += 1; }
+      else if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) { mediaCount += 1; }
+      else if (item.type === VaultItemType.File) { fileCount += 1; }
+    });
+    this.loginCount = loginCount;
+    this.noteCount = noteCount;
+    this.mediaCount = mediaCount;
+    this.fileCount = fileCount;
   }
 
   private async refreshTrash(): Promise<void> {
@@ -1131,8 +1147,7 @@ struct Index {
       if (this.selectedTrashEntry && this.selectedTrashEntry.item.id === item.id) {
         await this.closeTrashDetail();
       }
-      await this.refreshTrash();
-      await this.reloadVault();
+      await this.refreshData(true);
       this.getUIContext().getPromptAction().showToast({ message: permanent ? '资料已永久删除' : '资料已恢复' });
     } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
@@ -1187,8 +1202,7 @@ struct Index {
     try {
       await vaultRepository.restoreTrashItems(this.trashSelectedIds);
       this.closeTrashManagement();
-      await this.refreshTrash();
-      await this.reloadVault();
+      await this.refreshData(true);
       this.getUIContext().getPromptAction().showToast({ message: `已恢复 ${count} 条资料` });
     } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
@@ -1212,8 +1226,7 @@ struct Index {
     try {
       await vaultRepository.permanentlyDeleteItems(this.trashSelectedIds);
       this.closeTrashManagement();
-      await this.refreshTrash();
-      await this.reloadVault();
+      await this.refreshData(true);
       this.getUIContext().getPromptAction().showToast({ message: `已永久删除 ${count} 条资料` });
     } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
@@ -1239,8 +1252,7 @@ struct Index {
     try {
       await vaultRepository.emptyTrash();
       this.closeTrashManagement();
-      await this.refreshTrash();
-      await this.reloadVault();
+      await this.refreshData(true);
       this.getUIContext().getPromptAction().showToast({ message: '回收站已清空' });
     } catch (error) { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
     finally { this.trashBusy = false; }
@@ -1332,8 +1344,7 @@ struct Index {
     const version = ++this.searchVersion;
     if (text.trim().length === 0) {
       this.searchHits = [];
-      const items = await vaultRepository.listItems('', -1);
-      if (version === this.searchVersion) { this.items = items; }
+      if (version === this.searchVersion) { this.items = this.allItems.slice(); }
       return;
     }
     const hits = await vaultRepository.searchItems(text);
@@ -1353,7 +1364,7 @@ struct Index {
       await vaultRepository.createGroup(this.newGroupName, COLOR_PRIMARY);
       this.newGroupName = '';
       this.showNewGroup = false;
-      await this.reloadVault();
+      await this.refreshData();
       this.getUIContext().getPromptAction().showToast({ message: '分组已创建' });
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
@@ -1408,7 +1419,7 @@ struct Index {
     try {
       await vaultRepository.updateGroup(group.id, name, group.color);
       this.closeRenameGroup();
-      await this.reloadVault();
+      await this.refreshData();
       this.getUIContext().getPromptAction().showToast({ message: '分组已重命名' });
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
@@ -1422,10 +1433,10 @@ struct Index {
   private async requestDeleteGroup(group: VaultGroup): Promise<void> {
     try {
     try {
-      const groupItems = await vaultRepository.listItems('', group.id, false);
-      if (groupItems.length > 0) {
+      const itemCount = this.countGroup(group.id);
+      if (itemCount > 0) {
         this.groupPendingDelete = group;
-        this.groupPendingDeleteCount = groupItems.length;
+        this.groupPendingDeleteCount = itemCount;
         this.groupDeleteConfirmName = '';
         return;
       }
@@ -1471,7 +1482,7 @@ struct Index {
       if (this.newGroupId === group.id) {
         this.newGroupId = 0;
       }
-      await this.reloadVault();
+      await this.refreshData();
       this.getUIContext().getPromptAction().showToast({ message: hadItems ? '分组及其当前资料已永久删除' : '分组已删除' });
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
@@ -1629,18 +1640,17 @@ struct Index {
             attachmentUri: '',
             attachmentData: new Uint8Array(0)
           };
-          const createdId = await vaultRepository.createItemWithAttachments(mediaInput, attachments,
+          await vaultRepository.createItemWithAttachments(mediaInput, attachments,
             (completed: number, total: number): void => {
             this.saveProgress = 70 + Math.round(completed / total * 30);
           });
-          this.addCreatedItemToView(createdId, mediaInput);
         } finally {
           compressedPaths.forEach((path: string): void => { mediaCompressionService.removeTemporary(path); });
         }
         const importedCount = this.pendingMedia.length;
         this.resetNewItem();
         this.closeNewItem();
-        await this.reloadVault();
+        await this.refreshData();
         this.getUIContext().getPromptAction().showToast({ message: `已导入 ${importedCount} 项媒体` });
         return;
       }
@@ -1670,15 +1680,14 @@ struct Index {
           attachmentUri: '',
           attachmentData: new Uint8Array(0)
         };
-        const createdId = await vaultRepository.createItemWithAttachments(fileInput, attachments,
+        await vaultRepository.createItemWithAttachments(fileInput, attachments,
           (completed: number, total: number): void => {
           this.saveProgress = Math.round(completed / total * 100);
         });
-        this.addCreatedItemToView(createdId, fileInput);
         const importedCount = this.pendingFiles.length;
         this.resetNewItem();
         this.closeNewItem();
-        await this.reloadVault();
+        await this.refreshData();
         this.getUIContext().getPromptAction().showToast({ message: `已导入 ${importedCount} 个文件` });
         return;
       }
@@ -1692,11 +1701,10 @@ struct Index {
         attachmentUri: this.newAttachmentUri,
         attachmentData: this.pendingAttachment
       };
-      const createdId = await vaultRepository.createItem(input);
-      this.addCreatedItemToView(createdId, input);
+      await vaultRepository.createItem(input);
       this.resetNewItem();
       this.closeNewItem();
-      await this.reloadVault();
+      await this.refreshData();
       this.getUIContext().getPromptAction().showToast({ message: '资料已保存' });
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
@@ -1764,10 +1772,8 @@ struct Index {
     }
     try {
       await vaultRepository.moveToTrash(item.id);
-      this.applyActiveItems(this.allItems.filter((value: VaultItem): boolean => value.id !== item.id));
-      this.items = this.items.filter((value: VaultItem): boolean => value.id !== item.id);
-      await this.closeSelectedItem();
-      await this.refreshTrash();
+      await this.closeSelectedItem(false);
+      await this.refreshData(true);
       this.getUIContext().getPromptAction().showToast({ message: '资料已移入回收站' });
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
