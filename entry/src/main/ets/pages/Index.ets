@@ -614,8 +614,6 @@ struct Index {
     this.sessionKey = key.slice();
     try {
       await vaultRepository.open(AbilityContextHolder.getContext(), key);
-      const recovered = new VaultBackupService(AbilityContextHolder.getContext()).recoverInterruptedRestore();
-      if (recovered) { console.info('PalmVault completed interrupted restore cleanup'); }
     } catch (error) {
       this.sessionKey.fill(0);
       this.sessionKey = new Uint8Array(0);

@@ -28,17 +28,12 @@ const SALT_SIZE: number = 16;
 const IV_SIZE: number = 12;
 const TAG_SIZE: number = 16;
 const PASSWORD_CHECK_SIZE: number = 4;
-// Earlier v1 builds wrote the tag with a relative file offset after the ciphertext.
-// That produced a 44-byte zero gap followed by the tag. Keep this reader fallback
-// so backups already exported by those builds remain recoverable.
-const LEGACY_TAG_GAP_SIZE: number = 44;
+const HEADER_LAYOUT_VERSION: number = 1;
 const KDF_ITERATIONS: number = 210000;
 const CHUNK_SIZE: number = 1024 * 1024;
 const DATABASE_VERSION: number = 1;
 const DATA_FILE: string = 'vault-data.json';
 const MANIFEST_FILE: string = 'manifest.json';
-const DATABASE_FILE: string = 'vault-snapshot.db';
-const RESTORE_JOURNAL_FILE: string = 'palmvault-restore-state.json';
 
 export interface PreparedVaultBackup {
   workspacePath: string;
@@ -78,14 +73,9 @@ export class VaultBackupService {
       if (dataset.items.length === 0) {
         throw new Error('保险库中没有任何资料，无需创建备份');
       }
-      const dataPath = `${workspace}/${DATA_FILE}`;
-      this.writeText(dataPath, JSON.stringify(dataset));
-      const databasePath = `${workspace}/${DATABASE_FILE}`;
-      await vaultRepository.createDatabaseSnapshot(databasePath);
-
       const files: BackupFileRecord[] = [];
       let attachmentBytes = 0;
-      const archiveInputs: string[] = [dataPath, databasePath];
+      const archiveInputs: string[] = [];
       for (let index = 0; index < dataset.attachments.length; index += 1) {
         const attachment = dataset.attachments[index];
         const sourcePath = vaultRepository.backupAttachmentPath(attachment.storageName);
@@ -93,11 +83,16 @@ export class VaultBackupService {
         await this.copyFile(sourcePath, path);
         const size = fs.statSync(path).size;
         if (size !== attachment.sizeBytes) { throw new Error(`附件 ${attachment.name} 不完整`); }
-        files.push({ storageName: attachment.storageName, sizeBytes: size, sha256: await this.sha256(path) });
+        const sha256 = await this.sha256(path);
+        attachment.sha256 = sha256;
+        files.push({ storageName: attachment.storageName, sizeBytes: size, sha256: sha256 });
         attachmentBytes += size;
         archiveInputs.push(path);
         this.progress(onProgress, '校验附件', index + 1, dataset.attachments.length);
       }
+      const dataPath = `${workspace}/${DATA_FILE}`;
+      this.writeText(dataPath, JSON.stringify(dataset));
+      archiveInputs.unshift(dataPath);
       const manifest: BackupManifest = {
         formatVersion: BACKUP_FORMAT_VERSION,
         databaseVersion: DATABASE_VERSION,
@@ -109,7 +104,6 @@ export class VaultBackupService {
         trashCount: 0,
         attachmentCount: dataset.attachments.length,
         attachmentBytes: attachmentBytes,
-        databaseSha256: await this.sha256(databasePath),
         dataSha256: await this.sha256(dataPath),
         files: files
       };
@@ -188,14 +182,12 @@ export class VaultBackupService {
         { level: zlib.CompressLevel.COMPRESS_LEVEL_DEFAULT_COMPRESSION });
       const manifestPath = `${extractedPath}/${MANIFEST_FILE}`;
       const dataPath = `${extractedPath}/${DATA_FILE}`;
-      const databasePath = `${extractedPath}/${DATABASE_FILE}`;
       stage = '读取备份清单';
       const manifest = JSON.parse(fs.readTextSync(manifestPath)) as BackupManifest;
       stage = '校验备份版本和清单';
       this.validateManifest(manifest);
-      stage = '校验数据库和资料数据';
-      if (await this.sha256(dataPath) !== manifest.dataSha256 ||
-        await this.sha256(databasePath) !== manifest.databaseSha256) {
+      stage = '校验资料数据';
+      if (await this.sha256(dataPath) !== manifest.dataSha256) {
         throw new Error('备份内容校验失败');
       }
       stage = '校验备份附件';
@@ -223,7 +215,7 @@ export class VaultBackupService {
         groupCount: restoreDataset.groups.length, groupTombstoneCount: 0,
         itemCount: restoreDataset.items.length, trashCount: 0,
         attachmentCount: restoreDataset.attachments.length, attachmentBytes: restoreAttachmentBytes,
-        databaseSha256: manifest.databaseSha256, dataSha256: manifest.dataSha256, files: manifest.files
+        dataSha256: manifest.dataSha256, files: manifest.files
       };
       stage = '生成恢复预览';
       const preview = freshInstall ? this.freshPreview(restoreDataset, restoreManifest) :
@@ -242,24 +234,12 @@ export class VaultBackupService {
   async applyPreparedBackup(prepared: PreparedVaultBackup, mode: VaultRestoreMode,
     onProgress?: (progress: BackupProgress) => void): Promise<BackupRestoreResult> {
     try {
-      this.writeText(this.restoreJournalPath(), JSON.stringify({ startedAt: Date.now(), mode: mode }));
       this.progress(onProgress, mode === VaultRestoreMode.Merge ? '合并资料' : '替换资料', 0, 1);
       const result = await vaultRepository.applyBackupDataset(prepared.dataset, prepared.extractedPath, mode);
       this.progress(onProgress, '恢复完成', 1, 1);
       return result;
     } finally {
-      this.removeRestoreJournal();
       this.disposePreparedBackup(prepared);
-    }
-  }
-
-  recoverInterruptedRestore(): boolean {
-    try {
-      fs.statSync(this.restoreJournalPath());
-      this.removeRestoreJournal();
-      return true;
-    } catch (_) {
-      return false;
     }
   }
 
@@ -279,10 +259,10 @@ export class VaultBackupService {
     const iv = cryptoFramework.createRandom().generateRandomSync(IV_SIZE).data;
     const keyBytes = this.deriveKey(password, salt);
     const passwordCheck = this.passwordCheck(keyBytes, salt);
-    const header = this.createHeader(salt, iv, new Uint8Array(TAG_SIZE), passwordCheck);
+    const header = this.createHeader(salt, iv, passwordCheck);
     const key = cryptoFramework.createSymKeyGenerator('AES256').convertKeySync({ data: keyBytes });
     const params: cryptoFramework.GcmParamsSpec = { algName: 'GcmParamsSpec', iv: { data: iv },
-      aad: { data: this.headerAad(header) }, authTag: { data: new Uint8Array(TAG_SIZE) } };
+      aad: { data: header }, authTag: { data: new Uint8Array(TAG_SIZE) } };
     const cipher = cryptoFramework.createCipher('AES256|GCM');
     cipher.initSync(cryptoFramework.CryptoMode.ENCRYPT_MODE, key, params);
     const sourceSize = fs.statSync(sourcePath).size;
@@ -329,7 +309,7 @@ export class VaultBackupService {
     onProgress?: (progress: BackupProgress) => void): Promise<void> {
     try {
     const sourceSize = fs.statSync(sourcePath).size;
-    if (sourceSize <= HEADER_SIZE) { throw new Error('备份文件不完整'); }
+    if (sourceSize <= HEADER_SIZE + TAG_SIZE) { throw new Error('备份文件不完整'); }
     let source: fs.File | undefined = undefined;
     let target: fs.File | undefined = undefined;
     let keyBytes = new Uint8Array(0);
@@ -339,31 +319,18 @@ export class VaultBackupService {
       this.validateHeader(header);
       const salt = header.slice(16, 32);
       const iv = header.slice(32, 44);
-      let tag = header.slice(44, 60);
-      let cipherSize = sourceSize - HEADER_SIZE;
-      if (this.isZeroBytes(tag)) {
-        const legacyTrailerSize = LEGACY_TAG_GAP_SIZE + TAG_SIZE;
-        if (sourceSize <= HEADER_SIZE + TAG_SIZE) { throw new Error('备份完整性标签缺失'); }
-        let legacyGap = false;
-        if (sourceSize > HEADER_SIZE + legacyTrailerSize) {
-          fs.lseek(source.fd, sourceSize - legacyTrailerSize, fs.WhenceType.SEEK_SET);
-          const gap = this.readExact(source.fd, LEGACY_TAG_GAP_SIZE, '备份完整性标签缺失');
-          legacyGap = this.isZeroBytes(gap);
-        }
-        fs.lseek(source.fd, sourceSize - TAG_SIZE, fs.WhenceType.SEEK_SET);
-        tag = this.readExact(source.fd, TAG_SIZE, '备份完整性标签缺失');
-        if (this.isZeroBytes(tag)) { throw new Error('备份完整性标签缺失'); }
-        cipherSize -= legacyGap ? legacyTrailerSize : TAG_SIZE;
-      }
+      fs.lseek(source.fd, sourceSize - TAG_SIZE, fs.WhenceType.SEEK_SET);
+      const tag = this.readExact(source.fd, TAG_SIZE, '备份完整性标签缺失');
+      if (this.isZeroBytes(tag)) { throw new Error('备份完整性标签缺失'); }
+      const cipherSize = sourceSize - HEADER_SIZE - TAG_SIZE;
       keyBytes = this.deriveKey(password, salt);
       const storedPasswordCheck = header.slice(60, 64);
-      if (!this.isZeroBytes(storedPasswordCheck) &&
-        !this.constantTimeEquals(storedPasswordCheck, this.passwordCheck(keyBytes, salt))) {
+      if (!this.constantTimeEquals(storedPasswordCheck, this.passwordCheck(keyBytes, salt))) {
         throw new Error('备份密码不正确');
       }
       const key = cryptoFramework.createSymKeyGenerator('AES256').convertKeySync({ data: keyBytes });
       const params: cryptoFramework.GcmParamsSpec = { algName: 'GcmParamsSpec', iv: { data: iv },
-        aad: { data: this.headerAad(header) }, authTag: { data: tag } };
+        aad: { data: header }, authTag: { data: tag } };
       const cipher = cryptoFramework.createCipher('AES256|GCM');
       cipher.initSync(cryptoFramework.CryptoMode.DECRYPT_MODE, key, params);
       target = fs.openSync(targetPath, fs.OpenMode.WRITE_ONLY | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
@@ -385,9 +352,7 @@ export class VaultBackupService {
       try {
         finalResult = cipher.doFinalSync(null) as cryptoFramework.DataBlob | null;
       } catch (_) {
-        throw new Error(this.isZeroBytes(storedPasswordCheck) ?
-          '备份密码不正确，或旧备份文件已损坏' :
-          '备份密文完整性认证失败，文件内容已改变');
+        throw new Error('备份密文完整性认证失败，文件内容已改变');
       }
       const finalData = finalResult ? finalResult.data : new Uint8Array(0);
       if (finalData.length > 0) { this.writeAll(target.fd, finalData); }
@@ -402,28 +367,19 @@ export class VaultBackupService {
     }
   }
 
-  private createHeader(salt: Uint8Array, iv: Uint8Array, tag: Uint8Array,
-    passwordCheck: Uint8Array): Uint8Array {
+  private createHeader(salt: Uint8Array, iv: Uint8Array, passwordCheck: Uint8Array): Uint8Array {
     const header = new Uint8Array(HEADER_SIZE);
     header.set(MAGIC, 0);
     header[8] = BACKUP_FORMAT_VERSION;
+    header[9] = HEADER_LAYOUT_VERSION;
     header[12] = KDF_ITERATIONS & 255;
     header[13] = (KDF_ITERATIONS >>> 8) & 255;
     header[14] = (KDF_ITERATIONS >>> 16) & 255;
     header[15] = (KDF_ITERATIONS >>> 24) & 255;
     header.set(salt, 16);
     header.set(iv, 32);
-    header.set(tag, 44);
     header.set(passwordCheck, 60);
     return header;
-  }
-
-  private headerAad(header: Uint8Array): Uint8Array {
-    if (this.isZeroBytes(header.slice(60, 64))) { return header.slice(0, 44); }
-    const aad = new Uint8Array(44 + PASSWORD_CHECK_SIZE);
-    aad.set(header.slice(0, 44), 0);
-    aad.set(header.slice(60, 64), 44);
-    return aad;
   }
 
   private passwordCheck(keyBytes: Uint8Array, salt: Uint8Array): Uint8Array {
@@ -451,6 +407,8 @@ export class VaultBackupService {
     }
     if (header[8] > BACKUP_FORMAT_VERSION) { throw new Error('备份版本高于当前应用支持的版本'); }
     if (header[8] !== BACKUP_FORMAT_VERSION) { throw new Error('备份格式版本无效'); }
+    if (header[9] !== HEADER_LAYOUT_VERSION || !this.isZeroBytes(header.slice(10, 12)) ||
+      !this.isZeroBytes(header.slice(44, 60))) { throw new Error('备份文件头布局无效'); }
     const iterations = header[12] | (header[13] << 8) | (header[14] << 16) | (header[15] << 24);
     if (iterations !== KDF_ITERATIONS) { throw new Error('备份密码参数无效'); }
   }
@@ -552,8 +510,11 @@ export class VaultBackupService {
     });
     const fileNames = new Set<string>();
     manifest.files.forEach((file: BackupFileRecord): void => { fileNames.add(file.storageName); });
+    const fileHashes = new Map<string, string>();
+    manifest.files.forEach((file: BackupFileRecord): void => { fileHashes.set(file.storageName, file.sha256); });
     dataset.attachments.forEach((attachment): void => {
-      if (!fileNames.has(attachment.storageName) || !itemIds.has(attachment.itemId)) {
+      if (!fileNames.has(attachment.storageName) || !itemIds.has(attachment.itemId) ||
+        attachment.sha256.length !== 64 || fileHashes.get(attachment.storageName) !== attachment.sha256) {
         throw new Error('备份附件引用无效');
       }
     });
@@ -581,7 +542,7 @@ export class VaultBackupService {
 
   private validateStorageName(name: string): void {
     if (name.length === 0 || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0 || name.indexOf('..') >= 0 ||
-      name === DATA_FILE || name === MANIFEST_FILE || name === DATABASE_FILE) {
+      name === DATA_FILE || name === MANIFEST_FILE) {
       throw new Error('备份中包含不安全的文件名');
     }
   }
@@ -607,14 +568,6 @@ export class VaultBackupService {
     } catch (error) {
       throw normalizeError(error);
     }
-  }
-
-  private restoreJournalPath(): string {
-    return `${this.context.filesDir}/${RESTORE_JOURNAL_FILE}`;
-  }
-
-  private removeRestoreJournal(): void {
-    try { fs.unlinkSync(this.restoreJournalPath()); } catch (_) {}
   }
 
   private async copyFile(sourcePath: string, targetPath: string): Promise<void> {

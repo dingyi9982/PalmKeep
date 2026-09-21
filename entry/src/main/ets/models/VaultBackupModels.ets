@@ -37,6 +37,7 @@ export interface BackupAttachmentRecord {
   ocrText: string;
   storageName: string;
   sizeBytes: number;
+  sha256: string;
 }
 
 export interface BackupGroupTombstoneRecord {
@@ -77,7 +78,6 @@ export interface BackupManifest {
   trashCount: number;
   attachmentCount: number;
   attachmentBytes: number;
-  databaseSha256: string;
   dataSha256: string;
   files: BackupFileRecord[];
 }

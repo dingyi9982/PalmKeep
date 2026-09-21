@@ -1,6 +1,7 @@
 import relationalStore from '@ohos.data.relationalStore';
 import common from '@ohos.app.ability.common';
 import fs from '@ohos.file.fs';
+import cryptoFramework from '@ohos.security.cryptoFramework';
 import { normalizeError } from './ErrorUtils';
 import { migrateVaultDatabase } from './VaultDatabaseMigrations';
 import {
@@ -42,6 +43,13 @@ enum BackupMergeDecision {
 interface StoredAttachment {
   storageName: string;
   sizeBytes: number;
+}
+
+interface BackupComparisonContext {
+  currentItems: Map<string, BackupItemRecord>;
+  currentSignatures: Map<string, string>;
+  incomingSignatures: Map<string, string>;
+  conflictSignatures: Map<string, string>;
 }
 
 class VaultRepositoryImpl {
@@ -768,7 +776,7 @@ class VaultRepositoryImpl {
           attachments.push({ itemId: attachmentResult.getString(0), attachmentIndex: attachmentResult.getLong(1),
             type: attachmentResult.getString(2) as VaultItemType, name: attachmentResult.getString(3),
             ocrText: attachmentResult.getString(4), storageName: attachmentResult.getString(5),
-            sizeBytes: attachmentResult.getLong(6) });
+            sizeBytes: attachmentResult.getLong(6), sha256: '' });
         }
       } finally { attachmentResult.close(); }
 
@@ -783,21 +791,18 @@ class VaultRepositoryImpl {
     }
   }
 
-  async createDatabaseSnapshot(path: string): Promise<void> {
-    try {
-      try { fs.unlinkSync(path); } catch (_) {}
-      await this.requireStore().backup(path);
-    } catch (error) {
-      throw new Error(`创建数据库快照失败：${normalizeError(error).message}`);
-    }
-  }
-
   backupAttachmentPath(storageName: string): string {
     return this.storedAttachmentPath(storageName);
   }
 
   async previewBackupRestore(dataset: VaultBackupDataset, mode: VaultRestoreMode): Promise<BackupRestorePreview> {
-    const currentItems = await this.currentItemsById();
+    const comparison = await this.buildBackupComparisonContext(dataset);
+    return this.backupRestorePreview(dataset, mode, comparison);
+  }
+
+  private backupRestorePreview(dataset: VaultBackupDataset, mode: VaultRestoreMode,
+    comparison: BackupComparisonContext): BackupRestorePreview {
+    const currentItems = comparison.currentItems;
     let addedCount = 0;
     let updatedCount = 0;
     let retainedCount = 0;
@@ -810,7 +815,7 @@ class VaultRepositoryImpl {
       const current = currentItems.get(incoming.id);
       const decision = mode === VaultRestoreMode.Replace ?
         (current ? BackupMergeDecision.Update : BackupMergeDecision.Add) :
-        this.backupMergeDecision(current, incoming, currentItems);
+        this.backupMergeDecision(current, incoming, comparison);
       if (decision === BackupMergeDecision.Add) { addedCount += 1; }
       else if (decision === BackupMergeDecision.Update || decision === BackupMergeDecision.RestoreBesideTrash) {
         updatedCount += 1;
@@ -846,23 +851,26 @@ class VaultRepositoryImpl {
   async applyBackupDataset(dataset: VaultBackupDataset, extractedRoot: string,
     mode: VaultRestoreMode): Promise<BackupRestoreResult> {
     try {
-      const preview = await this.previewBackupRestore(dataset, mode);
       const store = this.requireStore();
-      const currentItems = await this.currentItemsById();
+      const comparison = await this.buildBackupComparisonContext(dataset);
+      const preview = this.backupRestorePreview(dataset, mode, comparison);
+      const currentItems = comparison.currentItems;
       const decisions = new Map<string, BackupMergeDecision>();
       const restoredTargets = new Map<string, string>();
       dataset.items.forEach((incoming: BackupItemRecord): void => {
         const current = currentItems.get(incoming.id);
         const decision = mode === VaultRestoreMode.Replace ?
           (current ? BackupMergeDecision.Update : BackupMergeDecision.Add) :
-          this.backupMergeDecision(current, incoming, currentItems);
+          this.backupMergeDecision(current, incoming, comparison);
         decisions.set(incoming.id, decision);
         if (decision === BackupMergeDecision.Add || decision === BackupMergeDecision.Update) {
           restoredTargets.set(incoming.id, incoming.id);
         } else if (decision === BackupMergeDecision.RestoreBesideTrash) {
-          restoredTargets.set(incoming.id, this.restoredItemId(incoming));
+          restoredTargets.set(incoming.id, this.restoredItemId(incoming,
+            comparison.incomingSignatures.get(incoming.id) ?? ''));
         } else if (decision === BackupMergeDecision.Conflict) {
-          restoredTargets.set(incoming.id, this.conflictItemId(incoming));
+          restoredTargets.set(incoming.id, this.conflictItemId(incoming,
+            comparison.incomingSignatures.get(incoming.id) ?? ''));
         }
       });
 
@@ -881,7 +889,7 @@ class VaultRepositoryImpl {
           copiedNames.push(newStorageName);
           importedAttachments.push({ itemId: targetItemId, attachmentIndex: attachment.attachmentIndex,
             type: attachment.type, name: attachment.name, ocrText: attachment.ocrText,
-            storageName: newStorageName, sizeBytes: attachment.sizeBytes });
+            storageName: newStorageName, sizeBytes: attachment.sizeBytes, sha256: attachment.sha256 });
         }
       } catch (error) {
         this.deleteStoredAttachments(copiedNames);
@@ -944,8 +952,15 @@ class VaultRepositoryImpl {
         this.deleteStoredAttachments(copiedNames);
         throw normalizeError(error);
       }
-      this.deleteStoredAttachments(oldStorageNames);
-      await this.cleanupOrphanedAttachments();
+      // The database transaction is already committed here. Cleanup is best-effort:
+      // leftovers are harmless orphans and will be removed the next time the store opens.
+      // Never report a committed restore as if the original data were unchanged.
+      try {
+        this.deleteStoredAttachments(oldStorageNames);
+        await this.cleanupOrphanedAttachments();
+      } catch (error) {
+        console.error(`PalmVault deferred post-restore attachment cleanup: ${normalizeError(error).message}`);
+      }
       return { addedCount: preview.addedCount, updatedCount: preview.updatedCount,
         retainedCount: preview.retainedCount, newerCount: preview.newerCount,
         conflictCount: preview.conflictCount, unchangedCount: preview.unchangedCount,
@@ -1283,52 +1298,155 @@ class VaultRepositoryImpl {
   }
 
   private backupMergeDecision(current: BackupItemRecord | undefined, incoming: BackupItemRecord,
-    currentItems: Map<string, BackupItemRecord>): BackupMergeDecision {
+    comparison: BackupComparisonContext): BackupMergeDecision {
     if (!current) { return BackupMergeDecision.Add; }
+    const incomingSignature = comparison.incomingSignatures.get(incoming.id) ?? '';
     if (incoming.deletedAt === 0 && current.deletedAt > 0) {
-      const restored = currentItems.get(this.restoredItemId(incoming));
-      return restored && this.sameItemPayload(restored, incoming, incoming.title) ?
+      const restoredId = this.restoredItemId(incoming, incomingSignature);
+      const restored = comparison.currentItems.get(restoredId);
+      return restored && comparison.currentSignatures.get(restoredId) === incomingSignature ?
         BackupMergeDecision.Unchanged : BackupMergeDecision.RestoreBesideTrash;
     }
     if (incoming.deletedAt > 0 && current.deletedAt === 0) { return BackupMergeDecision.RetainNewer; }
-    if (this.sameItemPayload(current, incoming, incoming.title)) { return BackupMergeDecision.Unchanged; }
+    if (comparison.currentSignatures.get(current.id) === incomingSignature) {
+      return BackupMergeDecision.Unchanged;
+    }
     if (incoming.updatedAt > current.updatedAt) { return BackupMergeDecision.Update; }
     if (current.updatedAt > incoming.updatedAt) { return BackupMergeDecision.RetainNewer; }
-    const existingConflict = currentItems.get(this.conflictItemId(incoming));
-    if (existingConflict && this.sameItemPayload(existingConflict, incoming, this.conflictTitle(incoming.title))) {
+    const conflictId = this.conflictItemId(incoming, incomingSignature);
+    const existingConflict = comparison.currentItems.get(conflictId);
+    if (existingConflict && comparison.currentSignatures.get(conflictId) ===
+      comparison.conflictSignatures.get(incoming.id)) {
       return BackupMergeDecision.Unchanged;
     }
     return BackupMergeDecision.Conflict;
-  }
-
-  private sameItemPayload(current: BackupItemRecord, incoming: BackupItemRecord, expectedTitle: string): boolean {
-    return current.type === incoming.type && current.title === expectedTitle &&
-      current.username === incoming.username && current.password === incoming.password &&
-      current.notes === incoming.notes && current.ocrText === incoming.ocrText &&
-      current.deletedAt === incoming.deletedAt;
   }
 
   private conflictTitle(title: string): string {
     return title.length > 0 ? `${title}（备份）` : '（备份）';
   }
 
-  private conflictItemId(item: BackupItemRecord): string {
-    return `backup-${item.id}-${item.updatedAt}-${this.contentHash(item)}`;
+  private conflictItemId(item: BackupItemRecord, signature: string): string {
+    return `backup-${item.id}-${item.updatedAt}-${this.contentHash(signature)}`;
   }
 
-  private restoredItemId(item: BackupItemRecord): string {
-    return `restored-${item.id}-${item.updatedAt}-${this.contentHash(item)}`;
+  private restoredItemId(item: BackupItemRecord, signature: string): string {
+    return `restored-${item.id}-${item.updatedAt}-${this.contentHash(signature)}`;
   }
 
-  private contentHash(item: BackupItemRecord): string {
-    const value = `${item.type}\u0000${item.title}\u0000${item.username}\u0000${item.password}\u0000` +
-      `${item.notes}\u0000${item.ocrText}\u0000${item.deletedAt}`;
+  private contentHash(value: string): string {
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
       hash ^= value.charCodeAt(index);
       hash = Math.imul(hash, 16777619);
     }
     return (hash >>> 0).toString(16);
+  }
+
+  private async buildBackupComparisonContext(dataset: VaultBackupDataset): Promise<BackupComparisonContext> {
+    try {
+    const currentItems = await this.currentItemsById();
+    const currentGroupNames = new Map<number, string>();
+    const groupResult = await this.requireStore().querySql('SELECT id, name FROM vault_groups');
+    try {
+      while (groupResult.goToNextRow()) {
+        currentGroupNames.set(groupResult.getLong(0), groupResult.getString(1));
+      }
+    } finally { groupResult.close(); }
+
+    const incomingGroupNames = new Map<number, string>();
+    dataset.groups.forEach((group: BackupGroupRecord): void => {
+      incomingGroupNames.set(group.id, group.name);
+    });
+    const currentAttachmentParts = new Map<string, string>();
+    const attachmentResult = await this.requireStore().querySql(
+      'SELECT item_id, attachment_index, type, name, ocr_text, storage_name, size_bytes ' +
+      'FROM vault_item_attachments ORDER BY item_id, attachment_index');
+    try {
+      while (attachmentResult.goToNextRow()) {
+        const itemId = attachmentResult.getString(0);
+        const hash = await this.sha256StoredAttachment(attachmentResult.getString(5));
+        const part = this.attachmentSignaturePart(attachmentResult.getLong(1),
+          attachmentResult.getString(2), attachmentResult.getString(3), attachmentResult.getString(4),
+          attachmentResult.getLong(6), hash);
+        currentAttachmentParts.set(itemId, `${currentAttachmentParts.get(itemId) ?? ''}${part}`);
+      }
+    } finally { attachmentResult.close(); }
+
+    const incomingAttachmentParts = new Map<string, string>();
+    dataset.attachments.forEach((attachment: BackupAttachmentRecord): void => {
+      const part = this.attachmentSignaturePart(attachment.attachmentIndex, attachment.type, attachment.name,
+        attachment.ocrText, attachment.sizeBytes, attachment.sha256);
+      incomingAttachmentParts.set(attachment.itemId,
+        `${incomingAttachmentParts.get(attachment.itemId) ?? ''}${part}`);
+    });
+
+    const currentSignatures = new Map<string, string>();
+    currentItems.forEach((item: BackupItemRecord): void => {
+      currentSignatures.set(item.id, this.itemSignature(item, currentGroupNames.get(item.groupId) ?? '',
+        currentAttachmentParts.get(item.id) ?? '', item.title));
+    });
+    const incomingSignatures = new Map<string, string>();
+    const conflictSignatures = new Map<string, string>();
+    dataset.items.forEach((item: BackupItemRecord): void => {
+      const groupName = incomingGroupNames.get(item.groupId) ?? '';
+      const attachments = incomingAttachmentParts.get(item.id) ?? '';
+      incomingSignatures.set(item.id, this.itemSignature(item, groupName, attachments, item.title));
+      conflictSignatures.set(item.id,
+        this.itemSignature(item, groupName, attachments, this.conflictTitle(item.title)));
+    });
+    return { currentItems: currentItems, currentSignatures: currentSignatures,
+      incomingSignatures: incomingSignatures, conflictSignatures: conflictSignatures };
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  private itemSignature(item: BackupItemRecord, groupName: string, attachments: string, title: string): string {
+    return this.signatureField(item.type) + this.signatureField(groupName) + this.signatureField(title) +
+      this.signatureField(item.username) + this.signatureField(item.password) + this.signatureField(item.notes) +
+      this.signatureField(item.ocrText) + this.signatureField(item.deletedAt.toString()) +
+      this.signatureField(attachments);
+  }
+
+  private attachmentSignaturePart(index: number, type: string, name: string, ocrText: string,
+    sizeBytes: number, sha256: string): string {
+    return this.signatureField(index.toString()) + this.signatureField(type) + this.signatureField(name) +
+      this.signatureField(ocrText) + this.signatureField(sizeBytes.toString()) + this.signatureField(sha256);
+  }
+
+  private signatureField(value: string): string {
+    return `${value.length}:${value}`;
+  }
+
+  private async sha256StoredAttachment(storageName: string): Promise<string> {
+    try {
+    const digest = cryptoFramework.createMd('SHA256');
+    let file: fs.File | undefined = undefined;
+    try {
+      file = fs.openSync(this.storedAttachmentPath(storageName), fs.OpenMode.READ_ONLY);
+      const size = fs.statSync(file.fd).size;
+      let offset = 0;
+      while (offset < size) {
+        const length = Math.min(1024 * 1024, size - offset);
+        const buffer = new ArrayBuffer(length);
+        const read = fs.readSync(file.fd, buffer, { length: length });
+        if (read <= 0) { throw new Error('附件内容校验失败'); }
+        await digest.update({ data: new Uint8Array(buffer, 0, read) });
+        offset += read;
+      }
+      const data = (await digest.digest()).data;
+      let output = '';
+      for (let index = 0; index < data.length; index += 1) {
+        output += data[index].toString(16).padStart(2, '0');
+      }
+      return output;
+    } finally {
+      if (file) { fs.closeSync(file); }
+    }
+    } catch (error) {
+      throw normalizeError(error);
+    }
   }
 
   private async mergeBackupGroups(store: relationalStore.RdbStore, dataset: VaultBackupDataset,
