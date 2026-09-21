@@ -131,7 +131,6 @@ export struct VaultItemDetailDialog {
     Column({ space: 6 }) {
       Text('移动到分组').fontSize(12).fontColor(COLOR_MUTED).width('100%')
       Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-        this.groupChip(0, '未分组')
         ForEach(this.groups, (group: VaultGroup): void => {
           this.groupChip(group.id, group.name)
         }, (group: VaultGroup): string => `${group.id}-${group.name}`)

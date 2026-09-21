@@ -75,6 +75,7 @@ class VaultRepositoryImpl {
       this.store = await relationalStore.getRdbStore(context, config);
       await migrateVaultDatabase(this.requireStore());
       await this.seedGroups();
+      await this.assignUngroupedItems();
       await this.cleanupOrphanedAttachments();
     } catch (error) {
       databaseKey.fill(0);
@@ -192,32 +193,28 @@ class VaultRepositoryImpl {
   async deleteGroup(id: number): Promise<void> {
     try {
     const store = this.requireStore();
-    const storageNames: string[] = [];
-    const attachmentResult = await store.querySql(
-      'SELECT storage_name FROM vault_item_attachments WHERE item_id IN ' +
-      '(SELECT id FROM vault_items WHERE group_id = ? AND deleted_at = 0)', [id]);
-    try {
-      while (attachmentResult.goToNextRow()) { storageNames.push(attachmentResult.getString(0)); }
-    } finally { attachmentResult.close(); }
+    const groupCountResult = await store.querySql('SELECT COUNT(*) FROM vault_groups');
+    let groupCount = 0;
+    try { if (groupCountResult.goToFirstRow()) { groupCount = groupCountResult.getLong(0); } }
+    finally { groupCountResult.close(); }
+    if (groupCount <= 1) { throw new Error('至少需要保留一个分组'); }
     store.beginTransaction();
     try {
+      const deletedAt = Date.now();
       await store.executeSql(
         'INSERT OR REPLACE INTO vault_group_tombstones (group_id, name, color, created_at, deleted_at) ' +
         'SELECT id, name, color, created_at, ? FROM vault_groups WHERE id = ?',
-        [Date.now(), id]
+        [deletedAt, id]
       );
       await store.executeSql(
-        'INSERT OR REPLACE INTO vault_item_tombstones (item_id, deleted_at) ' +
-        'SELECT id, ? FROM vault_items WHERE group_id = ? AND deleted_at = 0', [Date.now(), id]
+        'UPDATE vault_items SET deleted_at = ?, updated_at = ? WHERE group_id = ? AND deleted_at = 0',
+        [deletedAt, deletedAt, id]
       );
-      await store.executeSql(
-        'DELETE FROM vault_item_attachments WHERE item_id IN ' +
-        '(SELECT id FROM vault_items WHERE group_id = ? AND deleted_at = 0)', [id]
-      );
-      await store.executeSql('DELETE FROM vault_items WHERE group_id = ? AND deleted_at = 0', [id]);
       await store.executeSql('DELETE FROM vault_groups WHERE id = ?', [id]);
+      await store.executeSql(
+        'DELETE FROM vault_group_tombstones WHERE group_id = ? AND group_id NOT IN ' +
+        '(SELECT DISTINCT group_id FROM vault_items WHERE deleted_at > 0)', [id]);
       store.commit();
-      this.deleteStoredAttachments(storageNames);
     } catch (error) {
       store.rollBack();
       throw new Error('删除分组失败，数据未更改');
@@ -273,7 +270,7 @@ class VaultRepositoryImpl {
       'vault_items.title AS title, vault_items.username AS username, vault_items.password AS password, ' +
       'vault_items.website AS website, vault_items.notes AS notes, vault_items.ocr_text AS ocr_text, ' +
       'vault_items.created_at AS created_at, vault_items.updated_at AS updated_at, vault_items.deleted_at AS deleted_at, ' +
-      'COALESCE(vault_groups.name, vault_group_tombstones.name, \'未分组\') AS original_group_name';
+      'COALESCE(vault_groups.name, vault_group_tombstones.name, \'原分组已删除\') AS original_group_name';
     const sql = 'SELECT ' + fields + ', search_attachment.attachment_index AS matched_attachment_index, ' +
       'CASE WHEN search_attachment.name LIKE ? THEN search_attachment.name ' +
       'ELSE search_attachment.ocr_text END AS matched_ocr_text ' +
@@ -319,7 +316,7 @@ class VaultRepositoryImpl {
     let sql = 'SELECT vault_items.id, vault_items.type, vault_items.group_id, vault_items.title, ' +
       'vault_items.username, vault_items.password, vault_items.website, vault_items.notes, ' +
       'vault_items.ocr_text, vault_items.created_at, vault_items.updated_at, vault_items.deleted_at, ' +
-      'COALESCE(vault_groups.name, vault_group_tombstones.name, \'未分组\') AS original_group_name ' +
+      'COALESCE(vault_groups.name, vault_group_tombstones.name, \'原分组已删除\') AS original_group_name ' +
       'FROM vault_items LEFT JOIN vault_groups ON vault_groups.id = vault_items.group_id ' +
       'LEFT JOIN vault_group_tombstones ON vault_group_tombstones.group_id = vault_items.group_id ' +
       'WHERE vault_items.deleted_at > 0';
@@ -381,6 +378,7 @@ class VaultRepositoryImpl {
   async createItem(input: VaultItemInput): Promise<string> {
     try {
     this.validateItemFields(input.type, input.title, input.username, input.password, input.website, input.notes);
+    await this.requireGroup(input.groupId);
     const now = Date.now();
     const id = createVaultId();
     const values: relationalStore.ValuesBucket = {
@@ -408,6 +406,7 @@ class VaultRepositoryImpl {
     onProgress?: (completed: number, total: number) => void): Promise<string> {
     try {
     this.validateItemFields(input.type, input.title, input.username, input.password, input.website, input.notes);
+    await this.requireGroup(input.groupId);
     if (attachments.length === 0) { throw new Error('请先选择附件'); }
     const storedAttachments = await this.storeAttachments(attachments, onProgress);
     const store = this.requireStore();
@@ -617,6 +616,7 @@ class VaultRepositoryImpl {
   async updateItem(item: VaultItem): Promise<void> {
     try {
     this.validateItemFields(item.type, item.title, item.username, item.password, item.website, item.notes);
+    await this.requireGroup(item.groupId);
     const values: relationalStore.ValuesBucket = {
       type: item.type,
       group_id: item.groupId,
@@ -642,6 +642,52 @@ class VaultRepositoryImpl {
       [Date.now(), Date.now(), id]
     );
       } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  async moveItemsToTrash(ids: string[]): Promise<void> {
+    try {
+      if (ids.length === 0) { return; }
+      const store = this.requireStore();
+      const now = Date.now();
+      store.beginTransaction();
+      try {
+        for (let index = 0; index < ids.length; index += 1) {
+          await store.executeSql(
+            'UPDATE vault_items SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at = 0',
+            [now, now, ids[index]]);
+        }
+        store.commit();
+      } catch (error) {
+        store.rollBack();
+        throw new Error('批量移入回收站失败，资料未更改');
+      }
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  async moveItemsToGroup(ids: string[], groupId: number): Promise<void> {
+    try {
+      if (ids.length === 0) { return; }
+      const store = this.requireStore();
+      await this.requireGroup(groupId);
+      const now = Date.now();
+      store.beginTransaction();
+      try {
+        for (let index = 0; index < ids.length; index += 1) {
+          await store.executeSql(
+            'UPDATE vault_items SET group_id = ?, updated_at = ? ' +
+            'WHERE id = ? AND deleted_at = 0 AND group_id <> ?',
+            [groupId, now, ids[index], groupId]);
+        }
+        store.commit();
+      } catch (error) {
+        store.rollBack();
+        throw new Error('批量移动分组失败，资料未更改');
+      }
+    } catch (error) {
       throw normalizeError(error);
     }
   }
@@ -678,6 +724,8 @@ class VaultRepositoryImpl {
           let groupExists = false;
           try { groupExists = groupResult.goToFirstRow(); } finally { groupResult.close(); }
           if (!groupExists) { groupId = await this.restoreDeletedGroup(store, groupId); }
+        } else {
+          groupId = await this.firstGroupId();
         }
         await store.executeSql(
           'UPDATE vault_items SET group_id = ?, deleted_at = 0, updated_at = ? WHERE id = ?',
@@ -1385,7 +1433,7 @@ class VaultRepositoryImpl {
     let createdAt = Date.now();
     try {
       if (!tombstone.goToFirstRow()) {
-        return 0;
+        return await this.firstGroupId();
       }
       name = tombstone.getString(0);
       color = tombstone.getString(1);
@@ -1453,6 +1501,44 @@ class VaultRepositoryImpl {
     await this.createGroup('个人信息', '#75D7FF');
     await this.createGroup('家庭资料', '#F3C969');
       } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  private async firstGroupId(): Promise<number> {
+    try {
+    const result = await this.requireStore().querySql(
+      'SELECT id FROM vault_groups ORDER BY sort_order ASC, id ASC LIMIT 1');
+    try {
+      if (!result.goToFirstRow()) { throw new Error('请先创建分组'); }
+      return result.getLong(0);
+    } finally { result.close(); }
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  private async requireGroup(groupId: number): Promise<void> {
+    try {
+    if (groupId <= 0) { throw new Error('请选择分组'); }
+    const result = await this.requireStore().querySql('SELECT id FROM vault_groups WHERE id = ?', [groupId]);
+    try {
+      if (!result.goToFirstRow()) { throw new Error('所选分组不存在'); }
+    } finally { result.close(); }
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  private async assignUngroupedItems(): Promise<void> {
+    try {
+    const groupId = await this.firstGroupId();
+    await this.requireStore().executeSql(
+      'UPDATE vault_items SET group_id = ? WHERE deleted_at = 0 AND ' +
+      '(group_id <= 0 OR group_id NOT IN (SELECT id FROM vault_groups))', [groupId]);
+    await this.requireStore().executeSql(
+      'UPDATE vault_items SET group_id = ? WHERE deleted_at > 0 AND group_id <= 0', [groupId]);
+    } catch (error) {
       throw normalizeError(error);
     }
   }

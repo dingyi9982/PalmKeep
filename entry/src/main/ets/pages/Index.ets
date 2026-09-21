@@ -88,9 +88,19 @@ struct Index {
   @State private draggingGroupName: string = '';
   @State private groupDropTargetId: number = -1;
   @State private groupDragCancelActive: boolean = false;
+  @State private homeManaging: boolean = false;
+  @State private homeSelectedIds: string[] = [];
+  @State private homeSelectionGroupId: number = 0;
+  @State private homeBusy: boolean = false;
   @State private selectedCategoryType: VaultItemType = VaultItemType.Login;
   @State private categoryGroupId: number = -1;
   @State private categorySort: string = 'updated';
+  @State private categoryManaging: boolean = false;
+  @State private categorySelectedIds: string[] = [];
+  @State private categoryBusy: boolean = false;
+  @State private showBatchMoveDialog: boolean = false;
+  @State private batchMoveGroupId: number = 0;
+  @State private batchSelectionSource: string = 'category';
   @State private showGestureSetup: boolean = false;
   @State private gestureSetupStep: number = 1;
   @State private gestureSetupHint: string = '绘制新手势';
@@ -189,6 +199,8 @@ struct Index {
   private vaultRefreshVersion: number = 0;
   private trashRefreshVersion: number = 0;
   private trashLongPressTriggered: boolean = false;
+  private categoryLongPressTriggered: boolean = false;
+  private homeLongPressTriggered: boolean = false;
   private groupDragClickSuppressed: boolean = false;
   private groupDragFinalizeScheduled: boolean = false;
   private groupDragAccepted: boolean = false;
@@ -226,6 +238,10 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (this.showBatchMoveDialog) {
+      this.showBatchMoveDialog = false;
+      return true;
+    }
     if (this.showBackupDialog && !this.backupBusy) {
       this.closeBackupDialog();
       return true;
@@ -252,6 +268,14 @@ struct Index {
     }
     if (this.trashManaging) {
       this.closeTrashManagement();
+      return true;
+    }
+    if (this.categoryManaging) {
+      this.closeCategoryManagement();
+      return true;
+    }
+    if (this.homeManaging) {
+      this.closeHomeManagement();
       return true;
     }
     if (this.showTrashMore) {
@@ -602,6 +626,13 @@ struct Index {
     this.groupDragPositionLocked = false;
     this.groupDragLastReorderX = 0;
     this.groupDragLastReorderY = 0;
+    this.homeManaging = false;
+    this.homeSelectedIds = [];
+    this.homeBusy = false;
+    this.categoryManaging = false;
+    this.categorySelectedIds = [];
+    this.categoryBusy = false;
+    this.showBatchMoveDialog = false;
     this.categoryGroupId = -1;
     this.categorySort = 'updated';
     this.masterPassword = '';
@@ -675,7 +706,7 @@ struct Index {
   }
 
   private activateSearch(): void {
-    if (this.searchActive) {
+    if (this.searchActive || this.homeManaging) {
       return;
     }
     this.searchActive = true;
@@ -1803,6 +1834,10 @@ struct Index {
   private async requestDeleteGroup(group: VaultGroup): Promise<void> {
     try {
     try {
+      if (this.groups.length <= 1) {
+        this.getUIContext().getPromptAction().showToast({ message: '至少需要保留一个分组' });
+        return;
+      }
       const itemCount = this.countGroup(group.id);
       if (itemCount > 0) {
         this.groupPendingDelete = group;
@@ -1848,10 +1883,14 @@ struct Index {
       this.groupPendingDeleteCount = 0;
       this.expandedGroupId = -1;
       if (this.newGroupId === group.id) {
-        this.newGroupId = 0;
+        const replacement = this.groups.find((item: VaultGroup): boolean => item.id !== group.id);
+        this.newGroupId = replacement ? replacement.id : 0;
       }
-      await this.refreshData();
-      this.getUIContext().getPromptAction().showToast({ message: hadItems ? '分组及其当前资料已永久删除' : '分组已删除' });
+      if (this.categoryGroupId === group.id) { this.categoryGroupId = -1; }
+      await this.refreshData(true);
+      this.getUIContext().getPromptAction().showToast({
+        message: hadItems ? '分组已删除，其中资料已移入回收站' : '分组已删除'
+      });
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
@@ -2206,6 +2245,7 @@ struct Index {
   }
 
   private selectCategoryType(type: VaultItemType): void {
+    this.closeCategoryManagement();
     this.selectedCategoryType = type;
     if (this.categoryGroupId >= 0 && this.countGroupByType(this.categoryGroupId, type) === 0) {
       this.categoryGroupId = -1;
@@ -2256,6 +2296,152 @@ struct Index {
       } catch (error) {
       throw normalizeError(error);
     }
+  }
+
+  private openCategoryManagement(selectedId: string = ''): void {
+    this.categoryManaging = true;
+    this.categorySelectedIds = selectedId.length > 0 ? [selectedId] : [];
+    if (selectedId.length > 0) {
+      this.categoryLongPressTriggered = true;
+      setTimeout((): void => { this.categoryLongPressTriggered = false; }, 350);
+    }
+  }
+
+  private closeCategoryManagement(): void {
+    this.categoryManaging = false;
+    this.categorySelectedIds = [];
+    this.showBatchMoveDialog = false;
+  }
+
+  private toggleCategorySelection(id: string): void {
+    if (this.categoryLongPressTriggered) {
+      this.categoryLongPressTriggered = false;
+      return;
+    }
+    const selected = this.categorySelectedIds.slice();
+    const position = selected.indexOf(id);
+    if (position >= 0) { selected.splice(position, 1); } else { selected.push(id); }
+    this.categorySelectedIds = selected;
+  }
+
+  private toggleSelectAllCategory(): void {
+    const visibleIds = this.categoryItems().map((item: VaultItem): string => item.id);
+    const allSelected = visibleIds.length > 0 &&
+      visibleIds.every((id: string): boolean => this.categorySelectedIds.indexOf(id) >= 0);
+    this.categorySelectedIds = allSelected ? [] : visibleIds;
+  }
+
+  private selectedIdsForBatchSource(source: string = this.batchSelectionSource): string[] {
+    return source === 'home' ? this.homeSelectedIds : this.categorySelectedIds;
+  }
+
+  private openBatchMoveDialog(source: string = 'category'): void {
+    if (this.selectedIdsForBatchSource(source).length === 0) { return; }
+    this.batchSelectionSource = source;
+    this.batchMoveGroupId = this.groups.length > 0 ? this.groups[0].id : 0;
+    this.showBatchMoveDialog = true;
+  }
+
+  private async moveSelectedItems(): Promise<void> {
+    const ids = this.selectedIdsForBatchSource().slice();
+    if (this.categoryBusy || this.homeBusy || ids.length === 0) { return; }
+    const count = ids.length;
+    if (this.batchSelectionSource === 'home') { this.homeBusy = true; }
+    else { this.categoryBusy = true; }
+    try {
+      await vaultRepository.moveItemsToGroup(ids, this.batchMoveGroupId);
+      if (this.batchSelectionSource === 'home') { this.closeHomeManagement(); }
+      else { this.closeCategoryManagement(); }
+      await this.refreshData();
+      this.getUIContext().getPromptAction().showToast({ message: `已移动 ${count} 条资料` });
+    } catch (error) {
+      try { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
+      catch (promptError) { logRecoverableError('could not show batch move failure', promptError); }
+    } finally {
+      this.categoryBusy = false;
+      this.homeBusy = false;
+    }
+  }
+
+  private async trashSelectedCategoryItems(): Promise<void> {
+    await this.trashSelectedItems('category');
+  }
+
+  private async trashSelectedItems(source: string): Promise<void> {
+    const ids = this.selectedIdsForBatchSource(source).slice();
+    if (this.categoryBusy || this.homeBusy || ids.length === 0) { return; }
+    const count = ids.length;
+    try {
+      const choice = await this.getUIContext().getPromptAction().showDialog({
+        title: `将 ${count} 条资料移入回收站？`,
+        message: '之后可以在回收站中恢复。',
+        buttons: [{ text: ACTION_CANCEL, color: COLOR_MUTED }, { text: '移入回收站', color: COLOR_DANGER }]
+      });
+      if (choice.index !== 1) { return; }
+      if (source === 'home') { this.homeBusy = true; } else { this.categoryBusy = true; }
+      await vaultRepository.moveItemsToTrash(ids);
+      if (source === 'home') { this.closeHomeManagement(); } else { this.closeCategoryManagement(); }
+      await this.refreshData(true);
+      this.getUIContext().getPromptAction().showToast({ message: `已将 ${count} 条资料移入回收站` });
+    } catch (error) {
+      try { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
+      catch (promptError) { logRecoverableError('could not show batch trash failure', promptError); }
+    } finally {
+      this.categoryBusy = false;
+      this.homeBusy = false;
+    }
+  }
+
+  private openHomeManagement(item: VaultItem): void {
+    if (this.searchText.length > 0 || item.deletedAt > 0) { return; }
+    this.homeManaging = true;
+    this.searchActive = false;
+    this.clearHomeFocus();
+    this.homeSelectionGroupId = item.groupId;
+    this.homeSelectedIds = [item.id];
+    this.homeLongPressTriggered = true;
+    setTimeout((): void => { this.homeLongPressTriggered = false; }, 350);
+  }
+
+  private closeHomeManagement(): void {
+    this.homeManaging = false;
+    this.homeSelectedIds = [];
+    if (this.batchSelectionSource === 'home') { this.showBatchMoveDialog = false; }
+  }
+
+  private homeIsSelected(id: string): boolean {
+    return this.homeSelectedIds.indexOf(id) >= 0;
+  }
+
+  private toggleHomeSelection(item: VaultItem): void {
+    if (this.homeLongPressTriggered) {
+      this.homeLongPressTriggered = false;
+      return;
+    }
+    this.homeSelectionGroupId = item.groupId;
+    const selected = this.homeSelectedIds.slice();
+    const position = selected.indexOf(item.id);
+    if (position >= 0) { selected.splice(position, 1); } else { selected.push(item.id); }
+    this.homeSelectedIds = selected;
+  }
+
+  private toggleSelectHomeGroup(): void {
+    const groupIds = this.itemsInGroup(this.homeSelectionGroupId).map((item: VaultItem): string => item.id);
+    const allSelected = groupIds.length > 0 &&
+      groupIds.every((id: string): boolean => this.homeSelectedIds.indexOf(id) >= 0);
+    const selected = this.homeSelectedIds.filter((id: string): boolean => groupIds.indexOf(id) < 0);
+    if (!allSelected) { selected.push(...groupIds); }
+    this.homeSelectedIds = selected;
+  }
+
+  private toggleSelectAllHome(): void {
+    this.homeSelectedIds = this.homeSelectedIds.length === this.allItems.length ? [] :
+      this.allItems.map((item: VaultItem): string => item.id);
+  }
+
+  private homeSelectionGroupLabel(): string {
+    const group = this.groups.find((item: VaultGroup): boolean => item.id === this.homeSelectionGroupId);
+    return group ? group.name : '当前分组';
   }
 
   @Builder
@@ -2333,9 +2519,24 @@ struct Index {
   }
 
   @Builder
+  private homeSelectionMark(item: VaultItem): void {
+    if (this.homeManaging) {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle({ width: 21, height: 21 })
+          .fill(this.homeIsSelected(item.id) ? COLOR_PRIMARY : Color.Transparent)
+          .stroke(this.homeIsSelected(item.id) ? COLOR_PRIMARY : COLOR_DISABLED).strokeWidth(1.5)
+        if (this.homeIsSelected(item.id)) {
+          Text('✓').fontSize(12).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK)
+        }
+      }.width(24).height(28)
+    }
+  }
+
+  @Builder
   private itemRow(item: VaultItem, showThumbnail: boolean = false, highlightedAttachmentIndex: number = -1,
-    thumbnailCount: number = 3, originalGroupName: string = ''): void {
+    thumbnailCount: number = 3, originalGroupName: string = '', homeManageable: boolean = false): void {
     Row({ space: 8 }) {
+      if (homeManageable) { this.homeSelectionMark(item) }
       if (showThumbnail && (item.type === VaultItemType.Image || item.type === VaultItemType.Video)) {
         VaultAttachmentPreview({
           itemId: item.id,
@@ -2391,7 +2592,9 @@ struct Index {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      Text('›').fontSize(20).fontColor(COLOR_CHEVRON)
+      if (!homeManageable || !this.homeManaging) {
+        Text('›').fontSize(20).fontColor(COLOR_CHEVRON)
+      }
     }
     .width('100%')
     .constraintSize({ minHeight: item.type === VaultItemType.File ? 48 + (item.deletedAt > 0 ? 20 : 0) :
@@ -2402,23 +2605,35 @@ struct Index {
       bottom: item.type === VaultItemType.File ? 5 : 0 })
     .backgroundColor(COLOR_SURFACE)
     .borderRadius(15)
+    .border({ width: homeManageable && this.homeIsSelected(item.id) ? 1 : 0,
+      color: homeManageable && this.homeIsSelected(item.id) ? COLOR_PRIMARY : Color.Transparent })
     .onClick((): void => {
-      if (item.deletedAt > 0) {
+      if (homeManageable && this.homeManaging) {
+        this.toggleHomeSelection(item);
+      } else if (item.deletedAt > 0) {
         this.openTrashDetail({ item: item, originalGroupName: originalGroupName });
       } else {
         this.openItem(item, highlightedAttachmentIndex);
       }
     })
+    .priorityGesture(LongPressGesture({ repeat: false, duration: 500 })
+      .onAction((): void => { if (homeManageable) { this.openHomeManagement(item); } }))
   }
 
   @Builder
   private homeMediaItemRow(item: VaultItem): void {
     Column({ space: 3 }) {
-      if (item.title.length > 0) {
-        Text(item.title)
-          .fontSize(13).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
+      if (this.homeManaging || item.title.length > 0) {
+        Row({ space: 6 }) {
+          this.homeSelectionMark(item)
+          if (item.title.length > 0) {
+            Text(item.title)
+              .fontSize(13).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+          } else {
+            Blank()
+          }
+        }.width('100%')
       }
       VaultAttachmentPreview({
         itemId: item.id,
@@ -2431,7 +2646,13 @@ struct Index {
     .padding({ left: 8, right: 8, top: 5, bottom: 5 })
     .backgroundColor(COLOR_SURFACE)
     .borderRadius(15)
-    .onClick((): void => { this.openItem(item); })
+    .border({ width: this.homeIsSelected(item.id) ? 1 : 0,
+      color: this.homeIsSelected(item.id) ? COLOR_PRIMARY : Color.Transparent })
+    .onClick((): void => {
+      if (this.homeManaging) { this.toggleHomeSelection(item); } else { this.openItem(item); }
+    })
+    .priorityGesture(LongPressGesture({ repeat: false, duration: 500 })
+      .onAction((): void => { this.openHomeManagement(item); }))
   }
 
   @Builder
@@ -2530,14 +2751,6 @@ struct Index {
         rightHeight += height;
       }
     }
-    if (this.countGroup(0) > 0) {
-      const height = this.homeGroupCardHeight(0, true);
-      if (leftHeight <= rightHeight) {
-        leftHeight += height;
-      } else {
-        rightHeight += height;
-      }
-    }
     // 首页上方还有搜索和安全存储区域，分组双列实际可见高度约为 420vp。
     // 使用可见区域而不是整屏高度判断，避免卡片已经超出首屏却仍被当成“可全部显示”。
     return Math.max(leftHeight, rightHeight) <= 420;
@@ -2583,14 +2796,12 @@ struct Index {
           this.groupSection(group, true)
         }
       }, (group: VaultGroup): string => `${group.id}-${group.name}`)
-      if (this.countGroup(0) > 0 && this.homeSectionColumn(0) === column) {
-        this.ungroupedSection(true)
-      }
     }
     .width('48.5%')
   }
 
   private beginGroupDrag(group: VaultGroup, event: DragEvent): DragItemInfo {
+    if (this.homeManaging) { return { extraInfo: '' }; }
     this.draggingGroupId = group.id;
     this.draggingGroupName = group.name;
     this.groupDropTargetId = group.id;
@@ -2709,7 +2920,8 @@ struct Index {
 
         Row() {
           Column({ space: 3 }) {
-            Text(this.searchText.length > 0 ? '搜索结果' : '我的分组')
+            Text(this.searchText.length > 0 ? '搜索结果' :
+              (this.homeManaging ? `已选择 ${this.homeSelectedIds.length} 项` : '我的分组'))
               .fontSize(20).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
             if (this.searchText.length > 0) {
               Text(`找到 ${this.searchHits.length} 项结果`)
@@ -2719,7 +2931,11 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
           if (this.searchText.length === 0) {
-            if (this.draggingGroupId >= 0) {
+            if (this.homeManaging) {
+              Button(ACTION_CANCEL).height(38).fontSize(12).fontColor(COLOR_MUTED)
+                .backgroundColor(COLOR_SURFACE).borderRadius(12)
+                .onClick((): void => { this.closeHomeManagement(); })
+            } else if (this.draggingGroupId >= 0) {
               Button('拖到这里取消')
                 .height(38).fontSize(12).fontColor(COLOR_DANGER)
                 .backgroundColor(this.groupDragCancelActive ? COLOR_DANGER_WASH_STRONG : COLOR_DANGER_WASH)
@@ -2742,6 +2958,18 @@ struct Index {
         }
         .width('100%')
 
+        if (this.homeManaging) {
+          Row({ space: 6 }) {
+            Button(`全选 ${this.homeSelectionGroupLabel()}`).layoutWeight(1).height(36).fontSize(11)
+              .fontColor(COLOR_PRIMARY).backgroundColor(COLOR_PRIMARY_TINT).borderRadius(11)
+              .onClick((): void => { this.toggleSelectHomeGroup(); })
+            Button(this.homeSelectedIds.length === this.allItems.length ? '取消全选' : '全选所有资料')
+              .layoutWeight(1).height(36).fontSize(11).fontColor(COLOR_PRIMARY)
+              .backgroundColor(COLOR_SURFACE).borderRadius(11).border({ width: 1, color: COLOR_BORDER })
+              .onClick((): void => { this.toggleSelectAllHome(); })
+          }.width('100%')
+        }
+
         if (this.searchText.length > 0) {
           Column({ space: 4 }) {
             if (this.searchHits.length === 0) {
@@ -2758,7 +2986,7 @@ struct Index {
             }
           }
           .width('100%')
-        } else if (this.groups.length === 0 && this.countGroup(0) === 0) {
+        } else if (this.groups.length === 0) {
           this.emptyState('还没有分组', '创建分组后，即可分类保存各种资料')
         } else {
           Row({ space: 3 }) {
@@ -2771,7 +2999,7 @@ struct Index {
       }
       .width('100%')
       .constraintSize({ minHeight: '100%' })
-      .padding({ left: 18, right: 18, top: 12, bottom: 92 })
+      .padding({ left: 18, right: 18, top: 12, bottom: this.homeManaging ? 155 : 92 })
     }
     .width('100%')
     .height('100%')
@@ -2808,6 +3036,7 @@ struct Index {
     .border({ width: { top: 1 }, color: COLOR_BORDER })
     .opacity(this.draggingGroupId === groupId ? 0 : 1)
     .onClick((): void => {
+      if (this.homeManaging) { return; }
       this.expandedGroupId = this.expandedGroupId === groupId ? -1 : groupId;
     })
   }
@@ -2836,6 +3065,7 @@ struct Index {
         }
         .layoutWeight(1)
         .onClick((): void => {
+          if (this.homeManaging) { return; }
           if (this.groupDragClickSuppressed) { return; }
           if (this.shouldShowHomeMoreRow(group.id)) {
             this.expandedGroupId = this.expandedGroupId === group.id ? -1 : group.id;
@@ -2848,7 +3078,8 @@ struct Index {
           Text('+').fontSize(22).fontColor(COLOR_PRIMARY)
         }
           .width(34).height(34).borderRadius(11).backgroundColor(COLOR_PRIMARY_TINT)
-          .opacity(this.draggingGroupId === group.id ? 0 : 1)
+          .opacity(this.draggingGroupId === group.id ? 0 : (this.homeManaging ? 0.25 : 1))
+          .enabled(!this.homeManaging)
           .draggable(false)
           .onClick((): void => {
             this.openNewItem(undefined, group.id);
@@ -2871,7 +3102,7 @@ struct Index {
             if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
               this.homeMediaItemRow(item)
             } else {
-              this.itemRow(item, true)
+              this.itemRow(item, true, -1, 3, '', true)
             }
           }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
         }
@@ -2892,6 +3123,7 @@ struct Index {
       color: this.draggingGroupId === group.id ? COLOR_PRIMARY :
         (this.groupDropTargetId === group.id ? COLOR_PRIMARY : COLOR_BORDER),
       style: this.draggingGroupId === group.id ? BorderStyle.Dashed : BorderStyle.Solid })
+    .draggable(!this.homeManaging)
     .onDragStart((event: DragEvent): DragItemInfo => this.beginGroupDrag(group, event))
     .onDragEnter((event: DragEvent): void => { this.previewGroupReorder(group.id, event); })
     .onDragMove((event: DragEvent): void => { this.previewGroupReorder(group.id, event); })
@@ -2900,43 +3132,6 @@ struct Index {
       this.groupDragCancelled = false;
     })
     .onDragEnd((): void => { this.scheduleFinishGroupDrag(); })
-  }
-
-  @Builder
-  private ungroupedSection(fullWidth: boolean): void {
-    Column() {
-      Row() {
-        Text('未分组').fontSize(16).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-        Blank()
-        Text(`${this.countGroup(0)} 条资料`).fontSize(11).fontColor(COLOR_MUTED)
-      }
-      .width('100%').padding({ left: 12, right: 12, top: 9, bottom: 8 })
-      .onClick((): void => {
-        if (this.shouldShowHomeMoreRow(0)) {
-          this.expandedGroupId = this.expandedGroupId === 0 ? -1 : 0;
-        }
-      })
-      Column({ space: 0 }) {
-        ForEach(this.homeItemsInGroup(0), (item: VaultItem, index: number): void => {
-          if (index > 0) {
-            Divider().strokeWidth(1).color(COLOR_BORDER).margin({ left: 8, right: 8 })
-          }
-          if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
-            this.homeMediaItemRow(item)
-          } else {
-            this.itemRow(item, true)
-          }
-        }, (item: VaultItem): string => `${item.id}-${item.updatedAt}`)
-      }
-      .width('100%').padding({ left: 3, right: 3, bottom: 3 })
-      .border({ width: { top: 1 }, color: COLOR_BORDER })
-      if (this.shouldShowHomeMoreRow(0)) {
-        this.moreItemsRow(0, this.countGroup(0))
-      }
-    }
-    .width(fullWidth ? '100%' : '48.5%')
-    .margin({ bottom: 3 }).backgroundColor(COLOR_SURFACE).borderRadius(18)
-    .border({ width: 1, color: COLOR_BORDER })
   }
 
   @Builder
@@ -2952,11 +3147,76 @@ struct Index {
       noteCount: this.noteCount,
       mediaCount: this.mediaCount,
       fileCount: this.fileCount,
+      managing: this.categoryManaging,
+      selectedIds: this.categorySelectedIds,
+      busy: this.categoryBusy,
       onSelectType: (type: VaultItemType): void => { this.selectCategoryType(type); },
-      onSelectGroup: (groupId: number): void => { this.categoryGroupId = groupId; },
+      onSelectGroup: (groupId: number): void => {
+        this.closeCategoryManagement();
+        this.categoryGroupId = groupId;
+      },
       onChooseSort: (): void => { this.chooseCategorySort(); },
-      onOpenItem: (item: VaultItem): void => { this.openItem(item); }
+      onOpenItem: (item: VaultItem): void => { this.openItem(item); },
+      onEnterManagement: (itemId: string): void => { this.openCategoryManagement(itemId); },
+      onToggleSelection: (itemId: string): void => { this.toggleCategorySelection(itemId); },
+      onToggleAll: (): void => { this.toggleSelectAllCategory(); },
+      onCancelManagement: (): void => { this.closeCategoryManagement(); },
+      onMoveSelected: (): void => { this.openBatchMoveDialog('category'); },
+      onTrashSelected: (): void => { this.trashSelectedCategoryItems(); }
     })
+  }
+
+  @Builder
+  private batchMoveDialogOverlay(): void {
+    Stack({ alignContent: Alignment.Center }) {
+      Column({ space: 10 }) {
+        this.modalHeader('移动到分组', (): void => { this.showBatchMoveDialog = false; })
+        Text(`将已选择的 ${this.selectedIdsForBatchSource().length} 条资料移动到：`)
+          .fontSize(12).fontColor(COLOR_MUTED).width('100%')
+        Scroll() {
+          Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+            ForEach(this.groups, (group: VaultGroup): void => {
+              Text(group.name).fontSize(12).maxLines(1)
+                .fontColor(this.batchMoveGroupId === group.id ? COLOR_BG : COLOR_MUTED)
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor(this.batchMoveGroupId === group.id ? COLOR_PRIMARY : COLOR_SURFACE_2)
+                .borderRadius(16).margin({ right: 6, bottom: 6 })
+                .onClick((): void => { this.batchMoveGroupId = group.id; })
+            }, (group: VaultGroup): string => `batch-${group.id}-${group.name}`)
+          }.width('100%')
+        }.width('100%').constraintSize({ maxHeight: 230 }).scrollBar(BarState.Auto)
+        Row({ space: 8 }) {
+          Button(ACTION_CANCEL).layoutWeight(1).height(44).fontColor(COLOR_MUTED)
+            .backgroundColor(COLOR_SURFACE_2).borderRadius(13)
+            .onClick((): void => { this.showBatchMoveDialog = false; })
+          Button('确认移动').layoutWeight(1).height(44).fontColor(COLOR_ON_DARK)
+            .backgroundColor(COLOR_PRIMARY).borderRadius(13).enabled(!this.categoryBusy)
+            .onClick((): void => { this.moveSelectedItems(); })
+        }.width('100%')
+      }
+      .width('88%').padding(16).backgroundColor(COLOR_SURFACE).borderRadius(20)
+      .border({ width: 1, color: COLOR_BORDER })
+    }
+    .width('100%').height('100%').backgroundColor(COLOR_SCRIM_STRONG)
+  }
+
+  @Builder
+  private homeManagementBar(): void {
+    Row({ space: 8 }) {
+      Button('移动到分组').layoutWeight(1).height(46).fontColor(COLOR_PRIMARY)
+        .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(13)
+        .enabled(this.homeSelectedIds.length > 0 && !this.homeBusy)
+        .opacity(this.homeSelectedIds.length > 0 && !this.homeBusy ? 1 : 0.45)
+        .onClick((): void => { this.openBatchMoveDialog('home'); })
+      Button('移入回收站').layoutWeight(1).height(46).fontColor(COLOR_DANGER)
+        .backgroundColor(COLOR_DANGER_TINT).borderRadius(13)
+        .enabled(this.homeSelectedIds.length > 0 && !this.homeBusy)
+        .opacity(this.homeSelectedIds.length > 0 && !this.homeBusy ? 1 : 0.45)
+        .onClick((): void => { this.trashSelectedItems('home'); })
+    }
+    .width('100%').padding({ left: 18, right: 18, top: 8, bottom: 8 })
+    .margin({ bottom: 82 }).backgroundColor(COLOR_SURFACE)
+    .border({ width: { top: 1 }, color: COLOR_BORDER })
   }
 
   @Builder
@@ -3188,6 +3448,8 @@ struct Index {
       activeTab: this.activeTab,
       onSelectTab: (index: number): void => {
         this.activeTab = index;
+        if (index !== 0) { this.closeHomeManagement(); }
+        if (index !== 1) { this.closeCategoryManagement(); }
         if (index !== 2) {
           this.closeTrashManagement();
           this.showTrashMore = false;
@@ -3195,7 +3457,10 @@ struct Index {
         if (index === 2) { this.refreshTrash(); }
         if (index === 3) { this.showGroupManager = false; }
       },
-      onNewItem: (): void => { this.openNewItem(); }
+      onNewItem: (): void => {
+        if (this.homeManaging || this.categoryManaging) { return; }
+        this.openNewItem();
+      }
     })
   }
 
@@ -3228,8 +3493,14 @@ struct Index {
       .height('100%')
       .backgroundColor(COLOR_BG)
       this.bottomBar()
+      if (this.homeManaging && this.activeTab === 0) {
+        this.homeManagementBar()
+      }
       if (this.showNewItem) {
         this.newItemOverlay()
+      }
+      if (this.showBatchMoveDialog) {
+        this.batchMoveDialogOverlay()
       }
       if (this.showNewGroup) {
         this.newGroupOverlay()
@@ -3599,14 +3870,14 @@ struct Index {
         this.groupDeleteConfirmName = '';
       })
       Column({ space: 15 }) {
-        this.modalHeader('⚠ 永久删除分组', (): void => {
+        this.modalHeader('⚠ 删除分组', (): void => {
           this.groupPendingDelete = undefined;
           this.groupDeleteConfirmName = '';
         })
         Column({ space: 6 }) {
-          Text(`将删除“${group.name}”及其中 ${this.groupPendingDeleteCount} 条资料`)
+          Text(`将删除“${group.name}”，其中 ${this.groupPendingDeleteCount} 条资料将移入回收站`)
             .fontSize(14).fontWeight(FontWeight.Bold).fontColor(COLOR_DANGER).width('100%')
-          Text('分组中当前显示的资料和附件会永久删除。回收站资料会保留，恢复时将自动重建原分组。')
+          Text('资料和附件不会立即永久删除，可在回收站中恢复；恢复时会自动重新创建原分组。')
             .fontSize(13).fontColor(COLOR_DANGER).lineHeight(20).width('100%')
         }
         .width('100%').padding(12).backgroundColor(COLOR_DANGER_TINT).borderRadius(12)
@@ -3616,7 +3887,7 @@ struct Index {
           .fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER_LIGHT).backgroundColor(COLOR_SURFACE_2)
           .height(50).borderRadius(12)
           .onChange((value: string): void => { this.groupDeleteConfirmName = value; })
-        Button('永久删除分组及当前资料')
+        Button('删除分组并移入回收站')
           .width('100%').height(50).fontWeight(FontWeight.Bold)
           .fontColor(this.groupDeleteConfirmName.trim() === group.name ? COLOR_ON_DARK : COLOR_MUTED)
           .backgroundColor(this.groupDeleteConfirmName.trim() === group.name ? COLOR_DANGER : COLOR_SURFACE_2)
