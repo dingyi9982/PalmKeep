@@ -2,11 +2,6 @@ import { VaultItemType } from './VaultModels';
 
 export const BACKUP_FORMAT_VERSION: number = 1;
 
-export enum VaultRestoreMode {
-  Merge = 'merge',
-  Replace = 'replace'
-}
-
 export interface BackupGroupRecord {
   id: number;
   name: string;

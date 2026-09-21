@@ -1,7 +1,7 @@
 import { textRecognition } from '@kit.CoreVisionKit';
 import image from '@ohos.multimedia.image';
 import fs from '@ohos.file.fs';
-import { normalizeError } from './ErrorUtils';
+import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
 
 export interface OcrMediaInput {
@@ -27,6 +27,7 @@ class MediaOcrService {
         try {
           results[index] = await this.recognizeImage(items[index].uri);
         } catch (error) {
+          logRecoverableError(`OCR failed for selected image ${index}`, error);
           results[index] = '';
         }
         completed += 1;
@@ -34,9 +35,11 @@ class MediaOcrService {
       }
     } catch (error) {
       // OCR failures are intentionally silent and must not block saving.
+      logRecoverableError('OCR batch initialization or recognition failed', error);
     } finally {
       if (initialized) {
-        try { await textRecognition.release(); } catch (error) {}
+        try { await textRecognition.release(); }
+        catch (error) { logRecoverableError('could not release OCR service', error); }
       }
     }
     return results;

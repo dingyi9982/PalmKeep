@@ -1,7 +1,7 @@
 import image from '@ohos.multimedia.image';
 import media from '@ohos.multimedia.media';
 import fs from '@ohos.file.fs';
-import { normalizeError } from './ErrorUtils';
+import { logRecoverableError, normalizeError } from './ErrorUtils';
 import util from '@ohos.util';
 import { AbilityContextHolder } from './AbilityContextHolder';
 import { VaultItemType } from '../models/VaultModels';
@@ -28,7 +28,8 @@ class MediaCompressionService {
 
   removeTemporary(path: string): void {
     try {
-    try { fs.unlinkSync(path); } catch (error) {}
+    try { fs.unlinkSync(path); }
+    catch (error) { logRecoverableError(`could not remove temporary media ${path}`, error); }
       } catch (error) {
       throw normalizeError(error);
     }
@@ -134,12 +135,15 @@ class MediaCompressionService {
       succeeded = false;
     } finally {
       // The transcoder owns both descriptors until release completes.
-      try { if (transcoder) { await transcoder.release(); } } catch (error) {}
+      try { if (transcoder) { await transcoder.release(); } }
+      catch (error) { logRecoverableError('could not release video transcoder', error); }
       if (succeeded && output) {
         try { fs.fsyncSync(output.fd); } catch (error) { succeeded = false; }
       }
-      try { if (input) { fs.closeSync(input); } } catch (error) {}
-      try { if (output) { fs.closeSync(output); } } catch (error) {}
+      try { if (input) { fs.closeSync(input); } }
+      catch (error) { logRecoverableError('could not close source video', error); }
+      try { if (output) { fs.closeSync(output); } }
+      catch (error) { logRecoverableError('could not close compressed video', error); }
     }
     return succeeded;
       } catch (error) {
@@ -169,8 +173,10 @@ class MediaCompressionService {
     } catch (error) {
       return { width: 0, height: 0 };
     } finally {
-      try { if (extractor) { await extractor.release(); } } catch (error) {}
-      try { if (file) { fs.closeSync(file); } } catch (error) {}
+      try { if (extractor) { await extractor.release(); } }
+      catch (error) { logRecoverableError('could not release video metadata extractor', error); }
+      try { if (file) { fs.closeSync(file); } }
+      catch (error) { logRecoverableError('could not close video metadata file', error); }
     }
       } catch (error) {
       throw normalizeError(error);
@@ -199,9 +205,12 @@ class MediaCompressionService {
     } catch (error) {
       return false;
     } finally {
-      try { if (frame) { await frame.release(); } } catch (error) {}
-      try { if (generator) { await generator.release(); } } catch (error) {}
-      try { if (file) { fs.closeSync(file); } } catch (error) {}
+      try { if (frame) { await frame.release(); } }
+      catch (error) { logRecoverableError('could not release video thumbnail frame', error); }
+      try { if (generator) { await generator.release(); } }
+      catch (error) { logRecoverableError('could not release video thumbnail generator', error); }
+      try { if (file) { fs.closeSync(file); } }
+      catch (error) { logRecoverableError('could not close video thumbnail file', error); }
     }
       } catch (error) {
       throw normalizeError(error);

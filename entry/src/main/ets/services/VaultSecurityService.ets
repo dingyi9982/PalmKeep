@@ -3,7 +3,7 @@ import cryptoFramework from '@ohos.security.cryptoFramework';
 import huks from '@ohos.security.huks';
 import userAuth from '@ohos.userIAM.userAuth';
 import util from '@ohos.util';
-import { normalizeError } from './ErrorUtils';
+import { logRecoverableError, normalizeError } from './ErrorUtils';
 import common from '@ohos.app.ability.common';
 import { BusinessError } from '@ohos.base';
 
@@ -560,7 +560,8 @@ export class VaultSecurityService {
         if (settled) { return; }
         settled = true;
         instance.off('result', callback);
-        try { instance.cancel(); } catch (_) { }
+        try { instance.cancel(); }
+        catch (cancelError) { logRecoverableError('timed-out authentication cancellation failed', cancelError); }
         challenge.fill(0);
         reject(new Error('系统认证暂时无响应，请改用密码或稍后重试'));
       }, 12000);

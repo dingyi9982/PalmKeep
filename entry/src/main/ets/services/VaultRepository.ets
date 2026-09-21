@@ -2,8 +2,9 @@ import relationalStore from '@ohos.data.relationalStore';
 import common from '@ohos.app.ability.common';
 import fs from '@ohos.file.fs';
 import cryptoFramework from '@ohos.security.cryptoFramework';
-import { normalizeError } from './ErrorUtils';
+import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { migrateVaultDatabase } from './VaultDatabaseMigrations';
+import { MAX_FILE_ATTACHMENT_BYTES } from './VaultLimits';
 import {
   createVaultId,
   VaultAttachmentInput,
@@ -23,8 +24,7 @@ import {
   BackupItemTombstoneRecord,
   BackupRestorePreview,
   BackupRestoreResult,
-  VaultBackupDataset,
-  VaultRestoreMode
+  VaultBackupDataset
 } from '../models/VaultBackupModels';
 
 // Keep this file name stable. Future database changes must use schema migrations.
@@ -79,7 +79,8 @@ class VaultRepositoryImpl {
       const failedStore = this.store;
       this.store = undefined;
       if (failedStore) {
-        try { await failedStore.close(); } catch (_) {}
+        try { await failedStore.close(); }
+        catch (closeError) { logRecoverableError('could not close failed database connection', closeError); }
       }
       this.attachmentRoot = '';
       if (error instanceof Error) { throw error; }
@@ -795,12 +796,12 @@ class VaultRepositoryImpl {
     return this.storedAttachmentPath(storageName);
   }
 
-  async previewBackupRestore(dataset: VaultBackupDataset, mode: VaultRestoreMode): Promise<BackupRestorePreview> {
+  async previewBackupRestore(dataset: VaultBackupDataset): Promise<BackupRestorePreview> {
     const comparison = await this.buildBackupComparisonContext(dataset);
-    return this.backupRestorePreview(dataset, mode, comparison);
+    return this.backupRestorePreview(dataset, comparison);
   }
 
-  private backupRestorePreview(dataset: VaultBackupDataset, mode: VaultRestoreMode,
+  private backupRestorePreview(dataset: VaultBackupDataset,
     comparison: BackupComparisonContext): BackupRestorePreview {
     const currentItems = comparison.currentItems;
     let addedCount = 0;
@@ -813,9 +814,7 @@ class VaultRepositoryImpl {
     for (let index = 0; index < dataset.items.length; index += 1) {
       const incoming = dataset.items[index];
       const current = currentItems.get(incoming.id);
-      const decision = mode === VaultRestoreMode.Replace ?
-        (current ? BackupMergeDecision.Update : BackupMergeDecision.Add) :
-        this.backupMergeDecision(current, incoming, comparison);
+      const decision = this.backupMergeDecision(current, incoming, comparison);
       if (decision === BackupMergeDecision.Add) { addedCount += 1; }
       else if (decision === BackupMergeDecision.Update || decision === BackupMergeDecision.RestoreBesideTrash) {
         updatedCount += 1;
@@ -824,17 +823,18 @@ class VaultRepositoryImpl {
       else if (decision === BackupMergeDecision.Conflict) { conflictCount += 1; }
       else { unchangedCount += 1; }
     }
-    if (mode === VaultRestoreMode.Merge) {
-      currentItems.forEach((_: BackupItemRecord, id: string): void => {
-        if (!dataset.items.some((item: BackupItemRecord): boolean => item.id === id)) { retainedCount += 1; }
-      });
-      for (let index = 0; index < dataset.itemTombstones.length; index += 1) {
-        const tombstone = dataset.itemTombstones[index];
-        const current = currentItems.get(tombstone.itemId);
-        if (current && tombstone.deletedAt >= current.updatedAt) {
-          deletedCount += 1;
-          if (!dataset.items.some((item: BackupItemRecord): boolean => item.id === tombstone.itemId) &&
-            retainedCount > 0) { retainedCount -= 1; }
+    const incomingItemIds = new Set<string>();
+    dataset.items.forEach((item: BackupItemRecord): void => { incomingItemIds.add(item.id); });
+    currentItems.forEach((item: BackupItemRecord, id: string): void => {
+      if (item.deletedAt === 0 && !incomingItemIds.has(id)) { retainedCount += 1; }
+    });
+    for (let index = 0; index < dataset.itemTombstones.length; index += 1) {
+      const tombstone = dataset.itemTombstones[index];
+      const current = currentItems.get(tombstone.itemId);
+      if (current && tombstone.deletedAt >= current.updatedAt) {
+        deletedCount += 1;
+        if (!incomingItemIds.has(tombstone.itemId) && retainedCount > 0) {
+          retainedCount -= 1;
         }
       }
     }
@@ -848,20 +848,17 @@ class VaultRepositoryImpl {
       deletedCount: deletedCount };
   }
 
-  async applyBackupDataset(dataset: VaultBackupDataset, extractedRoot: string,
-    mode: VaultRestoreMode): Promise<BackupRestoreResult> {
+  async applyBackupDataset(dataset: VaultBackupDataset, extractedRoot: string): Promise<BackupRestoreResult> {
     try {
       const store = this.requireStore();
       const comparison = await this.buildBackupComparisonContext(dataset);
-      const preview = this.backupRestorePreview(dataset, mode, comparison);
+      const preview = this.backupRestorePreview(dataset, comparison);
       const currentItems = comparison.currentItems;
       const decisions = new Map<string, BackupMergeDecision>();
       const restoredTargets = new Map<string, string>();
       dataset.items.forEach((incoming: BackupItemRecord): void => {
         const current = currentItems.get(incoming.id);
-        const decision = mode === VaultRestoreMode.Replace ?
-          (current ? BackupMergeDecision.Update : BackupMergeDecision.Add) :
-          this.backupMergeDecision(current, incoming, comparison);
+        const decision = this.backupMergeDecision(current, incoming, comparison);
         decisions.set(incoming.id, decision);
         if (decision === BackupMergeDecision.Add || decision === BackupMergeDecision.Update) {
           restoredTargets.set(incoming.id, incoming.id);
@@ -875,7 +872,7 @@ class VaultRepositoryImpl {
       });
 
       const copiedNames: string[] = [];
-      const importedAttachments: BackupAttachmentRecord[] = [];
+      const importedAttachmentsByItem = new Map<string, BackupAttachmentRecord[]>();
       try {
         for (let index = 0; index < dataset.attachments.length; index += 1) {
           const attachment = dataset.attachments[index];
@@ -887,9 +884,14 @@ class VaultRepositoryImpl {
           const newStorageName = `restore-${createVaultId()}-${index}`;
           await this.copyFilePath(sourcePath, this.storedAttachmentPath(newStorageName));
           copiedNames.push(newStorageName);
-          importedAttachments.push({ itemId: targetItemId, attachmentIndex: attachment.attachmentIndex,
+          const importedAttachment: BackupAttachmentRecord = {
+            itemId: targetItemId, attachmentIndex: attachment.attachmentIndex,
             type: attachment.type, name: attachment.name, ocrText: attachment.ocrText,
-            storageName: newStorageName, sizeBytes: attachment.sizeBytes, sha256: attachment.sha256 });
+            storageName: newStorageName, sizeBytes: attachment.sizeBytes, sha256: attachment.sha256
+          };
+          const itemAttachments = importedAttachmentsByItem.get(targetItemId) ?? [];
+          itemAttachments.push(importedAttachment);
+          importedAttachmentsByItem.set(targetItemId, itemAttachments);
         }
       } catch (error) {
         this.deleteStoredAttachments(copiedNames);
@@ -899,24 +901,13 @@ class VaultRepositoryImpl {
       const oldStorageNames: string[] = [];
       store.beginTransaction();
       try {
-        if (mode === VaultRestoreMode.Replace) {
-          const oldResult = await store.querySql('SELECT storage_name FROM vault_item_attachments');
-          try { while (oldResult.goToNextRow()) { oldStorageNames.push(oldResult.getString(0)); } }
-          finally { oldResult.close(); }
-          await store.executeSql('DELETE FROM vault_item_attachments');
-          await store.executeSql('DELETE FROM vault_items');
-          await store.executeSql('DELETE FROM vault_groups');
-          await store.executeSql('DELETE FROM vault_group_tombstones');
-          await store.executeSql('DELETE FROM vault_item_tombstones');
-        }
-        const groupMap = await this.mergeBackupGroups(store, dataset, mode);
+        const groupMap = await this.mergeBackupGroups(store, dataset);
         for (let index = 0; index < dataset.items.length; index += 1) {
           const item = dataset.items[index];
           const targetItemId = restoredTargets.get(item.id);
           if (targetItemId === undefined) { continue; }
           const decision = decisions.get(item.id);
-          if (mode === VaultRestoreMode.Merge && decision === BackupMergeDecision.Update &&
-            currentItems.has(item.id)) {
+          if (decision === BackupMergeDecision.Update && currentItems.has(item.id)) {
             const oldResult = await store.querySql(
               'SELECT storage_name FROM vault_item_attachments WHERE item_id = ?', [item.id]);
             try { while (oldResult.goToNextRow()) { oldStorageNames.push(oldResult.getString(0)); } }
@@ -934,8 +925,7 @@ class VaultRepositoryImpl {
             group_id: mappedGroupId,
             title: restoredTitle, username: item.username, password: item.password, notes: item.notes,
             ocr_text: item.ocrText, created_at: item.createdAt, updated_at: item.updatedAt, deleted_at: item.deletedAt });
-          const itemAttachments = importedAttachments.filter(
-            (attachment: BackupAttachmentRecord): boolean => attachment.itemId === targetItemId);
+          const itemAttachments = importedAttachmentsByItem.get(targetItemId) ?? [];
           for (let attachmentIndex = 0; attachmentIndex < itemAttachments.length; attachmentIndex += 1) {
             const attachment = itemAttachments[attachmentIndex];
             await store.insert('vault_item_attachments', { item_id: targetItemId,
@@ -1071,7 +1061,7 @@ class VaultRepositoryImpl {
     const stored: StoredAttachment[] = [];
     try {
       for (let index = 0; index < attachments.length; index += 1) {
-        stored.push(await this.storeAttachment(attachments[index].uri));
+        stored.push(await this.storeAttachment(attachments[index]));
         if (onProgress) { onProgress(index + 1, attachments.length); }
       }
       return stored;
@@ -1081,16 +1071,19 @@ class VaultRepositoryImpl {
     }
   }
 
-  private async storeAttachment(uri: string): Promise<StoredAttachment> {
+  private async storeAttachment(attachment: VaultAttachmentInput): Promise<StoredAttachment> {
     const storageName = createVaultId();
     const targetPath = this.storedAttachmentPath(storageName);
     let source: fs.File | undefined = undefined;
     let target: fs.File | undefined = undefined;
     let completed = false;
     try {
-      source = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+      source = fs.openSync(attachment.uri, fs.OpenMode.READ_ONLY);
       const size = fs.statSync(source.fd).size;
       if (size <= 0) { throw new Error('所选附件为空'); }
+      if (attachment.type === VaultItemType.File && size > MAX_FILE_ATTACHMENT_BYTES) {
+        throw new Error(`文件“${attachment.name}”超过 10 MB，请选择较小的文件`);
+      }
       target = fs.openSync(targetPath, fs.OpenMode.WRITE_ONLY | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
       await fs.copyFile(source.fd, target.fd);
       fs.fsyncSync(target.fd);
@@ -1102,7 +1095,10 @@ class VaultRepositoryImpl {
     } finally {
       this.closeFile(target);
       this.closeFile(source);
-      if (!completed) { try { fs.unlinkSync(targetPath); } catch (_) {} }
+      if (!completed) {
+        try { fs.unlinkSync(targetPath); }
+        catch (cleanupError) { logRecoverableError('could not remove incomplete attachment', cleanupError); }
+      }
     }
   }
 
@@ -1143,7 +1139,9 @@ class VaultRepositoryImpl {
       const stat = fs.statSync(this.attachmentRoot);
       pathExists = true;
       if (stat.isDirectory()) { return; }
-    } catch (_) {}
+    } catch (error) {
+      logRecoverableError('attachment directory does not exist yet', error);
+    }
     if (pathExists) { throw new Error('附件存储路径不是目录'); }
     try {
       fs.mkdirSync(this.attachmentRoot, true);
@@ -1151,20 +1149,24 @@ class VaultRepositoryImpl {
       // Another initialization may have created the directory between stat and mkdir.
       try {
         if (fs.statSync(this.attachmentRoot).isDirectory()) { return; }
-      } catch (_) {}
+      } catch (validationError) {
+        logRecoverableError('could not validate attachment directory after creation failure', validationError);
+      }
       throw normalizeError(error);
     }
   }
 
   private deleteStoredAttachments(storageNames: string[]): void {
     storageNames.forEach((storageName: string): void => {
-      try { fs.unlinkSync(this.storedAttachmentPath(storageName)); } catch (_) {}
+      try { fs.unlinkSync(this.storedAttachmentPath(storageName)); }
+      catch (error) { logRecoverableError(`could not delete attachment ${storageName}`, error); }
     });
   }
 
   private closeFile(file?: fs.File): void {
     if (!file) { return; }
-    try { fs.closeSync(file); } catch (_) {}
+    try { fs.closeSync(file); }
+    catch (error) { logRecoverableError('could not close attachment file', error); }
   }
 
   private deleteAttachmentDirectory(): void {
@@ -1173,7 +1175,9 @@ class VaultRepositoryImpl {
       const names = fs.listFileSync(this.attachmentRoot);
       this.deleteStoredAttachments(names);
       fs.rmdirSync(this.attachmentRoot);
-    } catch (_) {}
+    } catch (error) {
+      logRecoverableError('could not delete attachment directory', error);
+    }
     this.attachmentRoot = '';
   }
 
@@ -1185,7 +1189,8 @@ class VaultRepositoryImpl {
     const names = fs.listFileSync(this.attachmentRoot);
     names.forEach((name: string): void => {
       if (!referenced.has(name)) {
-        try { fs.unlinkSync(this.storedAttachmentPath(name)); } catch (_) {}
+        try { fs.unlinkSync(this.storedAttachmentPath(name)); }
+        catch (error) { logRecoverableError(`could not delete orphan attachment ${name}`, error); }
       }
     });
     } catch (error) {
@@ -1449,8 +1454,8 @@ class VaultRepositoryImpl {
     }
   }
 
-  private async mergeBackupGroups(store: relationalStore.RdbStore, dataset: VaultBackupDataset,
-    mode: VaultRestoreMode): Promise<Map<number, number>> {
+  private async mergeBackupGroups(store: relationalStore.RdbStore,
+    dataset: VaultBackupDataset): Promise<Map<number, number>> {
     try {
     const mapping = new Map<number, number>();
     const names = new Map<string, number>();
@@ -1468,7 +1473,7 @@ class VaultRepositoryImpl {
       const group = dataset.groups[index];
       let targetId = names.get(group.name);
       if (!targetId) {
-        targetId = mode === VaultRestoreMode.Replace ? group.id : nextGroupId++;
+        targetId = nextGroupId++;
         await store.executeSql(
           'INSERT INTO vault_groups (id, name, color, created_at, sort_order) VALUES (?, ?, ?, ?, ?)',
           [targetId, group.name, group.color, group.createdAt, group.sortOrder]);
@@ -1484,7 +1489,7 @@ class VaultRepositoryImpl {
           [tombstone.name]);
         try { if (existing.goToFirstRow()) { targetId = existing.getLong(0); } } finally { existing.close(); }
       }
-      if (!targetId) { targetId = mode === VaultRestoreMode.Replace ? tombstone.groupId : nextGroupId++; }
+      if (!targetId) { targetId = nextGroupId++; }
       mapping.set(tombstone.groupId, targetId);
       if (!names.has(tombstone.name)) {
         await store.executeSql(

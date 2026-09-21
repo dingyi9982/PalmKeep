@@ -4,7 +4,7 @@ import util from '@ohos.util';
 import media from '@ohos.multimedia.media';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { vaultRepository } from '../services/VaultRepository';
-import { normalizeError } from '../services/ErrorUtils';
+import { logRecoverableError, normalizeError } from '../services/ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
 import { VaultThumbnail } from './VaultThumbnail';
 import {
@@ -60,7 +60,8 @@ export struct VaultMedia {
     try { if (player) { await player.release(); } } finally {
       if (this.file) { fs.closeSync(this.file); this.file = undefined; }
       if (this.videoPath.length > 0) {
-        try { fs.unlinkSync(this.videoPath); } catch (error) {}
+        try { fs.unlinkSync(this.videoPath); }
+        catch (error) { logRecoverableError('could not remove media playback file', error); }
         this.videoPath = '';
       }
     }
@@ -148,7 +149,8 @@ export struct VaultMedia {
     this.ready = false;
     this.playing = false;
     this.starting = false;
-    try { await failedPlayer.release(); } catch (error) {}
+    try { await failedPlayer.release(); }
+    catch (error) { logRecoverableError('could not release failed media player', error); }
     if (this.disposed) { return; }
     if (this.retryCount < 1) {
       this.retryCount += 1;
@@ -242,7 +244,8 @@ export struct VaultMedia {
       if (!this.disposed) { this.message = '媒体打开失败，请确认文件格式完整且受支持'; }
       if (this.file) { fs.closeSync(this.file); this.file = undefined; }
       if (this.videoPath.length > 0) {
-        try { fs.unlinkSync(this.videoPath); } catch (error) {}
+        try { fs.unlinkSync(this.videoPath); }
+        catch (error) { logRecoverableError('could not remove media playback file', error); }
         this.videoPath = '';
       }
     } finally { data.fill(0); }

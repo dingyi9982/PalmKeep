@@ -31,7 +31,7 @@ import {
   TITLE_ITEM_DETAILS
 } from '../components/VaultCopy';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
-import { normalizeError } from '../services/ErrorUtils';
+import { logRecoverableError, normalizeError } from '../services/ErrorUtils';
 import { QuickUnlockStatus, VaultSecurityService } from '../services/VaultSecurityService';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { mediaCompressionService } from '../services/MediaCompressionService';
@@ -50,7 +50,7 @@ import {
   VaultTrashEntry,
   VaultItemType
 } from '../models/VaultModels';
-import { BackupProgress, BackupRestoreResult, VaultRestoreMode } from '../models/VaultBackupModels';
+import { BackupProgress, BackupRestoreResult } from '../models/VaultBackupModels';
 
 @Entry
 @Component
@@ -192,6 +192,22 @@ struct Index {
   private selectedBackupUri: string = '';
   private preparedBackup?: PreparedVaultBackup = undefined;
   private restoringFreshInstall: boolean = false;
+  private securityService?: VaultSecurityService = undefined;
+  private backupService?: VaultBackupService = undefined;
+
+  private getSecurityService(): VaultSecurityService {
+    if (!this.securityService) {
+      this.securityService = new VaultSecurityService(AbilityContextHolder.getContext());
+    }
+    return this.securityService;
+  }
+
+  private getBackupService(): VaultBackupService {
+    if (!this.backupService) {
+      this.backupService = new VaultBackupService(AbilityContextHolder.getContext());
+    }
+    return this.backupService;
+  }
 
   aboutToAppear(): void {
     this.initialize();
@@ -236,7 +252,7 @@ struct Index {
   private async initialize(): Promise<void> {
     try {
     try {
-      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const security = this.getSecurityService();
       const initialized = await security.isInitialized();
       if (initialized) {
         await this.refreshQuickUnlockStatus();
@@ -280,7 +296,7 @@ struct Index {
     }
     this.busy = true;
     try {
-      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const security = this.getSecurityService();
       const key = await security.createMasterPassword(this.masterPassword);
       await this.openWithKey(key);
       this.masterPassword = '';
@@ -308,7 +324,7 @@ struct Index {
   private async openRestoreBackup(freshInstall: boolean = false): Promise<void> {
     this.lifecycleLockSuppressed = true;
     try {
-      const service = new VaultBackupService(AbilityContextHolder.getContext());
+      const service = this.getBackupService();
       const uri = await service.chooseBackupFile();
       if (!uri) { return; }
       this.resetBackupDialog();
@@ -318,7 +334,8 @@ struct Index {
       this.backupStage = 'password';
       this.showBackupDialog = true;
     } catch (error) {
-      try { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); } catch (_) {}
+      try { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
+      catch (toastError) { logRecoverableError('could not show backup file selection error', toastError); }
     } finally {
       this.lifecycleLockSuppressed = false;
     }
@@ -326,7 +343,7 @@ struct Index {
 
   private resetBackupDialog(): void {
     if (this.preparedBackup) {
-      new VaultBackupService(AbilityContextHolder.getContext()).disposePreparedBackup(this.preparedBackup);
+      this.getBackupService().disposePreparedBackup(this.preparedBackup);
     }
     this.preparedBackup = undefined;
     this.selectedBackupUri = '';
@@ -352,7 +369,7 @@ struct Index {
   private closeBackupDialog(): void {
     if (this.backupBusy) { return; }
     if (this.preparedBackup) {
-      new VaultBackupService(AbilityContextHolder.getContext()).disposePreparedBackup(this.preparedBackup);
+      this.getBackupService().disposePreparedBackup(this.preparedBackup);
     }
     this.preparedBackup = undefined;
     this.backupPassword = '';
@@ -383,9 +400,9 @@ struct Index {
     this.backupStage = 'running';
     this.lifecycleLockSuppressed = true;
     try {
-      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const security = this.getSecurityService();
       if (!await security.verifyPassword(this.backupPassword)) { throw new Error('密码不正确'); }
-      const service = new VaultBackupService(AbilityContextHolder.getContext());
+      const service = this.getBackupService();
       const saved = await service.createBackup(this.backupPassword, `${VERSION_NAME} (${VERSION_CODE})`,
         (progress: BackupProgress): void => { this.updateBackupProgress(progress); });
       this.backupBusy = false;
@@ -409,9 +426,8 @@ struct Index {
     this.backupBusy = true;
     this.backupStage = 'running';
     try {
-      const service = new VaultBackupService(AbilityContextHolder.getContext());
+      const service = this.getBackupService();
       const prepared = await service.inspectBackup(this.selectedBackupUri, this.backupPassword,
-        VaultRestoreMode.Merge,
         (progress: BackupProgress): void => { this.updateBackupProgress(progress); }, this.restoringFreshInstall);
       this.preparedBackup = prepared;
       this.applyBackupPreview(prepared);
@@ -447,14 +463,13 @@ struct Index {
     let securityCreated = false;
     try {
       if (this.restoringFreshInstall) {
-        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const security = this.getSecurityService();
         const key = await security.createMasterPassword(this.backupPassword);
         securityCreated = true;
         await this.openWithKey(key);
       }
-      const service = new VaultBackupService(AbilityContextHolder.getContext());
+      const service = this.getBackupService();
       const result = await service.applyPreparedBackup(prepared,
-        VaultRestoreMode.Merge,
         (progress: BackupProgress): void => { this.updateBackupProgress(progress); });
       this.preparedBackup = undefined;
       await this.refreshData(true);
@@ -472,10 +487,12 @@ struct Index {
       if (securityCreated) {
         try {
           await vaultRepository.destroy(AbilityContextHolder.getContext());
-          await new VaultSecurityService(AbilityContextHolder.getContext()).resetSecurity();
+          await this.getSecurityService().resetSecurity();
           this.sessionKey.fill(0);
           this.sessionKey = new Uint8Array(0);
-        } catch (_) {}
+        } catch (cleanupError) {
+          logRecoverableError('could not roll back security created for failed first restore', cleanupError);
+        }
       }
       this.backupBusy = false;
       this.backupStage = 'password';
@@ -518,7 +535,7 @@ struct Index {
     }
     this.busy = true;
     try {
-      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const security = this.getSecurityService();
       const key = await security.unlock(this.masterPassword);
       if (!key) {
         this.errorMessage = '密码不正确';
@@ -785,7 +802,7 @@ struct Index {
 
   private async refreshQuickUnlockStatus(): Promise<void> {
     try {
-    const security = new VaultSecurityService(AbilityContextHolder.getContext());
+    const security = this.getSecurityService();
     const status: QuickUnlockStatus = await security.getQuickUnlockStatus();
     this.gestureEnabled = status.gestureEnabled;
     this.fingerprintEnabled = status.fingerprintEnabled;
@@ -858,7 +875,7 @@ struct Index {
       return;
     }
     try {
-      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const security = this.getSecurityService();
       const previousPreferred = this.preferredUnlock;
       await security.enableGesture(pattern, this.sessionKey);
       await this.refreshQuickUnlockStatus();
@@ -883,7 +900,7 @@ struct Index {
     this.busy = true;
     this.errorMessage = '';
     try {
-      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const security = this.getSecurityService();
       const key = await security.unlockWithGesture(pattern);
       if (!key) {
         this.gestureFailures += 1;
@@ -916,7 +933,7 @@ struct Index {
     this.busy = true;
     this.errorMessage = '';
     try {
-      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const security = this.getSecurityService();
       const key = await security.unlockWithFingerprint();
       await this.openWithKey(key);
       await this.refreshData();
@@ -936,7 +953,7 @@ struct Index {
       this.busy = true;
       this.errorMessage = '';
       try {
-        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const security = this.getSecurityService();
         const key = await security.unlockWithFace();
         await this.openWithKey(key);
         await this.refreshData();
@@ -954,7 +971,7 @@ struct Index {
   private async toggleFingerprint(): Promise<void> {
     try {
     try {
-      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const security = this.getSecurityService();
       if (this.fingerprintEnabled) {
         const previousPreferred = this.preferredUnlock;
         await security.disableFingerprint();
@@ -982,7 +999,7 @@ struct Index {
   private async toggleFace(): Promise<void> {
     try {
       try {
-        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const security = this.getSecurityService();
         if (this.faceEnabled) {
           const previousPreferred = this.preferredUnlock;
           await security.disableFace();
@@ -1044,7 +1061,7 @@ struct Index {
       if (selectedIndex < 0 || selectedIndex >= values.length) { return; }
       try {
         const mode = values[selectedIndex];
-        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const security = this.getSecurityService();
         await security.setPreferredUnlockMode(mode);
         this.preferredUnlock = mode;
         this.getUIContext().getPromptAction().showToast({ message: `已将${this.unlockModeLabel(mode)}设为首选` });
@@ -1080,7 +1097,7 @@ struct Index {
       if (selectedIndex < 0 || selectedIndex >= values.length) { return; }
       try {
         const minutes = values[selectedIndex];
-        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const security = this.getSecurityService();
         await security.setAutoLockMinutes(minutes);
         this.autoLockMinutes = minutes;
         this.getUIContext().getPromptAction().showToast({ message: `自动锁定已设为${labels[selectedIndex]}` });
@@ -1123,7 +1140,7 @@ struct Index {
     }
     this.passwordChangeBusy = true;
     try {
-      const security = new VaultSecurityService(AbilityContextHolder.getContext());
+      const security = this.getSecurityService();
       const key = await security.changePassword(this.currentPassword, this.changedPassword);
       this.sessionKey.fill(0);
       this.sessionKey = key.slice();
@@ -1171,7 +1188,7 @@ struct Index {
     try {
       this.recoveryBusy = true;
       try {
-        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const security = this.getSecurityService();
         const key = mode === 'face' ? await security.unlockWithFace() : await security.unlockWithFingerprint();
         this.recoveryDatabaseKey.fill(0);
         this.recoveryDatabaseKey = key.slice();
@@ -1204,7 +1221,7 @@ struct Index {
       }
       this.recoveryBusy = true;
       try {
-        const security = new VaultSecurityService(AbilityContextHolder.getContext());
+        const security = this.getSecurityService();
         const key = await security.resetPasswordWithAuthenticatedKey(
           this.recoveryDatabaseKey, this.recoveryNewPassword);
         this.recoveryDatabaseKey = new Uint8Array(0);
@@ -1241,7 +1258,7 @@ struct Index {
       const context = AbilityContextHolder.getContext();
       await AbilityContextHolder.setPrivacyMode(false);
       await vaultRepository.destroy(context);
-      const security = new VaultSecurityService(context);
+      const security = this.getSecurityService();
       await security.resetSecurity();
       this.autoLockMinutes = 10;
       this.preferredUnlock = 'password';
@@ -1266,7 +1283,7 @@ struct Index {
 
   private async disableGesture(): Promise<void> {
     try {
-    const security = new VaultSecurityService(AbilityContextHolder.getContext());
+    const security = this.getSecurityService();
     const previousPreferred = this.preferredUnlock;
     await security.disableGesture();
     await this.refreshQuickUnlockStatus();

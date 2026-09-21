@@ -1,5 +1,5 @@
 import relationalStore from '@ohos.data.relationalStore';
-import { normalizeError } from './ErrorUtils';
+import { logRecoverableError, normalizeError } from './ErrorUtils';
 
 const DATABASE_SCHEMA_VERSION: number = 1;
 
@@ -91,7 +91,8 @@ export async function migrateVaultDatabase(store: relationalStore.RdbStore): Pro
     store.version = DATABASE_SCHEMA_VERSION;
   } catch (error) {
     if (transactionStarted) {
-      try { store.rollBack(); } catch (_) {}
+      try { store.rollBack(); }
+      catch (rollbackError) { logRecoverableError('database migration rollback failed', rollbackError); }
     }
     const failedVersion = Math.min(migratingVersion, DATABASE_SCHEMA_VERSION);
     throw new Error(`数据库升级到 v${failedVersion} 失败：${normalizeError(error).message}`);

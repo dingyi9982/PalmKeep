@@ -9,3 +9,7 @@ export function normalizeError(error: Object): Error {
   const text = `${error}`;
   return new Error(text.length > 0 && text !== '[object Object]' ? text : '操作失败');
 }
+
+export function logRecoverableError(operation: string, error: Object): void {
+  console.warn(`PalmVault ${operation}: ${normalizeError(error).message}`);
+}

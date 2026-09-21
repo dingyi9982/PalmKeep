@@ -4,7 +4,7 @@ import picker from '@ohos.file.picker';
 import zlib from '@ohos.zlib';
 import cryptoFramework from '@ohos.security.cryptoFramework';
 import util from '@ohos.util';
-import { normalizeError } from './ErrorUtils';
+import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { vaultRepository } from './VaultRepository';
 import {
   BACKUP_FORMAT_VERSION,
@@ -18,8 +18,7 @@ import {
   BackupRestorePreview,
   BackupRestoreResult,
   BackupSummary,
-  VaultBackupDataset,
-  VaultRestoreMode
+  VaultBackupDataset
 } from '../models/VaultBackupModels';
 
 const HEADER_SIZE: number = 64;
@@ -128,7 +127,8 @@ export class VaultBackupService {
       if (await this.sha256(zipPath) !== await this.sha256(verificationZipPath)) {
         throw new Error('加密备份自检失败，未生成可供恢复的文件');
       }
-      try { fs.unlinkSync(verificationZipPath); } catch (_) {}
+      try { fs.unlinkSync(verificationZipPath); }
+      catch (error) { logRecoverableError('could not remove backup verification file', error); }
 
       const saveOptions = new picker.DocumentSaveOptions();
       saveOptions.newFileNames = [this.backupFileName()];
@@ -158,7 +158,7 @@ export class VaultBackupService {
     }
   }
 
-  async inspectBackup(uri: string, password: string, mode: VaultRestoreMode,
+  async inspectBackup(uri: string, password: string,
     onProgress?: (progress: BackupProgress) => void, freshInstall: boolean = false): Promise<PreparedVaultBackup> {
     const workspace = this.createWorkspace();
     const encryptedPath = `${workspace}/selected.palmvault`;
@@ -219,7 +219,7 @@ export class VaultBackupService {
       };
       stage = '生成恢复预览';
       const preview = freshInstall ? this.freshPreview(restoreDataset, restoreManifest) :
-        await vaultRepository.previewBackupRestore(restoreDataset, mode);
+        await vaultRepository.previewBackupRestore(restoreDataset);
       preview.createdAt = restoreManifest.createdAt;
       return { workspacePath: workspace, extractedPath: extractedPath,
         manifest: restoreManifest, dataset: restoreDataset, preview: preview };
@@ -231,11 +231,11 @@ export class VaultBackupService {
     }
   }
 
-  async applyPreparedBackup(prepared: PreparedVaultBackup, mode: VaultRestoreMode,
+  async applyPreparedBackup(prepared: PreparedVaultBackup,
     onProgress?: (progress: BackupProgress) => void): Promise<BackupRestoreResult> {
     try {
-      this.progress(onProgress, mode === VaultRestoreMode.Merge ? '合并资料' : '替换资料', 0, 1);
-      const result = await vaultRepository.applyBackupDataset(prepared.dataset, prepared.extractedPath, mode);
+      this.progress(onProgress, '合并资料', 0, 1);
+      const result = await vaultRepository.applyBackupDataset(prepared.dataset, prepared.extractedPath);
       this.progress(onProgress, '恢复完成', 1, 1);
       return result;
     } finally {
@@ -653,10 +653,14 @@ export class VaultBackupService {
         try {
           if (fs.statSync(child).isDirectory()) { this.removeDirectory(child); }
           else { fs.unlinkSync(child); }
-        } catch (_) {}
+        } catch (error) {
+          logRecoverableError(`could not remove temporary backup entry ${child}`, error);
+        }
       });
       fs.rmdirSync(path);
-    } catch (_) {}
+    } catch (error) {
+      logRecoverableError(`could not remove temporary backup directory ${path}`, error);
+    }
   }
 
   private hex(data: Uint8Array): string {

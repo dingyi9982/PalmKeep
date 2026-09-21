@@ -4,7 +4,7 @@ import { VaultMedia } from './VaultMedia';
 import { VaultThumbnail } from './VaultThumbnail';
 import { VaultAttachmentInput, VaultAttachmentSummary, VaultItemType } from '../models/VaultModels';
 import { vaultRepository } from '../services/VaultRepository';
-import { normalizeError } from '../services/ErrorUtils';
+import { logRecoverableError, normalizeError } from '../services/ErrorUtils';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
@@ -144,7 +144,10 @@ export struct VaultAttachmentGallery {
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: error instanceof Error ? error.message : '保存到相册失败' });
     } finally {
-      paths.forEach((path: string): void => { try { fs.unlinkSync(path); } catch (error) {} });
+      paths.forEach((path: string): void => {
+        try { fs.unlinkSync(path); }
+        catch (error) { logRecoverableError(`could not remove gallery temporary file ${path}`, error); }
+      });
       this.busy = false;
       this.progress = 0;
       this.progressText = '';

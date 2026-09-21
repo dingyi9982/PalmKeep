@@ -4,8 +4,9 @@ import picker from '@ohos.file.picker';
 import image from '@ohos.multimedia.image';
 import fileUri from '@ohos.file.fileuri';
 import { AbilityContextHolder } from './AbilityContextHolder';
-import { normalizeError } from './ErrorUtils';
+import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
+import { MAX_FILE_ATTACHMENT_BYTES } from './VaultLimits';
 
 export interface PickedMedia {
   uri: string;
@@ -24,15 +25,21 @@ export class MediaPickerService {
     try {
       for (let index = 0; index < uris.length; index += 1) {
         const uri = uris[index];
+        const name = this.fileName(uri, VaultItemType.File);
+        if (this.fileSize(uri) > MAX_FILE_ATTACHMENT_BYTES) {
+          throw new Error(`文件“${name}”超过 10 MB，请选择较小的文件`);
+        }
         picked.push({
           uri: uri,
           type: VaultItemType.File,
-          name: this.fileName(uri, VaultItemType.File),
+          name: name,
           ocrText: ''
         });
       }
       return picked;
     } catch (error) {
+      const message = normalizeError(error).message;
+      if (message.indexOf('超过 10 MB') >= 0) { throw new Error(message); }
       throw new Error('文件导入失败，请确认所选文件完整且大小受支持');
     }
       } catch (error) {
@@ -129,11 +136,27 @@ export class MediaPickerService {
     const withoutQuery = uri.split('?')[0];
     const slash = Math.max(withoutQuery.lastIndexOf('/'), withoutQuery.lastIndexOf('\\'));
     let name = slash >= 0 ? withoutQuery.substring(slash + 1) : withoutQuery;
-    try { name = decodeURIComponent(name); } catch (_) {}
+    try { name = decodeURIComponent(name); }
+    catch (error) { logRecoverableError('could not decode selected file name', error); }
     if (name.length > 0 && name.indexOf('.') > 0) { return this.safeFileName(name); }
     if (type === VaultItemType.Image) { return '私密图片.jpg'; }
     if (type === VaultItemType.Video) { return '私密视频.mp4'; }
     return '私密文件';
+  }
+
+  private fileSize(uri: string): number {
+    let file: fs.File | undefined = undefined;
+    try {
+      file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+      return fs.statSync(file.fd).size;
+    } catch (error) {
+      throw normalizeError(error);
+    } finally {
+      if (file) {
+        try { fs.closeSync(file); }
+        catch (closeError) { logRecoverableError('could not close selected file after size check', closeError); }
+      }
+    }
   }
 
   private async detectMediaType(uri: string): Promise<VaultItemType> {
