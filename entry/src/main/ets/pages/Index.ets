@@ -38,6 +38,7 @@ import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
 import { vaultRepository } from '../services/VaultRepository';
 import { PreparedVaultBackup, VaultBackupService } from '../services/VaultBackupService';
+import { vaultUiPreferences } from '../services/VaultUiPreferences';
 import { BUILD_GIT_LABEL } from '../generated/BuildMetadata';
 import {
   itemTypeGlyph,
@@ -125,7 +126,7 @@ struct Index {
   @State private recoveryNewPassword: string = '';
   @State private recoveryPasswordConfirm: string = '';
   @State private recoveryBusy: boolean = false;
-  @State private newType: VaultItemType = VaultItemType.Login;
+  @State private newType: VaultItemType = VaultItemType.Note;
   @State private newTitle: string = '';
   @State private newUsername: string = '';
   @State private newPassword: string = '';
@@ -192,6 +193,7 @@ struct Index {
   private selectedBackupUri: string = '';
   private preparedBackup?: PreparedVaultBackup = undefined;
   private restoringFreshInstall: boolean = false;
+  private lastNewItemType: VaultItemType = VaultItemType.Note;
   private securityService?: VaultSecurityService = undefined;
   private backupService?: VaultBackupService = undefined;
 
@@ -252,6 +254,8 @@ struct Index {
   private async initialize(): Promise<void> {
     try {
     try {
+      this.lastNewItemType = await vaultUiPreferences.getLastNewItemType();
+      this.newType = this.lastNewItemType;
       const security = this.getSecurityService();
       const initialized = await security.isInitialized();
       if (initialized) {
@@ -688,8 +692,8 @@ struct Index {
     }, delay);
   }
 
-  private openNewItem(type: VaultItemType = VaultItemType.Login, groupId: number = 0): void {
-    this.newType = type;
+  private openNewItem(type?: VaultItemType, groupId: number = 0): void {
+    this.newType = type ?? this.lastNewItemType;
     this.revealNewPassword = false;
     if (groupId > 0) {
       this.newGroupId = groupId;
@@ -1260,6 +1264,9 @@ struct Index {
       await vaultRepository.destroy(context);
       const security = this.getSecurityService();
       await security.resetSecurity();
+      this.lastNewItemType = VaultItemType.Note;
+      this.newType = VaultItemType.Note;
+      await vaultUiPreferences.setLastNewItemType(VaultItemType.Note);
       this.autoLockMinutes = 10;
       this.preferredUnlock = 'password';
       this.sessionKey.fill(0);
@@ -1870,6 +1877,7 @@ struct Index {
           compressedPaths.forEach((path: string): void => { mediaCompressionService.removeTemporary(path); });
         }
         const importedCount = this.pendingMedia.length;
+        await this.rememberNewItemType(VaultItemType.Image);
         this.resetNewItem();
         this.closeNewItem();
         await this.refreshData();
@@ -1904,6 +1912,7 @@ struct Index {
           this.saveProgress = Math.round(completed / total * 100);
         });
         const importedCount = this.pendingFiles.length;
+        await this.rememberNewItemType(VaultItemType.File);
         this.resetNewItem();
         this.closeNewItem();
         await this.refreshData();
@@ -1919,6 +1928,7 @@ struct Index {
         notes: this.newNotes
       };
       await vaultRepository.createItem(input);
+      await this.rememberNewItemType(this.newType);
       this.resetNewItem();
       this.closeNewItem();
       await this.refreshData();
@@ -1998,7 +2008,7 @@ struct Index {
   }
 
   private resetNewItem(): void {
-    this.newType = VaultItemType.Login;
+    this.newType = this.lastNewItemType;
     this.newTitle = '';
     this.newUsername = '';
     this.newPassword = '';
@@ -2006,6 +2016,11 @@ struct Index {
     this.newNotes = '';
     this.clearPendingMedia();
     this.clearPendingFiles();
+  }
+
+  private async rememberNewItemType(type: VaultItemType): Promise<void> {
+    this.lastNewItemType = type;
+    await vaultUiPreferences.setLastNewItemType(type);
   }
 
   private clearPendingMedia(): void {
@@ -2124,7 +2139,7 @@ struct Index {
         .width(20).height(20)
         .alignSelf(ItemAlign.Center)
         if (this.searchActive) {
-          TextInput({ placeholder: '搜索名称、内容、图片文字…', text: this.searchText })
+          TextInput({ placeholder: '搜索名称/内容/文件名/图片文字…', text: this.searchText })
             .id('homeSearchInput')
             .layoutWeight(1)
             .height(44)
@@ -2138,7 +2153,7 @@ struct Index {
             .backgroundColor(Color.Transparent)
             .onChange((value: string): void => { this.applySearch(value); })
         } else {
-          Text(this.searchText.length > 0 ? this.searchText : '搜索名称、内容、图片文字…')
+          Text(this.searchText.length > 0 ? this.searchText : '搜索名称/内容/文件名/图片文字…')
             .layoutWeight(1)
             .fontSize(14)
             .fontWeight(FontWeight.Normal)
@@ -2304,13 +2319,26 @@ struct Index {
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
       }
-      VaultAttachmentPreview({
-        itemId: hit.item.id,
-        fallbackType: hit.item.type,
-        highlightAttachmentIndex: hit.attachmentIndex,
-        maxVisibleCount: 6
-      })
-      if (hit.matchedTextLine.length > 0) {
+      if (hit.item.type === VaultItemType.File) {
+        Row({ space: 6 }) {
+          Text('文件')
+            .fontSize(9).fontWeight(FontWeight.Medium).fontColor(COLOR_PRIMARY)
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(7)
+          Text(hit.matchedTextLine)
+            .fontSize(12).fontColor(COLOR_TEXT_SECONDARY).maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+        }
+        .width('100%')
+      } else {
+        VaultAttachmentPreview({
+          itemId: hit.item.id,
+          fallbackType: hit.item.type,
+          highlightAttachmentIndex: hit.attachmentIndex,
+          maxVisibleCount: 6
+        })
+      }
+      if (hit.item.type !== VaultItemType.File && hit.matchedTextLine.length > 0) {
         Text(hit.matchedTextLine)
           .fontSize(12).lineHeight(18).fontColor(COLOR_MUTED)
           .width('100%').textAlign(TextAlign.Start)
@@ -2582,7 +2610,7 @@ struct Index {
         if (this.searchText.length > 0) {
           Column({ space: 4 }) {
             if (this.searchHits.length === 0) {
-              this.emptyState('没有找到资料', '换个关键词搜索标题、内容或图片文字')
+              this.emptyState('没有找到资料', '换个关键词搜索标题、内容、附件文件名或图片文字')
             } else {
               ForEach(this.searchHits, (hit: VaultSearchHit): void => {
                 if (hit.attachmentIndex >= 0) {
@@ -2688,7 +2716,7 @@ struct Index {
           .opacity(this.draggingGroupId === group.id ? 0 : 1)
           .draggable(false)
           .onClick((): void => {
-            this.openNewItem(VaultItemType.Login, group.id);
+            this.openNewItem(undefined, group.id);
           })
       }
       .width('100%')
@@ -3420,10 +3448,22 @@ struct Index {
   private detailNotesEditor(type: VaultItemType): void {
     TextArea({ placeholder: type === VaultItemType.Note ? LABEL_CONTENT : LABEL_NOTES, text: this.detailNotes })
       .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
-      .height(type === VaultItemType.Login ? 42 :
-        (type === VaultItemType.Note || this.detailNotes.trim().length > 0 ? 84 : 44))
+      .height(this.detailNotesHeight(type))
       .borderRadius(11)
       .onChange((value: string): void => { this.detailNotes = value; })
+  }
+
+  private detailNotesHeight(type: VaultItemType): number {
+    const text = this.detailNotes.trim();
+    if (text.length === 0) { return 52; }
+    let visualLines = 0;
+    text.split('\n').forEach((line: string): void => {
+      visualLines += Math.max(1, Math.ceil(line.length / 24));
+    });
+    const desiredHeight = 24 + visualLines * 20;
+    const maximumHeight = type === VaultItemType.Note ? 160 :
+      (type === VaultItemType.Login ? 82 : 104);
+    return Math.max(52, Math.min(maximumHeight, desiredHeight));
   }
 
   @Builder
@@ -3475,8 +3515,8 @@ struct Index {
           }
           .width('100%')
           Row({ space: 4 }) {
-            this.typeChip(VaultItemType.Login)
             this.typeChip(VaultItemType.Note)
+            this.typeChip(VaultItemType.Login)
             this.typeChip(VaultItemType.Image)
             this.typeChip(VaultItemType.File)
           }
@@ -3727,20 +3767,24 @@ struct Index {
               if (this.revealPassword) { this.screenshotProtectionHint() }
             }
             this.detailNotesEditor(item.type)
-            Button('保存修改')
-              .width('100%').height(46).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
-              .backgroundColor(COLOR_PRIMARY).borderRadius(12)
-              .onClick((): void => { this.saveSelectedItem(); })
-            Button('移入回收站')
-              .width('100%').height(44).fontColor(COLOR_DANGER)
-              .backgroundColor(COLOR_DANGER_DARK_SURFACE).borderRadius(12)
-              .onClick((): void => { this.trashSelectedItem(); })
+            Row({ space: 10 }) {
+              Button('保存修改')
+                .layoutWeight(1).height(46).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
+                .backgroundColor(COLOR_PRIMARY).borderRadius(12)
+                .onClick((): void => { this.saveSelectedItem(); })
+              Button('移入回收站')
+                .layoutWeight(1).height(46).fontColor(COLOR_DANGER)
+                .backgroundColor(COLOR_DANGER_DARK_SURFACE).borderRadius(12)
+                .onClick((): void => { this.trashSelectedItem(); })
+            }
+            .width('100%')
           }
           .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 14 })
         }
       }
       .width('100%')
-      .constraintSize({ maxHeight: item.type === VaultItemType.Image || item.type === VaultItemType.Video ? '96%' : '88%' })
+      .constraintSize({ maxHeight:
+        item.type === VaultItemType.Image || item.type === VaultItemType.Video ? '96%' : '88%' })
       .scrollBar(BarState.Off)
       .backgroundColor(COLOR_SURFACE)
       .borderRadius({ topLeft: 24, topRight: 24 })

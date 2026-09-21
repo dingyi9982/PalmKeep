@@ -240,9 +240,10 @@ class VaultRepositoryImpl {
     if (cleanSearch.length > 0) {
       sql += ' AND (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ? OR EXISTS (' +
         'SELECT 1 FROM vault_item_attachments search_attachment ' +
-        'WHERE search_attachment.item_id = vault_items.id AND search_attachment.ocr_text LIKE ?))';
+        'WHERE search_attachment.item_id = vault_items.id ' +
+        'AND (search_attachment.ocr_text LIKE ? OR search_attachment.name LIKE ?)))';
       const pattern = `%${cleanSearch}%`;
-      args.push(pattern, pattern, pattern, pattern, pattern);
+      args.push(pattern, pattern, pattern, pattern, pattern, pattern);
     }
     sql += ' ORDER BY updated_at DESC';
     const result = await this.requireStore().querySql(sql, args);
@@ -271,20 +272,26 @@ class VaultRepositoryImpl {
       'vault_items.created_at AS created_at, vault_items.updated_at AS updated_at, vault_items.deleted_at AS deleted_at, ' +
       'COALESCE(vault_groups.name, vault_group_tombstones.name, \'未分组\') AS original_group_name';
     const sql = 'SELECT ' + fields + ', search_attachment.attachment_index AS matched_attachment_index, ' +
-      'search_attachment.ocr_text AS matched_ocr_text ' +
+      'CASE WHEN search_attachment.name LIKE ? THEN search_attachment.name ' +
+      'ELSE search_attachment.ocr_text END AS matched_ocr_text ' +
       'FROM vault_items JOIN vault_item_attachments search_attachment ON search_attachment.item_id = vault_items.id ' +
       'LEFT JOIN vault_groups ON vault_groups.id = vault_items.group_id ' +
       'LEFT JOIN vault_group_tombstones ON vault_group_tombstones.group_id = vault_items.group_id ' +
-      'WHERE search_attachment.type = ? AND search_attachment.ocr_text LIKE ? ' +
+      'WHERE ((search_attachment.type = ? AND search_attachment.ocr_text LIKE ?) ' +
+      'OR search_attachment.name LIKE ?) ' +
       'UNION ALL SELECT ' + fields + ', -1 AS matched_attachment_index, \'\' AS matched_ocr_text FROM vault_items ' +
       'LEFT JOIN vault_groups ON vault_groups.id = vault_items.group_id ' +
       'LEFT JOIN vault_group_tombstones ON vault_group_tombstones.group_id = vault_items.group_id ' +
-      'WHERE (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ?) ' +
+      'WHERE (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ? OR EXISTS (' +
+      'SELECT 1 FROM vault_item_attachments named_attachment ' +
+      'WHERE named_attachment.item_id = vault_items.id AND named_attachment.name LIKE ?)) ' +
       'AND NOT EXISTS (SELECT 1 FROM vault_item_attachments search_attachment ' +
-      'WHERE search_attachment.item_id = vault_items.id AND search_attachment.type = ? ' +
-      'AND search_attachment.ocr_text LIKE ?) ORDER BY updated_at DESC, matched_attachment_index ASC';
+      'WHERE search_attachment.item_id = vault_items.id AND ' +
+      '((search_attachment.type = ? AND search_attachment.ocr_text LIKE ?) ' +
+      'OR search_attachment.name LIKE ?)) ORDER BY updated_at DESC, matched_attachment_index ASC';
     const result = await this.requireStore().querySql(sql,
-      [VaultItemType.Image, pattern, pattern, pattern, pattern, pattern, VaultItemType.Image, pattern]);
+      [pattern, VaultItemType.Image, pattern, pattern,
+        pattern, pattern, pattern, pattern, pattern, VaultItemType.Image, pattern, pattern]);
     const hits: VaultSearchHit[] = [];
     try {
       while (result.goToNextRow()) {
