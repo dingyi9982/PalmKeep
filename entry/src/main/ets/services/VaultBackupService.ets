@@ -64,7 +64,7 @@ export class VaultBackupService {
   }
 
   async createBackup(password: string, appVersion: string,
-    onProgress?: (progress: BackupProgress) => void): Promise<boolean> {
+    onProgress?: (progress: BackupProgress) => void): Promise<BackupSummary | undefined> {
     const workspace = this.createWorkspace();
     try {
       this.progress(onProgress, '准备资料', 0, 1);
@@ -137,10 +137,10 @@ export class VaultBackupService {
       try {
         targets = await new picker.DocumentViewPicker(this.context).save(saveOptions);
       } catch (error) {
-        if (this.isCancelled(error)) { return false; }
+        if (this.isCancelled(error)) { return undefined; }
         throw normalizeError(error);
       }
-      if (targets.length === 0) { return false; }
+      if (targets.length === 0) { return undefined; }
       this.progress(onProgress, '保存备份', 0, 1);
       await this.copyFile(encryptedPath, targets[0]);
       this.progress(onProgress, '校验已保存文件', 0, 1);
@@ -150,12 +150,39 @@ export class VaultBackupService {
         throw new Error('已保存的备份文件校验失败，请更换保存位置后重试');
       }
       this.progress(onProgress, '备份完成', 1, 1);
-      return true;
+      return {
+        createdAt: manifest.createdAt,
+        itemCount: manifest.itemCount,
+        trashCount: manifest.trashCount,
+        attachmentCount: manifest.attachmentCount,
+        attachmentBytes: manifest.attachmentBytes
+      };
     } catch (error) {
       throw new Error(`创建备份失败：${normalizeError(error).message}`);
     } finally {
       this.removeDirectory(workspace);
     }
+  }
+
+  cleanupTemporaryWorkspaces(): number {
+    let removed = 0;
+    try {
+      const names = fs.listFileSync(this.context.tempDir);
+      names.forEach((name: string): void => {
+        if (!name.startsWith('palmvault-backup-')) { return; }
+        const path = `${this.context.tempDir}/${name}`;
+        try {
+          if (!fs.statSync(path).isDirectory()) { return; }
+          this.removeDirectory(path);
+          removed += 1;
+        } catch (error) {
+          logRecoverableError(`could not clean temporary backup workspace ${path}`, error);
+        }
+      });
+    } catch (error) {
+      logRecoverableError('could not inspect temporary backup workspaces', error);
+    }
+    return removed;
   }
 
   async inspectBackup(uri: string, password: string,

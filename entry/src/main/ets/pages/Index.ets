@@ -46,11 +46,14 @@ import {
   VaultGroup,
   VaultItem,
   VaultItemInput,
+  VaultHealthReport,
   VaultSearchHit,
   VaultTrashEntry,
   VaultItemType
 } from '../models/VaultModels';
-import { BackupProgress, BackupRestoreResult } from '../models/VaultBackupModels';
+import {
+  BackupProgress, BackupRestoreResult, BackupStatusRecord, BackupSummary
+} from '../models/VaultBackupModels';
 
 @Entry
 @Component
@@ -173,6 +176,12 @@ struct Index {
   @State private backupConflictCount: number = 0;
   @State private backupUnchangedCount: number = 0;
   @State private backupDeletedCount: number = 0;
+  @State private backupStatusLabel: string = '尚未创建备份';
+  @State private backupChangeLabel: string = '当前资料尚未备份';
+  @State private backupNeedsUpdate: boolean = true;
+  @State private storageUsageLabel: string = '尚未检查';
+  @State private healthStatusLabel: string = '检查数据库、附件与搜索索引';
+  @State private healthBusy: boolean = false;
   @State private pendingMedia: PickedMedia[] = [];
   private pendingFiles: PickedMedia[] = [];
   private mediaRecognitionVersion: number = 0;
@@ -408,13 +417,14 @@ struct Index {
       const security = this.getSecurityService();
       if (!await security.verifyPassword(this.backupPassword)) { throw new Error('密码不正确'); }
       const service = this.getBackupService();
-      const saved = await service.createBackup(this.backupPassword, `${VERSION_NAME} (${VERSION_CODE})`,
+      const summary = await service.createBackup(this.backupPassword, `${VERSION_NAME} (${VERSION_CODE})`,
         (progress: BackupProgress): void => { this.updateBackupProgress(progress); });
       this.backupBusy = false;
-      if (!saved) {
+      if (!summary) {
         this.backupStage = 'password';
         return;
       }
+      await this.rememberSuccessfulBackup(summary);
       this.closeBackupDialog();
       this.getUIContext().getPromptAction().showToast({ message: '加密备份已保存' });
     } catch (error) {
@@ -493,6 +503,7 @@ struct Index {
         try {
           await vaultRepository.destroy(AbilityContextHolder.getContext());
           await this.getSecurityService().resetSecurity();
+          await vaultUiPreferences.clearBackupStatus();
           this.sessionKey.fill(0);
           this.sessionKey = new Uint8Array(0);
         } catch (cleanupError) {
@@ -1265,6 +1276,7 @@ struct Index {
       const context = AbilityContextHolder.getContext();
       await AbilityContextHolder.setPrivacyMode(false);
       await vaultRepository.destroy(context);
+      await vaultUiPreferences.clearBackupStatus();
       const security = this.getSecurityService();
       await security.resetSecurity();
       this.lastNewItemType = VaultItemType.Note;
@@ -1346,9 +1358,113 @@ struct Index {
       const trashRequest: Promise<void> = this.refreshTrash();
       await vaultRequest;
       await trashRequest;
+      await this.refreshBackupTrustStatus();
       return;
     }
     await this.reloadVault();
+    await this.refreshBackupTrustStatus();
+  }
+
+  private async rememberSuccessfulBackup(summary: BackupSummary): Promise<void> {
+    const record: BackupStatusRecord = {
+      createdAt: summary.createdAt,
+      itemCount: summary.itemCount,
+      trashCount: summary.trashCount,
+      attachmentCount: summary.attachmentCount,
+      attachmentBytes: summary.attachmentBytes,
+      dataRevision: await vaultRepository.getDataRevision()
+    };
+    await vaultUiPreferences.setBackupStatus(record);
+    await this.refreshBackupTrustStatus(record);
+  }
+
+  private async refreshBackupTrustStatus(knownStatus?: BackupStatusRecord): Promise<void> {
+    try {
+      if (this.totalItemCount === 0) {
+        this.backupStatusLabel = '尚无资料可备份';
+        this.backupChangeLabel = '添加资料后即可创建备份';
+        this.backupNeedsUpdate = false;
+        return;
+      }
+      const status = knownStatus ?? await vaultUiPreferences.getBackupStatus();
+      if (!status) {
+        this.backupStatusLabel = '尚未创建备份';
+        this.backupChangeLabel = `${this.totalItemCount} 项资料尚未备份`;
+        this.backupNeedsUpdate = true;
+        return;
+      }
+      this.backupStatusLabel = `${this.formatBackupDate(status.createdAt)} · ${status.itemCount} 项资料 · ` +
+        `${status.attachmentCount} 个附件 · ${this.formatBackupSize(status.attachmentBytes)}`;
+      const revision = await vaultRepository.getDataRevision();
+      this.backupNeedsUpdate = revision !== status.dataRevision;
+      if (!this.backupNeedsUpdate) {
+        this.backupChangeLabel = '当前资料与上次成功备份一致';
+        return;
+      }
+      const changedCount = await vaultRepository.countActiveItemsChangedAfter(status.createdAt);
+      this.backupChangeLabel = changedCount > 0 ? `${changedCount} 项资料有未备份更改` :
+        '分组或附件有未备份更改';
+    } catch (error) {
+      logRecoverableError('could not refresh backup trust status', error);
+    }
+  }
+
+  private async checkAndRepairData(): Promise<void> {
+    if (this.healthBusy) { return; }
+    this.healthBusy = true;
+    this.healthStatusLabel = '正在检查数据库、附件与搜索索引…';
+    try {
+      const removedTemporaryCount = this.getBackupService().cleanupTemporaryWorkspaces();
+      const report = await vaultRepository.inspectDataHealth(true);
+      this.storageUsageLabel = this.formatBackupSize(report.storage.totalBytes);
+      const unresolvedCount = report.missingAttachmentCount + report.sizeMismatchCount +
+        report.orphanFileCount + report.ocrMismatchCount;
+      if (!report.databaseOk) {
+        this.healthStatusLabel = '数据库完整性检查未通过';
+      } else if (unresolvedCount > 0) {
+        this.healthStatusLabel = `发现 ${unresolvedCount} 个附件异常，需要手动处理`;
+      } else if (report.repairedOcrCount + report.removedOrphanCount + removedTemporaryCount > 0) {
+        this.healthStatusLabel = '检查完成，安全问题已修复';
+      } else {
+        this.healthStatusLabel = '检查通过，数据状态正常';
+      }
+      await this.refreshBackupTrustStatus();
+      await this.showHealthReport(report, removedTemporaryCount);
+    } catch (error) {
+      this.healthStatusLabel = '检查失败，请稍后重试';
+      try { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
+      catch (promptError) { logRecoverableError('could not show data health failure', promptError); }
+    } finally {
+      this.healthBusy = false;
+    }
+  }
+
+  private async showHealthReport(report: VaultHealthReport, removedTemporaryCount: number): Promise<void> {
+    const lines: string[] = [
+      report.databaseOk ? '数据库：完整性正常' : '数据库：完整性检查未通过',
+      `资料：${report.activeItemCount} 项 · 回收站 ${report.trashItemCount} 项`,
+      `附件：${report.attachmentCount} 个 · 媒体 ${this.formatBackupSize(report.storage.mediaBytes)} · ` +
+        `文件 ${this.formatBackupSize(report.storage.fileBytes)}`,
+      `数据库占用：${this.formatBackupSize(report.storage.databaseBytes)}`
+    ];
+    if (report.missingAttachmentCount > 0) {
+      lines.push(`缺失附件：${report.missingAttachmentCount} 个（未自动删除资料）`);
+    }
+    if (report.sizeMismatchCount > 0) { lines.push(`大小异常附件：${report.sizeMismatchCount} 个`); }
+    if (report.ocrMismatchCount > 0) { lines.push(`待修复 OCR 搜索索引：${report.ocrMismatchCount} 项`); }
+    if (report.orphanFileCount > 0) {
+      lines.push(`未清理孤立附件：${report.orphanFileCount} 个 · ${this.formatBackupSize(report.storage.orphanBytes)}`);
+    }
+    if (report.repairedOcrCount > 0) { lines.push(`已修复 OCR 搜索索引：${report.repairedOcrCount} 项`); }
+    if (report.removedOrphanCount > 0) { lines.push(`已清理孤立附件：${report.removedOrphanCount} 个`); }
+    if (removedTemporaryCount > 0) { lines.push(`已清理备份临时目录：${removedTemporaryCount} 个`); }
+    try {
+      await this.getUIContext().getPromptAction().showDialog({
+        title: '数据检查结果', message: lines.join('\n'), buttons: [{ text: '知道了', color: COLOR_PRIMARY }]
+      });
+    } catch (error) {
+      logRecoverableError('could not show data health report', error);
+    }
   }
 
   private applyActiveItems(items: VaultItem[]): void {
@@ -3018,6 +3134,12 @@ struct Index {
       autoLockLabel: this.autoLockLabel(),
       versionLabel: `${VERSION_NAME}（${VERSION_CODE}）`,
       buildLabel: BUILD_GIT_LABEL,
+      backupStatusLabel: this.backupStatusLabel,
+      backupChangeLabel: this.backupChangeLabel,
+      backupNeedsUpdate: this.backupNeedsUpdate,
+      storageUsageLabel: this.storageUsageLabel,
+      healthStatusLabel: this.healthStatusLabel,
+      healthBusy: this.healthBusy,
       onToggleFace: (): void => { this.toggleFace(); },
       onToggleFingerprint: (): void => { this.toggleFingerprint(); },
       onToggleGesture: (): void => {
@@ -3029,6 +3151,7 @@ struct Index {
       onOpenGroupManager: (): void => { this.showGroupManager = true; },
       onCreateBackup: (): void => { this.openCreateBackup(); },
       onRestoreBackup: (): void => { this.openRestoreBackup(false); },
+      onCheckDataHealth: (): void => { this.checkAndRepairData(); },
       onLockVault: (): void => { this.lockVault(); }
     })
   }

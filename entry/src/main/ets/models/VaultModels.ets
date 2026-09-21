@@ -67,6 +67,29 @@ export interface VaultTrashEntry {
   originalGroupName: string;
 }
 
+export interface VaultStorageStats {
+  databaseBytes: number;
+  mediaBytes: number;
+  fileBytes: number;
+  orphanBytes: number;
+  totalBytes: number;
+}
+
+export interface VaultHealthReport {
+  checkedAt: number;
+  databaseOk: boolean;
+  activeItemCount: number;
+  trashItemCount: number;
+  attachmentCount: number;
+  missingAttachmentCount: number;
+  sizeMismatchCount: number;
+  orphanFileCount: number;
+  ocrMismatchCount: number;
+  repairedOcrCount: number;
+  removedOrphanCount: number;
+  storage: VaultStorageStats;
+}
+
 export function createVaultId(): string {
   return `${Date.now()}-${Math.floor(Math.random() * 1000000000)}`;
 }

@@ -12,7 +12,9 @@ import {
   VaultGroup,
   VaultItem,
   VaultItemInput,
+  VaultHealthReport,
   VaultSearchHit,
+  VaultStorageStats,
   VaultTrashEntry,
   VaultItemType
 } from '../models/VaultModels';
@@ -803,6 +805,163 @@ class VaultRepositoryImpl {
       const itemTombstones: BackupItemTombstoneRecord[] = [];
       return { groups: groups, items: items, attachments: attachments,
         groupTombstones: groupTombstones, itemTombstones: itemTombstones };
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  async getDataRevision(): Promise<number> {
+    try {
+      const result = await this.requireStore().querySql(
+        'SELECT value FROM vault_metadata WHERE key = ?', ['data_revision']);
+      try { return result.goToFirstRow() ? result.getLong(0) : 0; }
+      finally { result.close(); }
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  async countActiveItemsChangedAfter(timestamp: number): Promise<number> {
+    try {
+      const result = await this.requireStore().querySql(
+        'SELECT COUNT(*) FROM vault_items WHERE deleted_at = 0 AND updated_at > ?', [timestamp]);
+      try { return result.goToFirstRow() ? result.getLong(0) : 0; }
+      finally { result.close(); }
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  }
+
+  async inspectDataHealth(repairSafeIssues: boolean = false): Promise<VaultHealthReport> {
+    try {
+      const store = this.requireStore();
+      let databaseOk = false;
+      const integrity = await store.querySql('PRAGMA quick_check');
+      try { databaseOk = integrity.goToFirstRow() && integrity.getString(0).toLowerCase() === 'ok'; }
+      finally { integrity.close(); }
+      const allowSafeRepair = repairSafeIssues && databaseOk;
+
+      let databaseBytes = 0;
+      let pageCount = 0;
+      let pageSize = 0;
+      const countResult = await store.querySql('PRAGMA page_count');
+      try { if (countResult.goToFirstRow()) { pageCount = countResult.getLong(0); } }
+      finally { countResult.close(); }
+      const sizeResult = await store.querySql('PRAGMA page_size');
+      try { if (sizeResult.goToFirstRow()) { pageSize = sizeResult.getLong(0); } }
+      finally { sizeResult.close(); }
+      databaseBytes = pageCount * pageSize;
+
+      let activeItemCount = 0;
+      let trashItemCount = 0;
+      const itemCountResult = await store.querySql(
+        'SELECT SUM(CASE WHEN deleted_at = 0 THEN 1 ELSE 0 END), ' +
+        'SUM(CASE WHEN deleted_at > 0 THEN 1 ELSE 0 END) FROM vault_items');
+      try {
+        if (itemCountResult.goToFirstRow()) {
+          if (!itemCountResult.isColumnNull(0)) { activeItemCount = itemCountResult.getLong(0); }
+          if (!itemCountResult.isColumnNull(1)) { trashItemCount = itemCountResult.getLong(1); }
+        }
+      } finally { itemCountResult.close(); }
+
+      const referenced = new Set<string>();
+      const expectedOcr = new Map<string, string[]>();
+      let attachmentCount = 0;
+      let missingAttachmentCount = 0;
+      let sizeMismatchCount = 0;
+      let mediaBytes = 0;
+      let fileBytes = 0;
+      const attachments = await store.querySql(
+        'SELECT item_id, type, ocr_text, storage_name, size_bytes FROM vault_item_attachments ' +
+        'ORDER BY item_id, attachment_index');
+      try {
+        while (attachments.goToNextRow()) {
+          attachmentCount += 1;
+          const itemId = attachments.getString(0);
+          const type = attachments.getString(1) as VaultItemType;
+          const ocrText = attachments.getString(2).trim();
+          const storageName = attachments.getString(3);
+          const expectedSize = attachments.getLong(4);
+          referenced.add(storageName);
+          if (type === VaultItemType.Image && ocrText.length > 0) {
+            const texts = expectedOcr.get(itemId) ?? [];
+            texts.push(ocrText);
+            expectedOcr.set(itemId, texts);
+          }
+          try {
+            const actualSize = fs.statSync(this.storedAttachmentPath(storageName)).size;
+            if (actualSize !== expectedSize) { sizeMismatchCount += 1; }
+            if (type === VaultItemType.File) { fileBytes += actualSize; }
+            else { mediaBytes += actualSize; }
+          } catch (error) {
+            missingAttachmentCount += 1;
+          }
+        }
+      } finally { attachments.close(); }
+
+      const mismatchedOcrIds: string[] = [];
+      const expectedOcrValues = new Map<string, string>();
+      const items = await store.querySql('SELECT id, ocr_text FROM vault_items');
+      try {
+        while (items.goToNextRow()) {
+          const itemId = items.getString(0);
+          const expected = (expectedOcr.get(itemId) ?? []).join('\n');
+          expectedOcrValues.set(itemId, expected);
+          if (items.getString(1) !== expected) { mismatchedOcrIds.push(itemId); }
+        }
+      } finally { items.close(); }
+
+      let repairedOcrCount = 0;
+      if (allowSafeRepair && mismatchedOcrIds.length > 0) {
+        store.beginTransaction();
+        try {
+          for (let index = 0; index < mismatchedOcrIds.length; index += 1) {
+            const itemId = mismatchedOcrIds[index];
+            await store.executeSql('UPDATE vault_items SET ocr_text = ? WHERE id = ?',
+              [expectedOcrValues.get(itemId) ?? '', itemId]);
+          }
+          store.commit();
+          repairedOcrCount = mismatchedOcrIds.length;
+        } catch (error) {
+          store.rollBack();
+          throw normalizeError(error);
+        }
+      }
+
+      let orphanFileCount = 0;
+      let orphanBytes = 0;
+      let removedOrphanCount = 0;
+      const names = fs.listFileSync(this.attachmentRoot);
+      names.forEach((name: string): void => {
+        if (referenced.has(name)) { return; }
+        orphanFileCount += 1;
+        try { orphanBytes += fs.statSync(this.storedAttachmentPath(name)).size; }
+        catch (error) { logRecoverableError(`could not inspect orphan attachment ${name}`, error); }
+        if (allowSafeRepair) {
+          try {
+            fs.unlinkSync(this.storedAttachmentPath(name));
+            removedOrphanCount += 1;
+          } catch (error) { logRecoverableError(`could not remove orphan attachment ${name}`, error); }
+        }
+      });
+      const remainingOrphanCount = allowSafeRepair ? orphanFileCount - removedOrphanCount : orphanFileCount;
+      const remainingOrphanBytes = allowSafeRepair && remainingOrphanCount === 0 ? 0 : orphanBytes;
+      const storage: VaultStorageStats = {
+        databaseBytes: databaseBytes,
+        mediaBytes: mediaBytes,
+        fileBytes: fileBytes,
+        orphanBytes: remainingOrphanBytes,
+        totalBytes: databaseBytes + mediaBytes + fileBytes + remainingOrphanBytes
+      };
+      return {
+        checkedAt: Date.now(), databaseOk: databaseOk, activeItemCount: activeItemCount,
+        trashItemCount: trashItemCount, attachmentCount: attachmentCount,
+        missingAttachmentCount: missingAttachmentCount, sizeMismatchCount: sizeMismatchCount,
+        orphanFileCount: remainingOrphanCount,
+        ocrMismatchCount: allowSafeRepair ? 0 : mismatchedOcrIds.length,
+        repairedOcrCount: repairedOcrCount, removedOrphanCount: removedOrphanCount,
+        storage: storage
+      };
     } catch (error) {
       throw normalizeError(error);
     }

@@ -24,6 +24,12 @@ export struct VaultSettingsPanel {
   @Prop autoLockLabel: string = '10 分钟';
   @Prop versionLabel: string = '';
   @Prop buildLabel: string = '';
+  @Prop backupStatusLabel: string = '尚未创建备份';
+  @Prop backupChangeLabel: string = '当前资料尚未备份';
+  @Prop backupNeedsUpdate: boolean = true;
+  @Prop storageUsageLabel: string = '尚未检查';
+  @Prop healthStatusLabel: string = '检查数据库、附件与搜索索引';
+  @Prop healthBusy: boolean = false;
   onToggleFace: () => void = (): void => {};
   onToggleFingerprint: () => void = (): void => {};
   onToggleGesture: () => void = (): void => {};
@@ -33,6 +39,7 @@ export struct VaultSettingsPanel {
   onOpenGroupManager: () => void = (): void => {};
   onCreateBackup: () => void = (): void => {};
   onRestoreBackup: () => void = (): void => {};
+  onCheckDataHealth: () => void = (): void => {};
   onLockVault: () => void = (): void => {};
 
   build() {
@@ -151,8 +158,17 @@ export struct VaultSettingsPanel {
         .border({ width: 1, color: COLOR_BORDER }).onClick((): void => { this.onOpenGroupManager(); })
 
         Column() {
-          Text('备份与恢复').fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-            .width('100%').padding(15)
+          Column({ space: 4 }) {
+            Row() {
+              Text('备份与恢复').fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
+              Blank()
+              Text(this.backupNeedsUpdate ? '待备份' : '已备份').fontSize(11)
+                .fontColor(this.backupNeedsUpdate ? COLOR_DANGER : COLOR_PRIMARY)
+            }.width('100%')
+            Text(this.backupStatusLabel).fontSize(12).fontColor(COLOR_MUTED).width('100%')
+            Text(this.backupChangeLabel).fontSize(12)
+              .fontColor(this.backupNeedsUpdate ? COLOR_DANGER : COLOR_PRIMARY).width('100%')
+          }.width('100%').padding(15).alignItems(HorizontalAlign.Start)
           Row({ space: 12 }) {
             Stack() { Text('↓').fontSize(22).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY) }
               .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
@@ -173,6 +189,29 @@ export struct VaultSettingsPanel {
             Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
           }.width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
           .onClick((): void => { this.onRestoreBackup(); })
+        }
+        .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
+        .border({ width: 1, color: COLOR_BORDER })
+
+        Column() {
+          Column({ space: 4 }) {
+            Row() {
+              Text('存储与数据检查').fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
+              Blank()
+              Text(this.storageUsageLabel).fontSize(12).fontColor(COLOR_MUTED)
+            }.width('100%')
+            Text(this.healthStatusLabel).fontSize(12).fontColor(COLOR_MUTED).width('100%')
+          }.width('100%').padding(15).alignItems(HorizontalAlign.Start)
+          Row({ space: 12 }) {
+            Stack() { Text('✓').fontSize(20).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY) }
+              .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
+            Column({ space: 3 }) {
+              Text(this.healthBusy ? '正在检查…' : '检查并安全修复').fontSize(14).fontColor(COLOR_TEXT)
+              Text('不会删除缺失附件对应的资料').fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
+          }.width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          .enabled(!this.healthBusy).onClick((): void => { this.onCheckDataHealth(); })
         }
         .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
         .border({ width: 1, color: COLOR_BORDER })

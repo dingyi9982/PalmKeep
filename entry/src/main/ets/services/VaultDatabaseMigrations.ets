@@ -11,9 +11,46 @@ async function applySchemaMigration(store: relationalStore.RdbStore, version: nu
       await store.executeSql('CREATE TABLE IF NOT EXISTS vault_group_tombstones (group_id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT NOT NULL, created_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL)');
       await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_attachments (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL, source_uri TEXT NOT NULL, ocr_text TEXT NOT NULL DEFAULT \'\', storage_name TEXT NOT NULL, size_bytes INTEGER NOT NULL, PRIMARY KEY (item_id, attachment_index))');
       await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_tombstones (item_id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)');
+      await store.executeSql('CREATE TABLE IF NOT EXISTS vault_metadata (key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)');
+      await store.executeSql('INSERT OR IGNORE INTO vault_metadata (key, value) VALUES (\'data_revision\', 0)');
       await store.executeSql('CREATE INDEX IF NOT EXISTS idx_vault_items_group ON vault_items(group_id, deleted_at, updated_at)');
       await store.executeSql('CREATE INDEX IF NOT EXISTS idx_vault_items_type ON vault_items(type, deleted_at, updated_at)');
       await store.executeSql('CREATE INDEX IF NOT EXISTS idx_vault_items_deleted ON vault_items(deleted_at)');
+      const revisionTables: string[] = [
+        'vault_groups', 'vault_items', 'vault_item_attachments', 'vault_group_tombstones', 'vault_item_tombstones'
+      ];
+      const revisionActions: string[] = ['INSERT', 'UPDATE', 'DELETE'];
+      for (let tableIndex = 0; tableIndex < revisionTables.length; tableIndex += 1) {
+        for (let actionIndex = 0; actionIndex < revisionActions.length; actionIndex += 1) {
+          const table = revisionTables[tableIndex];
+          const action = revisionActions[actionIndex];
+          await store.executeSql(`DROP TRIGGER IF EXISTS revision_${table}_${action.toLowerCase()}`);
+        }
+      }
+      const incrementRevision = 'BEGIN UPDATE vault_metadata SET value = value + 1 ' +
+        'WHERE key = \'data_revision\'; END';
+      await store.executeSql('CREATE TRIGGER revision_vault_groups_insert AFTER INSERT ON vault_groups ' +
+        incrementRevision);
+      await store.executeSql('CREATE TRIGGER revision_vault_groups_update AFTER UPDATE ON vault_groups ' +
+        incrementRevision);
+      await store.executeSql('CREATE TRIGGER revision_vault_groups_delete AFTER DELETE ON vault_groups ' +
+        incrementRevision);
+      await store.executeSql('CREATE TRIGGER revision_vault_items_insert AFTER INSERT ON vault_items ' +
+        `WHEN NEW.deleted_at = 0 ${incrementRevision}`);
+      await store.executeSql('CREATE TRIGGER revision_vault_items_update AFTER UPDATE ON vault_items ' +
+        `WHEN OLD.deleted_at = 0 OR NEW.deleted_at = 0 ${incrementRevision}`);
+      await store.executeSql('CREATE TRIGGER revision_vault_items_delete AFTER DELETE ON vault_items ' +
+        `WHEN OLD.deleted_at = 0 ${incrementRevision}`);
+      await store.executeSql('CREATE TRIGGER revision_vault_item_attachments_insert ' +
+        'AFTER INSERT ON vault_item_attachments WHEN EXISTS (SELECT 1 FROM vault_items ' +
+        `WHERE id = NEW.item_id AND deleted_at = 0) ${incrementRevision}`);
+      await store.executeSql('CREATE TRIGGER revision_vault_item_attachments_update ' +
+        'AFTER UPDATE ON vault_item_attachments WHEN EXISTS (SELECT 1 FROM vault_items ' +
+        'WHERE id = NEW.item_id AND deleted_at = 0) OR EXISTS (SELECT 1 FROM vault_items ' +
+        `WHERE id = OLD.item_id AND deleted_at = 0) ${incrementRevision}`);
+      await store.executeSql('CREATE TRIGGER revision_vault_item_attachments_delete ' +
+        'AFTER DELETE ON vault_item_attachments WHEN EXISTS (SELECT 1 FROM vault_items ' +
+        `WHERE id = OLD.item_id AND deleted_at = 0) ${incrementRevision}`);
       return;
     }
     throw new Error(`未定义数据库迁移 v${version}`);
@@ -67,7 +104,8 @@ async function requireSchemaColumn(store: relationalStore.RdbStore,
 async function validateSchema(store: relationalStore.RdbStore): Promise<void> {
   try {
     const requiredTables: string[] = [
-      'vault_groups', 'vault_items', 'vault_group_tombstones', 'vault_item_attachments', 'vault_item_tombstones'
+      'vault_groups', 'vault_items', 'vault_group_tombstones', 'vault_item_attachments',
+      'vault_item_tombstones', 'vault_metadata'
     ];
     for (let index = 0; index < requiredTables.length; index += 1) {
       const table = requiredTables[index];

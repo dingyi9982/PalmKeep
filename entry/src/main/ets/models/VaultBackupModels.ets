@@ -86,6 +86,10 @@ export interface BackupSummary {
   attachmentBytes: number;
 }
 
+export interface BackupStatusRecord extends BackupSummary {
+  dataRevision: number;
+}
+
 export interface BackupProgress {
   phase: string;
   completed: number;
