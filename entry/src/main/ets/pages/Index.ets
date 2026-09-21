@@ -9,6 +9,7 @@ import { VaultGroupManager } from '../components/VaultGroupManager';
 import { VaultCategoryPanel } from '../components/VaultCategoryPanel';
 import { VaultItemDetailDialog } from '../components/VaultItemDetailDialog';
 import { VaultTrashDetailDialog } from '../components/VaultTrashDetailDialog';
+import { VaultLoginFieldsEditor } from '../components/VaultLoginFieldsEditor';
 import {
   ChangePasswordDialog, GestureSetupDialog, RecoveryCenterDialog, ResetVaultDialog
 } from '../components/VaultSecurityDialogs';
@@ -24,7 +25,7 @@ import {
 import { VaultThumbnail } from '../components/VaultThumbnail';
 import { VaultAttachmentPreview } from '../components/VaultAttachmentPreview';
 import { VaultFileSummary } from '../components/VaultFileSummary';
-import { VaultDialogHeader, VaultScreenshotProtectionHint } from '../components/VaultCommonComponents';
+import { VaultDialogHeader } from '../components/VaultCommonComponents';
 import {
   ACTION_CANCEL, ACTION_DELETE, ACTION_MANAGE, ACTION_SAVE, LABEL_CONTENT, LABEL_NAME, LABEL_NOTES
 } from '../components/VaultCopy';
@@ -39,6 +40,7 @@ import { PreparedVaultBackup, VaultBackupService } from '../services/VaultBackup
 import { vaultUiPreferences } from '../services/VaultUiPreferences';
 import { BUILD_GIT_LABEL } from '../generated/BuildMetadata';
 import {
+  itemDisplayTitle,
   itemTypeLabel,
   VaultAttachmentInput,
   VaultGroup,
@@ -127,6 +129,7 @@ struct Index {
   @State private newTitle: string = '';
   @State private newUsername: string = '';
   @State private newPassword: string = '';
+  @State private newWebsite: string = '';
   @State private revealNewPassword: boolean = false;
   @State private newNotes: string = '';
   @State private selectedMediaCount: number = 0;
@@ -148,6 +151,7 @@ struct Index {
   @State private detailTitle: string = '';
   @State private detailUsername: string = '';
   @State private detailPassword: string = '';
+  @State private detailWebsite: string = '';
   @State private detailNotes: string = '';
   @State private detailGroupId: number = 0;
   @State private showBackupDialog: boolean = false;
@@ -593,6 +597,7 @@ struct Index {
     this.confirmPassword = '';
     this.detailPassword = '';
     this.detailUsername = '';
+    this.detailWebsite = '';
     this.detailNotes = '';
     this.detailTitle = '';
     this.detailGroupId = 0;
@@ -709,6 +714,7 @@ struct Index {
 
   private hasUnsavedNewItem(): boolean {
     return this.newTitle.length > 0 || this.newUsername.length > 0 || this.newPassword.length > 0 ||
+      this.newWebsite.length > 0 ||
       this.newNotes.length > 0 || this.pendingMedia.length > 0 ||
       this.pendingFiles.length > 0;
   }
@@ -1561,15 +1567,30 @@ struct Index {
   }
 
   private async copyTrashUsername(username: string): Promise<void> {
+    await this.copyLoginValue(username, '账号');
+  }
+
+  private async copyLoginValue(value: string, label: string): Promise<void> {
+    if (value.length === 0) { return; }
     try {
-    if (username.length === 0) { return; }
-    try {
-      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, username);
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, value);
       await pasteboard.getSystemPasteboard().setData(data);
-      this.getUIContext().getPromptAction().showToast({ message: '账号已复制' });
-    } catch (error) { this.getUIContext().getPromptAction().showToast({ message: '复制失败' }); }
-      } catch (error) {
-      throw normalizeError(error);
+      this.getUIContext().getPromptAction().showToast({ message: `${label}已复制` });
+    } catch (error) {
+      try { this.getUIContext().getPromptAction().showToast({ message: '复制失败' }); }
+      catch (toastError) { logRecoverableError('could not show copy failure', toastError); }
+    }
+  }
+
+  private async openLoginWebsite(website: string): Promise<void> {
+    const trimmed = website.trim();
+    if (trimmed.length === 0) { return; }
+    const uri = trimmed.indexOf('://') >= 0 ? trimmed : `https://${trimmed}`;
+    try {
+      await AbilityContextHolder.getContext().startAbility({ action: 'ohos.want.action.viewData', uri: uri });
+    } catch (error) {
+      try { this.getUIContext().getPromptAction().showToast({ message: '无法打开该网站地址' }); }
+      catch (toastError) { logRecoverableError('could not show website failure', toastError); }
     }
   }
 
@@ -1859,6 +1880,7 @@ struct Index {
             title: this.newTitle,
             username: '',
             password: '',
+            website: '',
             notes: this.newNotes
           };
           await vaultRepository.createItemWithAttachments(mediaInput, attachments,
@@ -1897,6 +1919,7 @@ struct Index {
           title: this.newTitle.trim(),
           username: '',
           password: '',
+          website: '',
           notes: this.newNotes
         };
         await vaultRepository.createItemWithAttachments(fileInput, attachments,
@@ -1917,6 +1940,7 @@ struct Index {
         title: this.newTitle,
         username: this.newUsername,
         password: this.newPassword,
+        website: this.newWebsite,
         notes: this.newNotes
       };
       await vaultRepository.createItem(input);
@@ -1943,6 +1967,7 @@ struct Index {
     this.detailTitle = item.title;
     this.detailUsername = item.username;
     this.detailPassword = item.password;
+    this.detailWebsite = item.website;
     this.detailNotes = item.notes;
     this.revealPassword = false;
     AbilityContextHolder.setPrivacyMode(false);
@@ -1962,6 +1987,7 @@ struct Index {
       title: this.detailTitle,
       username: this.detailUsername,
       password: this.detailPassword,
+      website: this.detailWebsite,
       notes: this.detailNotes,
       ocrText: item.ocrText,
       createdAt: item.createdAt,
@@ -2004,6 +2030,7 @@ struct Index {
     this.newTitle = '';
     this.newUsername = '';
     this.newPassword = '';
+    this.newWebsite = '';
     this.revealNewPassword = false;
     this.newNotes = '';
     this.clearPendingMedia();
@@ -2231,7 +2258,7 @@ struct Index {
               .width('100%')
           }
         } else {
-          Text(item.title)
+          Text(itemDisplayTitle(item))
             .fontSize(14)
             .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_TEXT)
@@ -2305,8 +2332,8 @@ struct Index {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }.width('100%')
       }
-      if (hit.item.title.length > 0) {
-        Text(hit.item.title)
+      if (itemDisplayTitle(hit.item).length > 0) {
+        Text(itemDisplayTitle(hit.item))
           .fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
@@ -2842,8 +2869,8 @@ struct Index {
           }.width(26).height(32)
         }
         Column({ space: 3 }) {
-          if (entry.item.title.length > 0) {
-            Text(entry.item.title)
+          if (itemDisplayTitle(entry.item).length > 0) {
+            Text(itemDisplayTitle(entry.item))
               .fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
           }
@@ -3114,6 +3141,7 @@ struct Index {
           title: $detailTitle,
           username: $detailUsername,
           password: $detailPassword,
+          website: $detailWebsite,
           notes: $detailNotes,
           groupId: $detailGroupId,
           revealPassword: $revealPassword,
@@ -3122,7 +3150,11 @@ struct Index {
           onTrash: (): void => { this.trashSelectedItem(); },
           onPasswordVisibilityChange: (visible: boolean): void => {
             AbilityContextHolder.setPrivacyMode(visible);
-          }
+          },
+          onCopyLoginValue: (value: string, label: string): void => {
+            this.copyLoginValue(value, label);
+          },
+          onOpenWebsite: (website: string): void => { this.openLoginWebsite(website); }
         })
       }
       if (this.showGestureSetup) {
@@ -3334,23 +3366,18 @@ struct Index {
             .height(48).borderRadius(12)
             .onChange((value: string): void => { this.newTitle = value; })
           if (this.newType === VaultItemType.Login) {
-            TextInput({ placeholder: '账号', text: this.newUsername })
+            TextInput({ placeholder: '网站地址', text: this.newWebsite })
               .fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER).backgroundColor(COLOR_SURFACE_2)
               .height(48).borderRadius(12)
-              .onChange((value: string): void => { this.newUsername = value; })
-            TextInput({ placeholder: '密码', text: this.newPassword })
-              .type(InputType.Password)
-              .showPassword(this.revealNewPassword)
-              .width('100%').fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER)
-              .backgroundColor(COLOR_SURFACE_2).height(48).borderRadius(12)
-              .onChange((value: string): void => { this.newPassword = value; })
-              .onSecurityStateChange((visible: boolean): void => {
-                this.revealNewPassword = visible;
+              .onChange((value: string): void => { this.newWebsite = value; })
+            VaultLoginFieldsEditor({
+              username: $newUsername,
+              password: $newPassword,
+              revealPassword: $revealNewPassword,
+              onPasswordVisibilityChange: (visible: boolean): void => {
                 AbilityContextHolder.setPrivacyMode(visible);
-              })
-            if (this.revealNewPassword) {
-              VaultScreenshotProtectionHint()
-            }
+              }
+            })
           }
           if (this.newType === VaultItemType.Image) {
             Button('从系统相册添加')

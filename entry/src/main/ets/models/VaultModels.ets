@@ -20,6 +20,7 @@ export interface VaultItem {
   title: string;
   username: string;
   password: string;
+  website: string;
   notes: string;
   ocrText: string;
   createdAt: number;
@@ -33,6 +34,7 @@ export interface VaultItemInput {
   title: string;
   username: string;
   password: string;
+  website: string;
   notes: string;
 }
 
@@ -84,6 +86,12 @@ export function itemTypeLabel(type: VaultItemType): string {
     default:
       return '资料';
   }
+}
+
+export function itemDisplayTitle(item: VaultItem): string {
+  if (item.title.length > 0) { return item.title; }
+  if (item.type === VaultItemType.Login) { return item.website; }
+  return '';
 }
 
 export function itemTypeGlyph(type: VaultItemType): string {

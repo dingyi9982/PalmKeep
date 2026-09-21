@@ -1,4 +1,4 @@
-import { itemTypeLabel, VaultGroup, VaultItem, VaultItemType } from '../models/VaultModels';
+import { itemDisplayTitle, itemTypeLabel, VaultGroup, VaultItem, VaultItemType } from '../models/VaultModels';
 import { VaultAttachmentPreview } from './VaultAttachmentPreview';
 import { VaultFileSummary } from './VaultFileSummary';
 import {
@@ -108,7 +108,7 @@ export struct VaultCategoryPanel {
       Column({ space: 5 }) {
         Row({ space: 8 }) {
           Column({ space: 4 }) {
-            Text(item.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+            Text(itemDisplayTitle(item)).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
             VaultFileSummary({ itemId: item.id })
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
@@ -121,7 +121,7 @@ export struct VaultCategoryPanel {
       .onClick((): void => { this.onOpenItem(item); })
     } else if (this.selectedType === VaultItemType.Note) {
       Column({ space: 5 }) {
-        Text(item.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+        Text(itemDisplayTitle(item)).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
         if (item.notes.length > 0) {
           Text(item.notes).fontSize(11).lineHeight(16).fontColor(COLOR_MUTED)
@@ -136,7 +136,7 @@ export struct VaultCategoryPanel {
       Column({ space: 5 }) {
         Row({ space: 8 }) {
           Column({ space: 2 }) {
-            Text(item.title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+            Text(itemDisplayTitle(item)).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
             if (item.username.length > 0) {
               Text(item.username).fontSize(11).fontColor(COLOR_MUTED)

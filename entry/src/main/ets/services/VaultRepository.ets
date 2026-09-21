@@ -227,7 +227,8 @@ class VaultRepositoryImpl {
 
   async listItems(search: string = '', groupId: number = -1, includeDeleted: boolean = false): Promise<VaultItem[]> {
     try {
-    let sql = 'SELECT id, type, group_id, title, username, password, notes, ocr_text, created_at, updated_at, deleted_at FROM vault_items WHERE 1 = 1';
+    let sql = 'SELECT id, type, group_id, title, username, password, website, notes, ocr_text, ' +
+      'created_at, updated_at, deleted_at FROM vault_items WHERE 1 = 1';
     const args: relationalStore.ValueType[] = [];
     if (!includeDeleted) {
       sql += ' AND deleted_at = 0';
@@ -238,12 +239,12 @@ class VaultRepositoryImpl {
     }
     const cleanSearch = search.trim();
     if (cleanSearch.length > 0) {
-      sql += ' AND (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ? OR EXISTS (' +
+      sql += ' AND (title LIKE ? OR username LIKE ? OR website LIKE ? OR notes LIKE ? OR ocr_text LIKE ? OR EXISTS (' +
         'SELECT 1 FROM vault_item_attachments search_attachment ' +
         'WHERE search_attachment.item_id = vault_items.id ' +
         'AND (search_attachment.ocr_text LIKE ? OR search_attachment.name LIKE ?)))';
       const pattern = `%${cleanSearch}%`;
-      args.push(pattern, pattern, pattern, pattern, pattern, pattern);
+      args.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
     }
     sql += ' ORDER BY updated_at DESC';
     const result = await this.requireStore().querySql(sql, args);
@@ -268,7 +269,7 @@ class VaultRepositoryImpl {
     const pattern = `%${cleanSearch}%`;
     const fields = 'vault_items.id AS id, vault_items.type AS type, vault_items.group_id AS group_id, ' +
       'vault_items.title AS title, vault_items.username AS username, vault_items.password AS password, ' +
-      'vault_items.notes AS notes, vault_items.ocr_text AS ocr_text, ' +
+      'vault_items.website AS website, vault_items.notes AS notes, vault_items.ocr_text AS ocr_text, ' +
       'vault_items.created_at AS created_at, vault_items.updated_at AS updated_at, vault_items.deleted_at AS deleted_at, ' +
       'COALESCE(vault_groups.name, vault_group_tombstones.name, \'未分组\') AS original_group_name';
     const sql = 'SELECT ' + fields + ', search_attachment.attachment_index AS matched_attachment_index, ' +
@@ -282,7 +283,7 @@ class VaultRepositoryImpl {
       'UNION ALL SELECT ' + fields + ', -1 AS matched_attachment_index, \'\' AS matched_ocr_text FROM vault_items ' +
       'LEFT JOIN vault_groups ON vault_groups.id = vault_items.group_id ' +
       'LEFT JOIN vault_group_tombstones ON vault_group_tombstones.group_id = vault_items.group_id ' +
-      'WHERE (title LIKE ? OR username LIKE ? OR notes LIKE ? OR ocr_text LIKE ? OR EXISTS (' +
+      'WHERE (title LIKE ? OR username LIKE ? OR website LIKE ? OR notes LIKE ? OR ocr_text LIKE ? OR EXISTS (' +
       'SELECT 1 FROM vault_item_attachments named_attachment ' +
       'WHERE named_attachment.item_id = vault_items.id AND named_attachment.name LIKE ?)) ' +
       'AND NOT EXISTS (SELECT 1 FROM vault_item_attachments search_attachment ' +
@@ -291,7 +292,8 @@ class VaultRepositoryImpl {
       'OR search_attachment.name LIKE ?)) ORDER BY updated_at DESC, matched_attachment_index ASC';
     const result = await this.requireStore().querySql(sql,
       [pattern, VaultItemType.Image, pattern, pattern,
-        pattern, pattern, pattern, pattern, pattern, VaultItemType.Image, pattern, pattern]);
+        pattern, pattern, pattern, pattern, pattern, pattern,
+        VaultItemType.Image, pattern, pattern]);
     const hits: VaultSearchHit[] = [];
     try {
       while (result.goToNextRow()) {
@@ -313,7 +315,7 @@ class VaultRepositoryImpl {
   async listTrashEntries(type?: VaultItemType): Promise<VaultTrashEntry[]> {
     try {
     let sql = 'SELECT vault_items.id, vault_items.type, vault_items.group_id, vault_items.title, ' +
-      'vault_items.username, vault_items.password, vault_items.notes, ' +
+      'vault_items.username, vault_items.password, vault_items.website, vault_items.notes, ' +
       'vault_items.ocr_text, vault_items.created_at, vault_items.updated_at, vault_items.deleted_at, ' +
       'COALESCE(vault_groups.name, vault_group_tombstones.name, \'未分组\') AS original_group_name ' +
       'FROM vault_items LEFT JOIN vault_groups ON vault_groups.id = vault_items.group_id ' +
@@ -358,12 +360,14 @@ class VaultRepositoryImpl {
   }
 
   private validateItemFields(type: VaultItemType, title: string, username: string,
-    password: string, notes: string): void {
-    const titleRequired = type === VaultItemType.Login || type === VaultItemType.Note;
-    if (titleRequired && title.trim().length === 0) {
+    password: string, website: string, notes: string): void {
+    if (type === VaultItemType.Note && title.trim().length === 0) {
       throw new Error('名称不能为空');
     }
     if (type === VaultItemType.Login) {
+      if (title.trim().length === 0 && website.trim().length === 0) {
+        throw new Error('名称和网址至少填写一个');
+      }
       if (username.trim().length === 0) { throw new Error('账号不能为空'); }
       if (password.trim().length === 0) { throw new Error('密码不能为空'); }
     }
@@ -374,7 +378,7 @@ class VaultRepositoryImpl {
 
   async createItem(input: VaultItemInput): Promise<string> {
     try {
-    this.validateItemFields(input.type, input.title, input.username, input.password, input.notes);
+    this.validateItemFields(input.type, input.title, input.username, input.password, input.website, input.notes);
     const now = Date.now();
     const id = createVaultId();
     const values: relationalStore.ValuesBucket = {
@@ -384,6 +388,7 @@ class VaultRepositoryImpl {
       title: input.title.trim(),
       username: input.username.trim(),
       password: input.password,
+      website: input.website.trim(),
       notes: input.notes,
       ocr_text: '',
       created_at: now,
@@ -400,7 +405,7 @@ class VaultRepositoryImpl {
   async createItemWithAttachments(input: VaultItemInput, attachments: VaultAttachmentInput[],
     onProgress?: (completed: number, total: number) => void): Promise<string> {
     try {
-    this.validateItemFields(input.type, input.title, input.username, input.password, input.notes);
+    this.validateItemFields(input.type, input.title, input.username, input.password, input.website, input.notes);
     if (attachments.length === 0) { throw new Error('请先选择附件'); }
     const storedAttachments = await this.storeAttachments(attachments, onProgress);
     const store = this.requireStore();
@@ -415,6 +420,7 @@ class VaultRepositoryImpl {
         title: input.title.trim(),
         username: input.username.trim(),
         password: input.password,
+        website: input.website.trim(),
         notes: input.notes,
         ocr_text: '',
         created_at: now,
@@ -608,13 +614,14 @@ class VaultRepositoryImpl {
 
   async updateItem(item: VaultItem): Promise<void> {
     try {
-    this.validateItemFields(item.type, item.title, item.username, item.password, item.notes);
+    this.validateItemFields(item.type, item.title, item.username, item.password, item.website, item.notes);
     const values: relationalStore.ValuesBucket = {
       type: item.type,
       group_id: item.groupId,
       title: item.title.trim(),
       username: item.username.trim(),
       password: item.password,
+      website: item.website.trim(),
       notes: item.notes,
       updated_at: Date.now()
     };
@@ -763,14 +770,16 @@ class VaultRepositoryImpl {
 
       const items: BackupItemRecord[] = [];
       const itemResult = await store.querySql(
-        'SELECT id, type, group_id, title, username, password, notes, ocr_text, created_at, updated_at, deleted_at ' +
+        'SELECT id, type, group_id, title, username, password, website, notes, ocr_text, ' +
+        'created_at, updated_at, deleted_at ' +
         'FROM vault_items WHERE deleted_at = 0 ORDER BY created_at ASC');
       try {
         while (itemResult.goToNextRow()) {
           items.push({ id: itemResult.getString(0), type: itemResult.getString(1) as VaultItemType,
             groupId: itemResult.getLong(2), title: itemResult.getString(3), username: itemResult.getString(4),
-            password: itemResult.getString(5), notes: itemResult.getString(6), ocrText: itemResult.getString(7),
-            createdAt: itemResult.getLong(8), updatedAt: itemResult.getLong(9), deletedAt: itemResult.getLong(10) });
+            password: itemResult.getString(5), website: itemResult.getString(6), notes: itemResult.getString(7),
+            ocrText: itemResult.getString(8), createdAt: itemResult.getLong(9),
+            updatedAt: itemResult.getLong(10), deletedAt: itemResult.getLong(11) });
         }
       } finally { itemResult.close(); }
 
@@ -931,6 +940,7 @@ class VaultRepositoryImpl {
           await store.insert('vault_items', { id: targetItemId, type: item.type,
             group_id: mappedGroupId,
             title: restoredTitle, username: item.username, password: item.password, notes: item.notes,
+            website: item.website,
             ocr_text: item.ocrText, created_at: item.createdAt, updated_at: item.updatedAt, deleted_at: item.deletedAt });
           const itemAttachments = importedAttachmentsByItem.get(targetItemId) ?? [];
           for (let attachmentIndex = 0; attachmentIndex < itemAttachments.length; attachmentIndex += 1) {
@@ -1292,14 +1302,16 @@ class VaultRepositoryImpl {
     try {
     const items = new Map<string, BackupItemRecord>();
     const result = await this.requireStore().querySql(
-      'SELECT id, type, group_id, title, username, password, notes, ocr_text, created_at, updated_at, deleted_at ' +
+      'SELECT id, type, group_id, title, username, password, website, notes, ocr_text, ' +
+      'created_at, updated_at, deleted_at ' +
       'FROM vault_items');
     try {
       while (result.goToNextRow()) {
         const item: BackupItemRecord = { id: result.getString(0), type: result.getString(1) as VaultItemType,
           groupId: result.getLong(2), title: result.getString(3), username: result.getString(4),
-          password: result.getString(5), notes: result.getString(6), ocrText: result.getString(7),
-          createdAt: result.getLong(8), updatedAt: result.getLong(9), deletedAt: result.getLong(10) };
+          password: result.getString(5), website: result.getString(6), notes: result.getString(7),
+          ocrText: result.getString(8), createdAt: result.getLong(9),
+          updatedAt: result.getLong(10), deletedAt: result.getLong(11) };
         items.set(item.id, item);
       }
     } finally { result.close(); }
@@ -1417,6 +1429,7 @@ class VaultRepositoryImpl {
   private itemSignature(item: BackupItemRecord, groupName: string, attachments: string, title: string): string {
     return this.signatureField(item.type) + this.signatureField(groupName) + this.signatureField(title) +
       this.signatureField(item.username) + this.signatureField(item.password) + this.signatureField(item.notes) +
+      this.signatureField(item.website) +
       this.signatureField(item.ocrText) + this.signatureField(item.deletedAt.toString()) +
       this.signatureField(attachments);
   }
@@ -1538,6 +1551,7 @@ class VaultRepositoryImpl {
       title: result.getString(result.getColumnIndex('title')),
       username: result.getString(result.getColumnIndex('username')),
       password: result.getString(result.getColumnIndex('password')),
+      website: result.getString(result.getColumnIndex('website')),
       notes: result.getString(result.getColumnIndex('notes')),
       ocrText: result.getString(result.getColumnIndex('ocr_text')),
       createdAt: result.getLong(result.getColumnIndex('created_at')),
@@ -1548,6 +1562,7 @@ class VaultRepositoryImpl {
       throw normalizeError(error);
     }
   }
+
 
   private requireStore(): relationalStore.RdbStore {
     if (!this.store) {

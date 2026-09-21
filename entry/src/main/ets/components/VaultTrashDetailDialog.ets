@@ -19,6 +19,7 @@ export struct VaultTrashDetailDialog {
       title: '',
       username: '',
       password: '',
+      website: '',
       notes: '',
       ocrText: '',
       createdAt: 0,
@@ -112,6 +113,9 @@ export struct VaultTrashDetailDialog {
             this.readOnlyField('名称', this.entry.item.title)
             if (this.entry.item.type === VaultItemType.Login) {
               this.loginFields()
+              if (this.entry.item.website.length > 0) {
+                this.readOnlyField('网站地址', this.entry.item.website)
+              }
             }
             if (this.entry.item.notes.length > 0) {
               this.readOnlyField(this.entry.item.type === VaultItemType.Note ? '内容' : '备注',

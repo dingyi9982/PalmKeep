@@ -7,7 +7,7 @@ async function applySchemaMigration(store: relationalStore.RdbStore, version: nu
   try {
     if (version === 1) {
       await store.executeSql('CREATE TABLE IF NOT EXISTS vault_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL, created_at INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0)');
-      await store.executeSql('CREATE TABLE IF NOT EXISTS vault_items (id TEXT PRIMARY KEY, type TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL, username TEXT NOT NULL DEFAULT \'\', password TEXT NOT NULL DEFAULT \'\', notes TEXT NOT NULL DEFAULT \'\', ocr_text TEXT NOT NULL DEFAULT \'\', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL DEFAULT 0)');
+      await store.executeSql('CREATE TABLE IF NOT EXISTS vault_items (id TEXT PRIMARY KEY, type TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL, username TEXT NOT NULL DEFAULT \'\', password TEXT NOT NULL DEFAULT \'\', website TEXT NOT NULL DEFAULT \'\', notes TEXT NOT NULL DEFAULT \'\', ocr_text TEXT NOT NULL DEFAULT \'\', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL DEFAULT 0)');
       await store.executeSql('CREATE TABLE IF NOT EXISTS vault_group_tombstones (group_id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT NOT NULL, created_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL)');
       await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_attachments (item_id TEXT NOT NULL, attachment_index INTEGER NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL, source_uri TEXT NOT NULL, ocr_text TEXT NOT NULL DEFAULT \'\', storage_name TEXT NOT NULL, size_bytes INTEGER NOT NULL, PRIMARY KEY (item_id, attachment_index))');
       await store.executeSql('CREATE TABLE IF NOT EXISTS vault_item_tombstones (item_id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)');
@@ -17,6 +17,32 @@ async function applySchemaMigration(store: relationalStore.RdbStore, version: nu
       return;
     }
     throw new Error(`未定义数据库迁移 v${version}`);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+async function hasSchemaColumn(store: relationalStore.RdbStore,
+  table: string, column: string): Promise<boolean> {
+  try {
+    const columns = await store.querySql(`PRAGMA table_info(${table})`);
+    try {
+      const nameIndex = columns.getColumnIndex('name');
+      while (columns.goToNextRow()) {
+        if (columns.getString(nameIndex) === column) { return true; }
+      }
+      return false;
+    } finally { columns.close(); }
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+async function finalizeFirstSchema(store: relationalStore.RdbStore): Promise<void> {
+  try {
+    if (!await hasSchemaColumn(store, 'vault_items', 'website')) {
+      await store.executeSql('ALTER TABLE vault_items ADD COLUMN website TEXT NOT NULL DEFAULT \'\'');
+    }
   } catch (error) {
     throw normalizeError(error);
   }
@@ -53,6 +79,7 @@ async function validateSchema(store: relationalStore.RdbStore): Promise<void> {
     }
     await requireSchemaColumn(store, 'vault_groups', 'sort_order');
     await requireSchemaColumn(store, 'vault_items', 'ocr_text');
+    await requireSchemaColumn(store, 'vault_items', 'website');
     await requireSchemaColumn(store, 'vault_item_attachments', 'storage_name');
     await requireSchemaColumn(store, 'vault_item_attachments', 'size_bytes');
   } catch (error) {
@@ -70,6 +97,7 @@ export async function migrateVaultDatabase(store: relationalStore.RdbStore): Pro
     // The app is still on its first public schema. Keep CREATE IF NOT EXISTS idempotent
     // so development builds with an earlier v1 database receive newly finalized v1 tables.
     await applySchemaMigration(store, DATABASE_SCHEMA_VERSION);
+    await finalizeFirstSchema(store);
     await validateSchema(store);
     return;
   }
@@ -83,6 +111,7 @@ export async function migrateVaultDatabase(store: relationalStore.RdbStore): Pro
       await applySchemaMigration(store, migratingVersion);
       migratingVersion += 1;
     }
+    await finalizeFirstSchema(store);
     store.commit();
     transactionStarted = false;
     // HarmonyOS may serve schema queries from another connection which cannot

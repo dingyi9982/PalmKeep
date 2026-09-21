@@ -1,6 +1,6 @@
 import { VaultAttachmentGallery } from './VaultAttachmentGallery';
 import { VaultFileGallery } from './VaultFileGallery';
-import { VaultScreenshotProtectionHint } from './VaultCommonComponents';
+import { VaultLoginFieldsEditor } from './VaultLoginFieldsEditor';
 import {
   COLOR_BG, COLOR_DANGER, COLOR_DANGER_DARK_SURFACE, COLOR_DARK_SURFACE, COLOR_MUTED,
   COLOR_PRIMARY, COLOR_SURFACE, COLOR_SURFACE_2, COLOR_TEXT, COLOR_TYPE_BADGE, COLOR_SCRIM
@@ -19,6 +19,7 @@ export struct VaultItemDetailDialog {
     title: '',
     username: '',
     password: '',
+    website: '',
     notes: '',
     ocrText: '',
     createdAt: 0,
@@ -30,6 +31,7 @@ export struct VaultItemDetailDialog {
   @Link title: string;
   @Link username: string;
   @Link password: string;
+  @Link website: string;
   @Link notes: string;
   @Link groupId: number;
   @Link revealPassword: boolean;
@@ -37,6 +39,8 @@ export struct VaultItemDetailDialog {
   onSave: () => void = (): void => {};
   onTrash: () => void = (): void => {};
   onPasswordVisibilityChange: (visible: boolean) => void = (): void => {};
+  onCopyLoginValue: (value: string, label: string) => void = (): void => {};
+  onOpenWebsite: (website: string) => void = (): void => {};
 
   @Builder
   private typeIcon(type: VaultItemType): void {
@@ -191,22 +195,24 @@ export struct VaultItemDetailDialog {
         .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)
         .onChange((value: string): void => { this.title = value; })
       if (this.item.type === VaultItemType.Login) {
-        TextInput({ placeholder: '账号', text: this.username })
-          .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)
-          .onChange((value: string): void => { this.username = value; })
-        TextInput({ placeholder: '密码', text: this.password })
-          .type(InputType.Password)
-          .showPassword(this.revealPassword)
-          .width('100%').fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
-          .height(44).borderRadius(11)
-          .onChange((value: string): void => { this.password = value; })
-          .onSecurityStateChange((visible: boolean): void => {
-            this.revealPassword = visible;
-            this.onPasswordVisibilityChange(visible);
-          })
-        if (this.revealPassword) {
-          VaultScreenshotProtectionHint()
-        }
+        Row({ space: 7 }) {
+          TextInput({ placeholder: '网站地址', text: this.website })
+            .layoutWeight(1).fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
+            .height(44).borderRadius(11)
+            .onChange((value: string): void => { this.website = value; })
+          Button('打开').height(42).fontSize(11).fontColor(COLOR_PRIMARY)
+            .backgroundColor(COLOR_SURFACE_2).borderRadius(11)
+            .enabled(this.website.trim().length > 0)
+            .onClick((): void => { this.onOpenWebsite(this.website); })
+        }.width('100%')
+        VaultLoginFieldsEditor({
+          username: $username,
+          password: $password,
+          revealPassword: $revealPassword,
+          allowUtilities: true,
+          onCopy: this.onCopyLoginValue,
+          onPasswordVisibilityChange: this.onPasswordVisibilityChange
+        })
       }
       this.notesEditor(this.item.type)
       this.actionButtons(false)

@@ -17,6 +17,7 @@ export interface BackupItemRecord {
   title: string;
   username: string;
   password: string;
+  website: string;
   notes: string;
   ocrText: string;
   createdAt: number;
