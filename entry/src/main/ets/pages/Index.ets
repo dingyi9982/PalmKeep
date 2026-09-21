@@ -7,28 +7,26 @@ import { VaultBackupDialog } from '../components/VaultBackupDialog';
 import { VaultBottomNavigation } from '../components/VaultBottomNavigation';
 import { VaultGroupManager } from '../components/VaultGroupManager';
 import { VaultCategoryPanel } from '../components/VaultCategoryPanel';
+import { VaultItemDetailDialog } from '../components/VaultItemDetailDialog';
+import { VaultTrashDetailDialog } from '../components/VaultTrashDetailDialog';
 import {
   ChangePasswordDialog, GestureSetupDialog, RecoveryCenterDialog, ResetVaultDialog
 } from '../components/VaultSecurityDialogs';
 import {
   COLOR_BG, COLOR_BORDER, COLOR_CARD_HIGHLIGHT, COLOR_CHEVRON, COLOR_DANGER,
-  COLOR_DANGER_DARK_SURFACE, COLOR_DANGER_TINT, COLOR_DANGER_WASH, COLOR_DANGER_WASH_STRONG,
-  COLOR_DARK_ACTION, COLOR_DARK_SURFACE, COLOR_DISABLED, COLOR_DIVIDER_SOFT, COLOR_GROUP_DRAG,
+  COLOR_DANGER_TINT, COLOR_DANGER_WASH, COLOR_DANGER_WASH_STRONG, COLOR_DARK_ACTION,
+  COLOR_DISABLED, COLOR_DIVIDER_SOFT, COLOR_GROUP_DRAG,
   COLOR_HERO_MUTED, COLOR_HERO_PILL, COLOR_HERO_SURFACE, COLOR_HERO_TEXT, COLOR_HERO_TITLE,
   COLOR_MUTED, COLOR_MUTED_LIGHT, COLOR_ON_DARK, COLOR_PLACEHOLDER, COLOR_PLACEHOLDER_LIGHT,
   COLOR_PRIMARY, COLOR_PRIMARY_ALT_TINT, COLOR_PRIMARY_TINT, COLOR_PRIMARY_WASH, COLOR_SCRIM,
-  COLOR_SCRIM_STRONG, COLOR_SURFACE, COLOR_SURFACE_2, COLOR_TEXT, COLOR_TEXT_SECONDARY,
-  COLOR_TYPE_BADGE
+  COLOR_SCRIM_STRONG, COLOR_SURFACE, COLOR_SURFACE_2, COLOR_TEXT, COLOR_TEXT_SECONDARY
 } from '../components/VaultTheme';
 import { VaultThumbnail } from '../components/VaultThumbnail';
 import { VaultAttachmentPreview } from '../components/VaultAttachmentPreview';
-import { VaultAttachmentGallery } from '../components/VaultAttachmentGallery';
 import { VaultFileSummary } from '../components/VaultFileSummary';
-import { VaultFileGallery } from '../components/VaultFileGallery';
-import { VaultDialogHeader } from '../components/VaultCommonComponents';
+import { VaultDialogHeader, VaultScreenshotProtectionHint } from '../components/VaultCommonComponents';
 import {
-  ACTION_CANCEL, ACTION_DELETE, ACTION_MANAGE, ACTION_SAVE, LABEL_CONTENT, LABEL_NAME, LABEL_NOTES,
-  TITLE_ITEM_DETAILS
+  ACTION_CANCEL, ACTION_DELETE, ACTION_MANAGE, ACTION_SAVE, LABEL_CONTENT, LABEL_NAME, LABEL_NOTES
 } from '../components/VaultCopy';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { logRecoverableError, normalizeError } from '../services/ErrorUtils';
@@ -41,7 +39,6 @@ import { PreparedVaultBackup, VaultBackupService } from '../services/VaultBackup
 import { vaultUiPreferences } from '../services/VaultUiPreferences';
 import { BUILD_GIT_LABEL } from '../generated/BuildMetadata';
 import {
-  itemTypeGlyph,
   itemTypeLabel,
   VaultAttachmentInput,
   VaultGroup,
@@ -1561,11 +1558,6 @@ struct Index {
       } catch (error) {
       throw normalizeError(error);
     }
-  }
-
-  private toggleTrashPasswordVisibility(): void {
-    this.revealTrashPassword = !this.revealTrashPassword;
-    AbilityContextHolder.setPrivacyMode(this.revealTrashPassword);
   }
 
   private async copyTrashUsername(username: string): Promise<void> {
@@ -3099,10 +3091,39 @@ struct Index {
         this.deleteGroupOverlay(this.groupPendingDelete as VaultGroup)
       }
       if (this.selectedTrashEntry) {
-        this.trashDetailOverlay(this.selectedTrashEntry as VaultTrashEntry)
+        VaultTrashDetailDialog({
+          entry: this.selectedTrashEntry as VaultTrashEntry,
+          deletedTimeText: this.formatTrashTime((this.selectedTrashEntry as VaultTrashEntry).item.deletedAt),
+          revealPassword: $revealTrashPassword,
+          onClose: (): void => { this.closeTrashDetail(); },
+          onRestore: (): void => { this.trashAction((this.selectedTrashEntry as VaultTrashEntry).item, false); },
+          onPermanentlyDelete: (): void => {
+            this.trashAction((this.selectedTrashEntry as VaultTrashEntry).item, true);
+          },
+          onCopyUsername: (username: string): void => { this.copyTrashUsername(username); },
+          onPasswordVisibilityChange: (visible: boolean): void => {
+            AbilityContextHolder.setPrivacyMode(visible);
+          }
+        })
       }
       if (this.selectedItem) {
-        this.detailOverlay(this.selectedItem as VaultItem)
+        VaultItemDetailDialog({
+          item: this.selectedItem as VaultItem,
+          groups: this.groups,
+          initialAttachmentIndex: this.selectedAttachmentIndex,
+          title: $detailTitle,
+          username: $detailUsername,
+          password: $detailPassword,
+          notes: $detailNotes,
+          groupId: $detailGroupId,
+          revealPassword: $revealPassword,
+          onClose: (): void => { this.closeSelectedItem(); },
+          onSave: (): void => { this.saveSelectedItem(); },
+          onTrash: (): void => { this.trashSelectedItem(); },
+          onPasswordVisibilityChange: (visible: boolean): void => {
+            AbilityContextHolder.setPrivacyMode(visible);
+          }
+        })
       }
       if (this.showGestureSetup) {
         GestureSetupDialog({
@@ -3139,142 +3160,8 @@ struct Index {
   }
 
   @Builder
-  private trashReadOnlyField(label: string, value: string): void {
-    Column({ space: 4 }) {
-      Text(label).fontSize(11).fontColor(COLOR_MUTED).width('100%')
-      Text(value.length > 0 ? value : '—')
-        .fontSize(14).fontColor(value.length > 0 ? COLOR_TEXT : COLOR_MUTED)
-        .width('100%').textAlign(TextAlign.Start)
-    }
-    .width('100%').padding(10).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
-  }
-
-  @Builder
-  private trashDetailOverlay(entry: VaultTrashEntry): void {
-    Column() {
-      Blank().onClick((): void => { this.closeTrashDetail(); })
-      Scroll() {
-        Column({ space: 8 }) {
-          this.modalHeader('只读详情', (): void => { this.closeTrashDetail(); })
-          Row({ space: 6 }) {
-            Text(itemTypeLabel(entry.item.type)).fontSize(11).fontColor(COLOR_PRIMARY)
-              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(9)
-            Text(entry.originalGroupName).fontSize(11).fontColor(COLOR_MUTED)
-            Blank()
-            Text(this.formatTrashTime(entry.item.deletedAt)).fontSize(10).fontColor(COLOR_MUTED)
-          }.width('100%')
-          if (entry.item.type === VaultItemType.Image || entry.item.type === VaultItemType.Video) {
-            if (entry.item.title.length > 0) {
-              Text(entry.item.title).fontSize(16).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT).width('100%')
-            }
-            VaultAttachmentGallery({ itemId: entry.item.id, fallbackType: entry.item.type, readOnly: true })
-            if (entry.item.notes.length > 0) {
-              this.trashReadOnlyField('备注', entry.item.notes)
-            }
-          } else {
-            this.trashReadOnlyField('名称', entry.item.title)
-            if (entry.item.type === VaultItemType.Login) {
-              Row({ space: 6 }) {
-                Column({ space: 4 }) {
-                  Text('账号').fontSize(11).fontColor(COLOR_MUTED).width('100%')
-                  Text(entry.item.username.length > 0 ? entry.item.username : '—')
-                    .fontSize(14).fontColor(entry.item.username.length > 0 ? COLOR_TEXT : COLOR_MUTED)
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-                }.layoutWeight(1).padding(10).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
-                Button('复制').height(44).fontSize(12).fontColor(COLOR_PRIMARY)
-                  .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(11)
-                  .enabled(entry.item.username.length > 0)
-                  .onClick((): void => { this.copyTrashUsername(entry.item.username); })
-              }.width('100%')
-              Row({ space: 6 }) {
-                Column({ space: 4 }) {
-                  Text('密码').fontSize(11).fontColor(COLOR_MUTED).width('100%')
-                  Text(this.revealTrashPassword ? entry.item.password : '••••••••')
-                    .fontSize(14).fontColor(COLOR_TEXT).maxLines(1).width('100%')
-                }.layoutWeight(1).padding(10).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
-                this.passwordEyeButton(this.revealTrashPassword, 44,
-                  (): void => { this.toggleTrashPasswordVisibility(); })
-              }.width('100%')
-              if (this.revealTrashPassword) { this.screenshotProtectionHint() }
-            }
-            if (entry.item.notes.length > 0) {
-              this.trashReadOnlyField(entry.item.type === VaultItemType.Note ? '内容' : '备注', entry.item.notes)
-            }
-            if (entry.item.type === VaultItemType.File) {
-              VaultFileGallery({ itemId: entry.item.id, readOnly: true })
-            }
-          }
-          Row({ space: 8 }) {
-            Button('恢复').layoutWeight(1).height(46).fontWeight(FontWeight.Bold)
-              .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(13)
-              .onClick((): void => { this.trashAction(entry.item, false); })
-            Button('永久删除').layoutWeight(1).height(46).fontColor(COLOR_DANGER)
-              .backgroundColor(COLOR_DANGER_TINT).borderRadius(13)
-              .onClick((): void => { this.trashAction(entry.item, true); })
-          }.width('100%')
-        }
-        .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 14 })
-      }
-      .width('100%').constraintSize({ maxHeight: '94%' }).scrollBar(BarState.Off)
-      .backgroundColor(COLOR_SURFACE).borderRadius({ topLeft: 24, topRight: 24 })
-    }
-    .width('100%').height('100%').backgroundColor(COLOR_SCRIM)
-  }
-
-  @Builder
   private modalHeader(title: string, closeAction: () => void): void {
     VaultDialogHeader({ title: title, onClose: closeAction })
-  }
-
-  @Builder
-  private detailTypeIcon(type: VaultItemType): void {
-    if (type === VaultItemType.Image || type === VaultItemType.Video) {
-      Stack({ alignContent: Alignment.Center }) {
-        Stack() {
-          Circle({ width: 4, height: 4 }).fill(COLOR_PRIMARY).position({ left: 4, top: 3 })
-          Text('▶').fontSize(7).fontColor(COLOR_PRIMARY)
-            .width(9).height(9).textAlign(TextAlign.Center).position({ right: 2, bottom: 1 })
-        }
-        .width(20).height(15).border({ width: 1.6, color: COLOR_PRIMARY }).borderRadius(4)
-      }.width(22).height(22)
-    } else if (type === VaultItemType.File) {
-      Stack({ alignContent: Alignment.Center }) {
-        Stack() {
-          Column({ space: 2 }) {
-            Divider().width(8).strokeWidth(1.4).color(COLOR_PRIMARY)
-            Divider().width(8).strokeWidth(1.4).color(COLOR_PRIMARY)
-          }.position({ left: 4, top: 8 })
-          Stack().width(5).height(5)
-            .border({ width: { left: 1.4, bottom: 1.4 }, color: COLOR_PRIMARY })
-            .position({ right: 0, top: 0 })
-        }
-        .width(16).height(19).border({ width: 1.6, color: COLOR_PRIMARY }).borderRadius(3)
-      }.width(22).height(22)
-    } else {
-      Text(itemTypeGlyph(type)).fontSize(16).fontColor(COLOR_PRIMARY)
-        .width(22).height(22).textAlign(TextAlign.Center)
-    }
-  }
-
-  @Builder
-  private detailHeader(type: VaultItemType, closeAction: () => void): void {
-    Row({ space: 9 }) {
-      Text(TITLE_ITEM_DETAILS).fontSize(19).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-      Row({ space: 4 }) {
-        this.detailTypeIcon(type)
-        Text(itemTypeLabel(type)).fontSize(11).fontColor(COLOR_PRIMARY)
-      }
-      .height(28).padding({ left: 7, right: 9 })
-      .backgroundColor(COLOR_TYPE_BADGE).borderRadius(10)
-      Blank()
-      Stack() {
-        Text('×').fontSize(22).lineHeight(24).fontColor(COLOR_MUTED)
-      }
-      .width(38).height(38).backgroundColor(COLOR_SURFACE_2).borderRadius(11)
-      .onClick(closeAction)
-    }
-    .width('100%')
   }
 
   @Builder
@@ -3413,88 +3300,6 @@ struct Index {
   }
 
   @Builder
-  private passwordEyeButton(revealed: boolean, height: number, action: () => void): void {
-    Stack({ alignContent: Alignment.Center }) {
-      Stack({ alignContent: Alignment.Center }) {
-        Stack()
-          .width(22).height(14)
-          .border({ width: 2, color: COLOR_PRIMARY })
-          .borderRadius(9)
-        Circle({ width: 6, height: 6 }).fill(COLOR_PRIMARY)
-      }
-      if (!revealed) {
-        Divider().width(27).strokeWidth(2).color(COLOR_PRIMARY).borderRadius(1)
-          .rotate({ angle: -42 })
-      }
-    }
-    .width(46).height(height)
-    .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(11)
-    .onClick(action)
-  }
-
-  @Builder
-  private screenshotProtectionHint(): void {
-    Row({ space: 5 }) {
-      Text('✓').fontSize(11).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY)
-      Text('已禁止截屏').fontSize(11).fontColor(COLOR_PRIMARY)
-    }
-    .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-    .backgroundColor(COLOR_DARK_ACTION)
-    .borderRadius(12)
-    .alignSelf(ItemAlign.Start)
-  }
-
-  @Builder
-  private detailNotesEditor(type: VaultItemType): void {
-    TextArea({ placeholder: type === VaultItemType.Note ? LABEL_CONTENT : LABEL_NOTES, text: this.detailNotes })
-      .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
-      .height(this.detailNotesHeight(type))
-      .borderRadius(11)
-      .onChange((value: string): void => { this.detailNotes = value; })
-  }
-
-  private detailNotesHeight(type: VaultItemType): number {
-    const text = this.detailNotes.trim();
-    if (text.length === 0) { return 52; }
-    let visualLines = 0;
-    text.split('\n').forEach((line: string): void => {
-      visualLines += Math.max(1, Math.ceil(line.length / 24));
-    });
-    const desiredHeight = 24 + visualLines * 20;
-    const maximumHeight = type === VaultItemType.Note ? 160 :
-      (type === VaultItemType.Login ? 82 : 104);
-    return Math.max(52, Math.min(maximumHeight, desiredHeight));
-  }
-
-  @Builder
-  private detailGroupChip(groupId: number, name: string): void {
-    Text(name)
-      .fontSize(12)
-      .fontColor(this.detailGroupId === groupId ? COLOR_BG : COLOR_MUTED)
-      .maxLines(1)
-      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-      .backgroundColor(this.detailGroupId === groupId ? COLOR_PRIMARY : COLOR_SURFACE_2)
-      .borderRadius(16)
-      .margin({ right: 6, bottom: 6 })
-      .onClick((): void => { this.detailGroupId = groupId; })
-  }
-
-  @Builder
-  private detailGroupPicker(): void {
-    Column({ space: 6 }) {
-      Text('移动到分组').fontSize(12).fontColor(COLOR_MUTED).width('100%')
-      Flex({ direction: FlexDirection.Row, wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
-        this.detailGroupChip(0, '未分组')
-        ForEach(this.groups, (group: VaultGroup): void => {
-          this.detailGroupChip(group.id, group.name)
-        }, (group: VaultGroup): string => `${group.id}-${group.name}`)
-      }
-      .width('100%')
-    }
-    .width('100%')
-  }
-
-  @Builder
   private newItemOverlay(): void {
     Column() {
       Scroll() {
@@ -3544,7 +3349,7 @@ struct Index {
                 AbilityContextHolder.setPrivacyMode(visible);
               })
             if (this.revealNewPassword) {
-              this.screenshotProtectionHint()
+              VaultScreenshotProtectionHint()
             }
           }
           if (this.newType === VaultItemType.Image) {
@@ -3697,97 +3502,6 @@ struct Index {
       .backgroundColor(COLOR_SURFACE)
       .borderRadius(24)
       Blank().onClick((): void => { this.closeNewGroup(); })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(COLOR_SCRIM)
-  }
-
-  @Builder
-  private detailOverlay(item: VaultItem): void {
-    Column() {
-      Blank().onClick((): void => { this.closeSelectedItem(); })
-      Scroll() {
-        if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
-          Column({ space: 8 }) {
-            this.detailHeader(VaultItemType.Image, (): void => { this.closeSelectedItem(); })
-            VaultAttachmentGallery({
-              itemId: item.id,
-              fallbackType: item.type,
-              initialAttachmentIndex: this.selectedAttachmentIndex
-            })
-            Column() {
-              this.detailGroupPicker()
-            }
-            .width('100%').padding(9).backgroundColor(COLOR_DARK_SURFACE).borderRadius(15)
-            Column({ space: 7 }) {
-              TextInput({ placeholder: LABEL_NAME, text: this.detailTitle })
-                .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(42).borderRadius(11)
-                .onChange((value: string): void => { this.detailTitle = value; })
-              this.detailNotesEditor(item.type)
-            }
-            .width('100%').padding(9).backgroundColor(COLOR_DARK_SURFACE).borderRadius(15)
-            Row({ space: 10 }) {
-              Button('保存修改').fontSize(14).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
-                .layoutWeight(1).height(44)
-                .backgroundColor(COLOR_PRIMARY).borderRadius(14)
-                .onClick((): void => { this.saveSelectedItem(); })
-              Button('移入回收站').fontSize(14).fontColor(COLOR_DANGER)
-                .layoutWeight(1).height(44)
-                .backgroundColor(COLOR_DANGER_DARK_SURFACE).borderRadius(14)
-                .onClick((): void => { this.trashSelectedItem(); })
-            }
-            .width('100%')
-          }
-          .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 12 })
-        } else {
-          Column({ space: 9 }) {
-            this.detailHeader(item.type, (): void => { this.closeSelectedItem(); })
-            this.detailGroupPicker()
-            if (item.type === VaultItemType.File) {
-              VaultFileGallery({ itemId: item.id })
-            }
-            TextInput({ placeholder: LABEL_NAME, text: this.detailTitle })
-              .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)
-              .onChange((value: string): void => { this.detailTitle = value; })
-            if (item.type === VaultItemType.Login) {
-              TextInput({ placeholder: '账号', text: this.detailUsername })
-                .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)
-                .onChange((value: string): void => { this.detailUsername = value; })
-              TextInput({ placeholder: '密码', text: this.detailPassword })
-                .type(InputType.Password)
-                .showPassword(this.revealPassword)
-                .width('100%').fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2)
-                .height(44).borderRadius(11)
-                .onChange((value: string): void => { this.detailPassword = value; })
-                .onSecurityStateChange((visible: boolean): void => {
-                  this.revealPassword = visible;
-                  AbilityContextHolder.setPrivacyMode(visible);
-                })
-              if (this.revealPassword) { this.screenshotProtectionHint() }
-            }
-            this.detailNotesEditor(item.type)
-            Row({ space: 10 }) {
-              Button('保存修改')
-                .layoutWeight(1).height(46).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
-                .backgroundColor(COLOR_PRIMARY).borderRadius(12)
-                .onClick((): void => { this.saveSelectedItem(); })
-              Button('移入回收站')
-                .layoutWeight(1).height(46).fontColor(COLOR_DANGER)
-                .backgroundColor(COLOR_DANGER_DARK_SURFACE).borderRadius(12)
-                .onClick((): void => { this.trashSelectedItem(); })
-            }
-            .width('100%')
-          }
-          .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 14 })
-        }
-      }
-      .width('100%')
-      .constraintSize({ maxHeight:
-        item.type === VaultItemType.Image || item.type === VaultItemType.Video ? '96%' : '88%' })
-      .scrollBar(BarState.Off)
-      .backgroundColor(COLOR_SURFACE)
-      .borderRadius({ topLeft: 24, topRight: 24 })
     }
     .width('100%')
     .height('100%')
