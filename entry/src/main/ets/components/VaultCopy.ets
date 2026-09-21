@@ -5,6 +5,7 @@ export const ACTION_DELETE: string = '删除';
 export const ACTION_DOWNLOAD: string = '下载';
 export const ACTION_ENABLE: string = '启用';
 export const ACTION_MANAGE: string = '管理';
+export const ACTION_PREVIEW: string = '预览';
 export const ACTION_SAVE: string = '保存';
 export const ACTION_SELECT: string = '选择';
 

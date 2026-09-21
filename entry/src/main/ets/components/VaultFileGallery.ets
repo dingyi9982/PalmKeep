@@ -3,14 +3,17 @@ import picker from '@ohos.file.picker';
 import { VaultAttachmentInput, VaultAttachmentSummary, VaultItemType } from '../models/VaultModels';
 import { mediaPickerService, PickedMedia } from '../services/MediaPickerService';
 import { vaultRepository } from '../services/VaultRepository';
-import { normalizeError } from '../services/ErrorUtils';
+import { logRecoverableError, normalizeError } from '../services/ErrorUtils';
 import {
-  ACTION_ADD, ACTION_CANCEL, ACTION_DELETE, ACTION_DOWNLOAD, TITLE_FILES, managementAction
+  vaultFilePreviewService, VaultFilePreviewResult
+} from '../services/VaultFilePreviewService';
+import {
+  ACTION_ADD, ACTION_CANCEL, ACTION_DELETE, ACTION_DOWNLOAD, ACTION_PREVIEW, TITLE_FILES, managementAction
 } from './VaultCopy';
 import {
   COLOR_DANGER, COLOR_DANGER_TINT, COLOR_MUTED, COLOR_MUTED_DARK, COLOR_ON_DARK,
   COLOR_NEUTRAL_BORDER, COLOR_NEUTRAL_TINT, COLOR_PRIMARY, COLOR_PRIMARY_DARK,
-  COLOR_PRIMARY_SELECTED_BG, COLOR_PRIMARY_TINT, COLOR_SELECTION_BORDER, COLOR_SURFACE_2,
+  COLOR_PRIMARY_SELECTED_BG, COLOR_SELECTION_BORDER, COLOR_SURFACE_2,
   COLOR_SURFACE_WASH, COLOR_TEXT_DARK, COLOR_TRANSPARENT
 } from './VaultTheme';
 
@@ -146,6 +149,29 @@ export struct VaultFileGallery {
     }
   }
 
+  private async preview(attachment: VaultAttachmentSummary): Promise<void> {
+    if (this.busy) { return; }
+    this.busy = true;
+    this.progressText = '正在准备预览';
+    try {
+      const result = await vaultFilePreviewService.open(this.itemId, attachment);
+      if (result === VaultFilePreviewResult.Unsupported) {
+        this.getUIContext().getPromptAction().showToast({ message: '该文件暂不支持预览，可下载后用其他应用打开' });
+      }
+    } catch (error) {
+      try {
+        this.getUIContext().getPromptAction().showToast({
+          message: error instanceof Error ? error.message : '文件预览失败'
+        });
+      } catch (toastError) {
+        logRecoverableError('could not show file preview error', toastError);
+      }
+    } finally {
+      this.busy = false;
+      this.progressText = '';
+    }
+  }
+
   private async deleteSelected(): Promise<void> {
     try {
     if (this.busy || this.selectedIndexes.length === 0 || this.readOnly) { return; }
@@ -195,8 +221,13 @@ export struct VaultFileGallery {
       }
       .layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (!this.managing) {
+        if (vaultFilePreviewService.canAttempt(attachment.name)) {
+          Button(ACTION_PREVIEW).height(32).fontSize(11).fontColor(COLOR_PRIMARY_DARK)
+            .backgroundColor(COLOR_TRANSPARENT).borderRadius(10)
+            .enabled(!this.busy).onClick((): void => { this.preview(attachment); })
+        }
         Button(ACTION_DOWNLOAD).height(32).fontSize(11).fontColor(COLOR_PRIMARY_DARK)
-          .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(10)
+          .backgroundColor(COLOR_TRANSPARENT).borderRadius(10)
           .enabled(!this.busy).onClick((): void => { this.download(attachment); })
       }
     }
