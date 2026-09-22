@@ -625,7 +625,7 @@ class VaultRepositoryImpl {
       password: item.password,
       website: item.website.trim(),
       notes: item.notes,
-      updated_at: Date.now()
+      updated_at: item.updatedAt
     };
     const predicates = new relationalStore.RdbPredicates('vault_items');
     predicates.equalTo('id', item.id);
@@ -673,14 +673,13 @@ class VaultRepositoryImpl {
       if (ids.length === 0) { return; }
       const store = this.requireStore();
       await this.requireGroup(groupId);
-      const now = Date.now();
       store.beginTransaction();
       try {
         for (let index = 0; index < ids.length; index += 1) {
           await store.executeSql(
-            'UPDATE vault_items SET group_id = ?, updated_at = ? ' +
+            'UPDATE vault_items SET group_id = ? ' +
             'WHERE id = ? AND deleted_at = 0 AND group_id <> ?',
-            [groupId, now, ids[index], groupId]);
+            [groupId, ids[index], groupId]);
         }
         store.commit();
       } catch (error) {

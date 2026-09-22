@@ -1,6 +1,7 @@
 import { VaultAttachmentGallery } from './VaultAttachmentGallery';
 import { VaultFileGallery } from './VaultFileGallery';
 import { VaultLoginFieldsEditor } from './VaultLoginFieldsEditor';
+import { VaultItemTimeInfo } from './VaultCommonComponents';
 import {
   COLOR_BG, COLOR_DANGER, COLOR_DANGER_DARK_SURFACE, COLOR_DARK_SURFACE, COLOR_MUTED,
   COLOR_PRIMARY, COLOR_SURFACE, COLOR_SURFACE_2, COLOR_TEXT, COLOR_TYPE_BADGE, COLOR_SCRIM
@@ -12,7 +13,7 @@ import {
 
 @Component
 export struct VaultItemDetailDialog {
-  item: VaultItem = {
+  @Prop item: VaultItem = {
     id: '',
     type: VaultItemType.Note,
     groupId: 0,
@@ -35,12 +36,32 @@ export struct VaultItemDetailDialog {
   @Link notes: string;
   @Link groupId: number;
   @Link revealPassword: boolean;
+  @Link createdAt: number;
+  @Link updatedAt: number;
+  @State private displayedUpdatedAt: number = 0;
+  busy: boolean = false;
   onClose: () => void = (): void => {};
-  onSave: () => void = (): void => {};
+  onSave: () => Promise<number> = async (): Promise<number> => 0;
   onTrash: () => void = (): void => {};
   onPasswordVisibilityChange: (visible: boolean) => void = (): void => {};
   onCopyLoginValue: (value: string, label: string) => void = (): void => {};
   onOpenWebsite: (website: string) => void = (): void => {};
+
+  aboutToAppear(): void {
+    this.displayedUpdatedAt = this.updatedAt;
+  }
+
+  private async saveChanges(): Promise<void> {
+    const savedAt = await this.onSave();
+    if (savedAt > 0) { this.displayedUpdatedAt = savedAt; }
+  }
+
+  @Builder
+  private timeInfo(): void {
+    ForEach([this.displayedUpdatedAt], (timestamp: number): void => {
+      VaultItemTimeInfo({ createdAt: this.createdAt, updatedAt: timestamp })
+    }, (timestamp: number): string => `detail-time-${this.createdAt}-${timestamp}`)
+  }
 
   @Builder
   private typeIcon(type: VaultItemType): void {
@@ -147,12 +168,14 @@ export struct VaultItemDetailDialog {
         .fontSize(14).fontColor(COLOR_DANGER)
         .layoutWeight(1).height(compact ? 44 : 46)
         .backgroundColor(COLOR_DANGER_DARK_SURFACE).borderRadius(compact ? 14 : 12)
+        .enabled(!this.busy).opacity(this.busy ? 0.45 : 1)
         .onClick((): void => { this.onTrash(); })
-      Button('保存修改')
+      Button(this.busy ? '正在保存…' : '保存修改')
         .fontSize(14).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
         .layoutWeight(1).height(compact ? 44 : 46)
         .backgroundColor(COLOR_PRIMARY).borderRadius(compact ? 14 : 12)
-        .onClick((): void => { this.onSave(); })
+        .enabled(!this.busy).opacity(this.busy ? 0.65 : 1)
+        .onClick((): void => { this.saveChanges(); })
     }
     .width('100%')
   }
@@ -177,6 +200,7 @@ export struct VaultItemDetailDialog {
         this.notesEditor(this.item.type)
       }
       .width('100%').padding(9).backgroundColor(COLOR_DARK_SURFACE).borderRadius(15)
+      this.timeInfo()
       this.actionButtons(true)
     }
     .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 12 })
@@ -214,6 +238,7 @@ export struct VaultItemDetailDialog {
         })
       }
       this.notesEditor(this.item.type)
+      this.timeInfo()
       this.actionButtons(false)
     }
     .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 14 })

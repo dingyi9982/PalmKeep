@@ -62,3 +62,38 @@ export struct VaultScreenshotProtectionHint {
     .alignSelf(ItemAlign.Start)
   }
 }
+
+@Component
+export struct VaultItemTimeInfo {
+  @Prop createdAt: number = 0;
+  @Prop updatedAt: number = 0;
+
+  private formatDateTime(timestamp: number): string {
+    if (timestamp <= 0) { return '—'; }
+    const date = new Date(timestamp);
+    const two = (value: number): string => value.toString().padStart(2, '0');
+    return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ` +
+      `${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+  }
+
+  @Builder
+  private timeRow(label: string, timestamp: number): void {
+    Row() {
+      Text(label).fontSize(11).fontColor(COLOR_MUTED)
+      Blank()
+      Text(this.formatDateTime(timestamp)).fontSize(12).fontColor(COLOR_TEXT)
+    }
+    .width('100%')
+  }
+
+  build() {
+    Column({ space: 7 }) {
+      this.timeRow('创建时间', this.createdAt)
+      this.timeRow('最后修改时间', this.updatedAt)
+    }
+    .width('100%')
+    .padding({ left: 11, right: 11, top: 9, bottom: 9 })
+    .backgroundColor(COLOR_SURFACE_2)
+    .borderRadius(RADIUS_SM + 1)
+  }
+}

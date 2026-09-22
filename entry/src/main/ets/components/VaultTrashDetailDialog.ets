@@ -1,7 +1,7 @@
 import { VaultAttachmentGallery } from './VaultAttachmentGallery';
 import { VaultFileGallery } from './VaultFileGallery';
 import {
-  VaultDialogHeader, VaultPasswordEyeButton, VaultScreenshotProtectionHint
+  VaultDialogHeader, VaultItemTimeInfo, VaultPasswordEyeButton, VaultScreenshotProtectionHint
 } from './VaultCommonComponents';
 import {
   COLOR_BG, COLOR_DANGER, COLOR_DANGER_TINT, COLOR_MUTED, COLOR_PRIMARY, COLOR_PRIMARY_TINT,
@@ -125,6 +125,10 @@ export struct VaultTrashDetailDialog {
               VaultFileGallery({ itemId: this.entry.item.id, readOnly: true })
             }
           }
+          VaultItemTimeInfo({
+            createdAt: this.entry.item.createdAt,
+            updatedAt: this.entry.item.updatedAt
+          })
           Row({ space: 8 }) {
             Button('恢复').layoutWeight(1).height(46).fontWeight(FontWeight.Bold)
               .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(13)

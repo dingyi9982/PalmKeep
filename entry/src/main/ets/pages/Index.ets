@@ -135,6 +135,7 @@ struct Index {
   @State private revealTrashPassword: boolean = false;
   @State private selectedItem?: VaultItem = undefined;
   @State private selectedAttachmentIndex: number = -1;
+  @State private detailSaving: boolean = false;
   @State private revealPassword: boolean = false;
   @State private showChangePassword: boolean = false;
   @State private currentPassword: string = '';
@@ -181,6 +182,8 @@ struct Index {
   @State private detailWebsite: string = '';
   @State private detailNotes: string = '';
   @State private detailGroupId: number = 0;
+  @State private detailCreatedAt: number = 0;
+  @State private detailUpdatedAt: number = 0;
   @State private showBackupDialog: boolean = false;
   @State private backupAction: string = 'create';
   @State private backupStage: string = 'password';
@@ -286,6 +289,10 @@ struct Index {
     }
     if (this.showNewItem) {
       this.requestCloseNewItem();
+      return true;
+    }
+    if (this.selectedItem) {
+      if (!this.detailSaving) { this.closeSelectedItem(); }
       return true;
     }
     if (this.selectedTrashEntry) {
@@ -683,6 +690,8 @@ struct Index {
     this.detailNotes = '';
     this.detailTitle = '';
     this.detailGroupId = 0;
+    this.detailCreatedAt = 0;
+    this.detailUpdatedAt = 0;
     this.captureMode = 'none';
     this.captureReturnsToDraft = false;
     this.resetNewItem();
@@ -986,9 +995,12 @@ struct Index {
 
   private async closeSelectedItem(refresh: boolean = true): Promise<void> {
     try {
+    if (this.detailSaving) { return; }
     this.selectedItem = undefined;
     this.selectedAttachmentIndex = -1;
     this.detailGroupId = 0;
+    this.detailCreatedAt = 0;
+    this.detailUpdatedAt = 0;
     this.detailPassword = '';
     this.revealPassword = false;
     try {
@@ -2352,37 +2364,66 @@ struct Index {
     this.detailPassword = item.password;
     this.detailWebsite = item.website;
     this.detailNotes = item.notes;
+    this.detailCreatedAt = item.createdAt;
+    this.detailUpdatedAt = item.updatedAt;
     this.revealPassword = false;
     AbilityContextHolder.setPrivacyMode(false);
   }
 
-  private async saveSelectedItem(): Promise<void> {
+  private async saveSelectedItem(): Promise<number> {
     try {
     const item = this.selectedItem;
-    if (!item) {
-      return;
+    if (!item || this.detailSaving) {
+      return 0;
     }
+    const normalizedTitle = this.detailTitle.trim();
+    const normalizedUsername = this.detailUsername.trim();
+    const normalizedWebsite = this.detailWebsite.trim();
     const moved = item.groupId !== this.detailGroupId;
+    const contentChanged = item.title !== normalizedTitle || item.username !== normalizedUsername ||
+      item.password !== this.detailPassword || item.website !== normalizedWebsite || item.notes !== this.detailNotes;
+    if (!moved && !contentChanged) {
+      this.getUIContext().getPromptAction().showToast({ message: '没有修改，无需保存' });
+      return 0;
+    }
+    const updatedAt = contentChanged ? Date.now() : item.updatedAt;
     const updated: VaultItem = {
       id: item.id,
       type: item.type,
       groupId: this.detailGroupId,
-      title: this.detailTitle,
-      username: this.detailUsername,
+      title: normalizedTitle,
+      username: normalizedUsername,
       password: this.detailPassword,
-      website: this.detailWebsite,
+      website: normalizedWebsite,
       notes: this.detailNotes,
       ocrText: item.ocrText,
       createdAt: item.createdAt,
-      updatedAt: Date.now(),
+      updatedAt: updatedAt,
       deletedAt: item.deletedAt
     };
+    this.detailSaving = true;
     try {
       await vaultRepository.updateItem(updated);
-      await this.closeSelectedItem();
-      this.getUIContext().getPromptAction().showToast({ message: moved ? '资料已移动并保存' : '修改已保存' });
+      this.detailUpdatedAt = updatedAt;
+      this.selectedItem = updated;
+      this.detailTitle = updated.title;
+      this.detailUsername = updated.username;
+      this.detailWebsite = updated.website;
+      await this.refreshData();
+      const refreshed = this.allItems.find((candidate: VaultItem): boolean => candidate.id === updated.id);
+      if (refreshed) {
+        this.selectedItem = refreshed;
+        this.detailCreatedAt = refreshed.createdAt;
+        this.detailUpdatedAt = refreshed.updatedAt;
+      }
+      const message = contentChanged ? (moved ? '资料已移动并保存' : '修改已保存') : '资料已移动';
+      this.getUIContext().getPromptAction().showToast({ message: message });
+      return updatedAt;
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+      return 0;
+    } finally {
+      this.detailSaving = false;
     }
       } catch (error) {
       throw normalizeError(error);
@@ -3772,8 +3813,11 @@ struct Index {
           notes: $detailNotes,
           groupId: $detailGroupId,
           revealPassword: $revealPassword,
+          createdAt: $detailCreatedAt,
+          updatedAt: $detailUpdatedAt,
+          busy: this.detailSaving,
           onClose: (): void => { this.closeSelectedItem(); },
-          onSave: (): void => { this.saveSelectedItem(); },
+          onSave: async (): Promise<number> => await this.saveSelectedItem(),
           onTrash: (): void => { this.trashSelectedItem(); },
           onPasswordVisibilityChange: (visible: boolean): void => {
             AbilityContextHolder.setPrivacyMode(visible);

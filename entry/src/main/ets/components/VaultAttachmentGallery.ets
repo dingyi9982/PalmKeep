@@ -45,6 +45,7 @@ export struct VaultAttachmentGallery {
   @State private fullScreenAutoPlay: boolean = false;
   @State private attachmentRevision: number = 0;
   @State private playbackRevision: number = 0;
+  @State private confirmedGalleryUris: string[] = [];
   private switchVersion: number = 0;
   private thumbnailLongPressTriggered: boolean = false;
   private suppressFullScreenUntil: number = 0;
@@ -94,14 +95,11 @@ export struct VaultAttachmentGallery {
 
   private isInGallery(attachment: VaultAttachmentSummary): boolean {
     try {
+    if (this.confirmedGalleryUris.indexOf(attachment.sourceUri) >= 0) { return true; }
     return mediaPickerService.isMediaInGallery(attachment.sourceUri);
       } catch (error) {
       throw normalizeError(error);
     }
-  }
-
-  private isPrivateOnly(attachment: VaultAttachmentSummary): boolean {
-    return attachment.sourceUri.length === 0;
   }
 
   private exportPath(attachment: VaultAttachmentSummary): string {
@@ -144,6 +142,9 @@ export struct VaultAttachmentGallery {
       if (savedUris.length !== pending.length) { throw new Error('系统相册没有返回完整的保存结果'); }
       for (let index = 0; index < pending.length; index += 1) {
         await vaultRepository.updateAttachmentSourceUri(this.itemId, pending[index].index, savedUris[index]);
+        if (this.confirmedGalleryUris.indexOf(savedUris[index]) < 0) {
+          this.confirmedGalleryUris = this.confirmedGalleryUris.concat(savedUris[index]);
+        }
         this.progress = 55 + Math.round(((index + 1) / pending.length) * 45);
       }
       await this.load(true);
@@ -433,14 +434,9 @@ export struct VaultAttachmentGallery {
             Stack({ alignContent: Alignment.TopStart }) {
               VaultThumbnail({ itemId: this.itemId, mediaType: attachment.type,
                 attachmentIndex: attachment.index, thumbnailSize: 52 })
-              if (this.isPrivateOnly(attachment)) {
-                Text('密').fontSize(8).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
-                  .width(18).height(18).backgroundColor(COLOR_PRIMARY_DARK).borderRadius(9).margin({ top: 4, left: 4 })
-              } else {
-                Circle({ width: 9, height: 9 })
-                  .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
-                  .stroke(COLOR_ON_DARK).strokeWidth(2).margin({ top: 5, left: 5 })
-              }
+              Circle({ width: 9, height: 9 })
+                .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
+                .stroke(COLOR_ON_DARK).strokeWidth(2).margin({ top: 5, left: 5 })
             }
             .width(56).height(56).padding(2).borderRadius(13)
             .border({ width: index === this.currentIndex ? 2 : 0,
@@ -575,14 +571,9 @@ export struct VaultAttachmentGallery {
         Text('▶').fontSize(15).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
           .width(30).height(30).backgroundColor(COLOR_OVERLAY_STRONG).borderRadius(15).position({ left: 8, bottom: 8 })
       }
-      if (this.isPrivateOnly(attachment)) {
-        Text('密').fontSize(9).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
-          .width(21).height(21).backgroundColor(COLOR_PRIMARY_DARK).borderRadius(11).position({ left: 7, top: 7 })
-      } else {
-        Circle({ width: 11, height: 11 })
-          .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
-          .stroke(COLOR_ON_DARK).strokeWidth(2).position({ left: 7, top: 7 })
-      }
+      Circle({ width: 11, height: 11 })
+        .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
+        .stroke(COLOR_ON_DARK).strokeWidth(2).position({ left: 7, top: 7 })
       if (this.selectionMode) {
         Text(this.isSelected(attachment.index) ? '✓' : '').fontSize(15).fontWeight(FontWeight.Bold)
           .fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center).width(26).height(26)
@@ -633,10 +624,6 @@ export struct VaultAttachmentGallery {
           Blank().width(7)
           Circle({ width: 8, height: 8 }).fill(COLOR_WARNING)
           Text('原图不在相册').fontSize(11).fontColor(COLOR_MUTED_DARK)
-          Blank().width(7)
-          Text('密').fontSize(8).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
-            .width(17).height(17).backgroundColor(COLOR_PRIMARY_DARK).borderRadius(9)
-          Text('仅保存在密匣').fontSize(11).fontColor(COLOR_MUTED_DARK)
         }.width('100%').padding({ left: 17, right: 17, bottom: 8 })
         if (this.selectionMode) {
           Row() {
