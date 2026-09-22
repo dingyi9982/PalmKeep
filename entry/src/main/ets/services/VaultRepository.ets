@@ -435,7 +435,7 @@ class VaultRepositoryImpl {
           attachment_index: index,
           type: attachment.type,
           name: attachment.name,
-          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri,
+          source_uri: attachment.sourceUri !== undefined ? attachment.sourceUri : attachment.uri,
           ocr_text: attachment.ocrText,
           storage_name: storedAttachments[index].storageName,
           size_bytes: storedAttachments[index].sizeBytes
@@ -497,7 +497,7 @@ class VaultRepositoryImpl {
           attachment_index: index,
           type: attachment.type,
           name: attachment.name,
-          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri,
+          source_uri: attachment.sourceUri !== undefined ? attachment.sourceUri : attachment.uri,
           ocr_text: attachment.ocrText,
           storage_name: storedAttachments[index].storageName,
           size_bytes: storedAttachments[index].sizeBytes
@@ -536,7 +536,7 @@ class VaultRepositoryImpl {
           attachment_index: attachmentIndex,
           type: attachment.type,
           name: attachment.name,
-          source_uri: attachment.sourceUri ? attachment.sourceUri : attachment.uri,
+          source_uri: attachment.sourceUri !== undefined ? attachment.sourceUri : attachment.uri,
           ocr_text: attachment.ocrText,
           storage_name: storedAttachments[index].storageName,
           size_bytes: storedAttachments[index].sizeBytes

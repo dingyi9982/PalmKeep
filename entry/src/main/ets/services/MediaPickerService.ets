@@ -13,6 +13,8 @@ export interface PickedMedia {
   type: VaultItemType;
   name: string;
   ocrText: string;
+  // Empty means that the source was created privately and never belonged to the system gallery.
+  sourceUri?: string;
 }
 
 export class MediaPickerService {

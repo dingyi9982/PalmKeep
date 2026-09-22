@@ -1,5 +1,9 @@
 {
   "string": [
+    {
+      "name": "camera_permission_reason",
+      "value": "用于在掌心密匣内直接拍摄私密照片和扫描文档"
+    },
     { "name": "app_name", "value": "掌心密匣" },
     { "name": "module_desc", "value": "纯本地加密的个人信息保险箱" },
     { "name": "entry_desc", "value": "安全保存账号、笔记、媒体和文件" }

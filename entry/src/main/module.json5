@@ -28,7 +28,15 @@
     ],
     "requestPermissions": [
       { "name": "ohos.permission.PRIVACY_WINDOW" },
-      { "name": "ohos.permission.ACCESS_BIOMETRIC" }
+      { "name": "ohos.permission.ACCESS_BIOMETRIC" },
+      {
+        "name": "ohos.permission.CAMERA",
+        "reason": "$string:camera_permission_reason",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      }
     ]
   }
 }

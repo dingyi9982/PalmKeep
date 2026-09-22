@@ -9,6 +9,9 @@ import { mediaPickerService, PickedMedia } from '../services/MediaPickerService'
 import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
+import { privateCaptureService } from '../services/PrivateCaptureService';
+import { PrivateCameraOverlay } from './PrivateCameraOverlay';
+import { VaultDocumentScanner } from './VaultDocumentScanner';
 import {
   ACTION_ADD, ACTION_CANCEL, ACTION_DELETE, ACTION_DOWNLOAD, ACTION_MANAGE,
   LABEL_READ_ONLY, TITLE_MEDIA, selectionAction
@@ -45,6 +48,7 @@ export struct VaultAttachmentGallery {
   private switchVersion: number = 0;
   private thumbnailLongPressTriggered: boolean = false;
   private suppressFullScreenUntil: number = 0;
+  private captureReturnMode: string = 'none';
 
   aboutToAppear(): void { this.load(); }
 
@@ -94,6 +98,10 @@ export struct VaultAttachmentGallery {
       } catch (error) {
       throw normalizeError(error);
     }
+  }
+
+  private isPrivateOnly(attachment: VaultAttachmentSummary): boolean {
+    return attachment.sourceUri.length === 0;
   }
 
   private exportPath(attachment: VaultAttachmentSummary): string {
@@ -197,7 +205,8 @@ export struct VaultAttachmentGallery {
               this.progress = 25 + Math.round(((index + value / 100) / newMedia.length) * 50);
             });
           temporaryPaths.push(path);
-          attachments.push({ type: mediaItem.type, uri: path, sourceUri: mediaItem.uri,
+          attachments.push({ type: mediaItem.type, uri: path,
+            sourceUri: mediaItem.sourceUri !== undefined ? mediaItem.sourceUri : mediaItem.uri,
             name: mediaItem.name, ocrText: mediaItem.ocrText });
         }
         if (attachments.length > 0) {
@@ -228,6 +237,96 @@ export struct VaultAttachmentGallery {
     }
       } catch (error) {
       throw normalizeError(error);
+    }
+  }
+
+  private openAddMenu(returnMode: string = 'none'): void {
+    if (this.busy) { return; }
+    this.captureReturnMode = returnMode;
+    this.overlayMode = 'add';
+  }
+
+  private importFromAddMenu(): void {
+    const returnMode = this.captureReturnMode;
+    this.overlayMode = returnMode;
+    setTimeout((): void => { this.importMedia(); }, 80);
+  }
+
+  private beginPrivateCapture(): void { this.overlayMode = 'camera'; }
+
+  private beginDocumentScan(): void {
+    if (!canIUse('SystemCapability.AI.Component.DocScan')) {
+      try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到私密拍摄' }); }
+      catch (error) {}
+      this.overlayMode = 'camera';
+      return;
+    }
+    this.overlayMode = 'scanner';
+  }
+
+  private cancelPrivateCapture(): void { this.overlayMode = this.captureReturnMode; }
+
+  private scannerUnavailable(): void {
+    try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到私密拍摄' }); }
+    catch (error) {}
+    this.overlayMode = 'none';
+    setTimeout((): void => { this.overlayMode = 'camera'; }, 120);
+  }
+
+  private async appendPrivateMedia(media: PickedMedia[]): Promise<void> {
+    if (media.length === 0) {
+      this.overlayMode = this.captureReturnMode;
+      return;
+    }
+    this.overlayMode = this.captureReturnMode;
+    this.busy = true;
+    this.progress = 0;
+    const compressedPaths: string[] = [];
+    try {
+      const imageCount = media.length;
+      this.progressText = `正在识别图片文字 0/${imageCount}`;
+      const ocrResults = await mediaOcrService.recognizeBatch(media,
+        (completed: number, total: number): void => {
+          this.progressText = `正在识别图片文字 ${completed}/${total}`;
+          this.progress = Math.round(completed / total * 25);
+        });
+      const attachments: VaultAttachmentInput[] = [];
+      for (let index = 0; index < media.length; index += 1) {
+        media[index].ocrText = ocrResults[index];
+        this.progressText = `正在压缩 ${index + 1}/${media.length}`;
+        const path = await mediaCompressionService.compress(media[index].uri, media[index].type,
+          (value: number): void => {
+            this.progress = 25 + Math.round(((index + value / 100) / media.length) * 50);
+          });
+        compressedPaths.push(path);
+        attachments.push({
+          type: media[index].type,
+          uri: path,
+          sourceUri: '',
+          name: media[index].name,
+          ocrText: media[index].ocrText
+        });
+      }
+      this.progressText = '正在写入本地数据';
+      await vaultRepository.appendItemAttachments(this.itemId, attachments,
+        (completed: number, total: number): void => {
+          this.progress = 75 + Math.round(completed / total * 25);
+        });
+      await this.load(true);
+      this.currentIndex = Math.max(0, this.attachments.length - media.length);
+      this.getUIContext().getPromptAction().showToast({ message: `已添加 ${media.length} 项私密素材` });
+    } catch (error) {
+      try {
+        this.getUIContext().getPromptAction().showToast({
+          message: error instanceof Error ? error.message : '私密素材保存失败'
+        });
+      } catch (promptError) {}
+    } finally {
+      compressedPaths.forEach((path: string): void => { mediaCompressionService.removeTemporary(path); });
+      privateCaptureService.removeMedia(media);
+      this.busy = false;
+      this.progress = 0;
+      this.progressText = '';
     }
   }
 
@@ -334,9 +433,14 @@ export struct VaultAttachmentGallery {
             Stack({ alignContent: Alignment.TopStart }) {
               VaultThumbnail({ itemId: this.itemId, mediaType: attachment.type,
                 attachmentIndex: attachment.index, thumbnailSize: 52 })
-              Circle({ width: 9, height: 9 })
-                .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
-                .stroke(COLOR_ON_DARK).strokeWidth(2).margin({ top: 5, left: 5 })
+              if (this.isPrivateOnly(attachment)) {
+                Text('密').fontSize(8).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+                  .width(18).height(18).backgroundColor(COLOR_PRIMARY_DARK).borderRadius(9).margin({ top: 4, left: 4 })
+              } else {
+                Circle({ width: 9, height: 9 })
+                  .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
+                  .stroke(COLOR_ON_DARK).strokeWidth(2).margin({ top: 5, left: 5 })
+              }
             }
             .width(56).height(56).padding(2).borderRadius(13)
             .border({ width: index === this.currentIndex ? 2 : 0,
@@ -471,9 +575,14 @@ export struct VaultAttachmentGallery {
         Text('▶').fontSize(15).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
           .width(30).height(30).backgroundColor(COLOR_OVERLAY_STRONG).borderRadius(15).position({ left: 8, bottom: 8 })
       }
-      Circle({ width: 11, height: 11 })
-        .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
-        .stroke(COLOR_ON_DARK).strokeWidth(2).position({ left: 7, top: 7 })
+      if (this.isPrivateOnly(attachment)) {
+        Text('密').fontSize(9).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+          .width(21).height(21).backgroundColor(COLOR_PRIMARY_DARK).borderRadius(11).position({ left: 7, top: 7 })
+      } else {
+        Circle({ width: 11, height: 11 })
+          .fill(this.isInGallery(attachment) ? COLOR_SUCCESS : COLOR_WARNING)
+          .stroke(COLOR_ON_DARK).strokeWidth(2).position({ left: 7, top: 7 })
+      }
       if (this.selectionMode) {
         Text(this.isSelected(attachment.index) ? '✓' : '').fontSize(15).fontWeight(FontWeight.Bold)
           .fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center).width(26).height(26)
@@ -513,7 +622,7 @@ export struct VaultAttachmentGallery {
           Text(`${this.attachments.length} 项媒体`).fontSize(11).fontColor(COLOR_MUTED_DARK)
         }.alignItems(HorizontalAlign.Start).layoutWeight(1)
         Button(ACTION_ADD).height(36).fontSize(13).fontColor(COLOR_PRIMARY_DARK).backgroundColor(COLOR_PRIMARY_TINT)
-          .borderRadius(18).enabled(!this.busy).onClick((): void => { this.importMedia(); })
+          .borderRadius(18).enabled(!this.busy).onClick((): void => { this.openAddMenu('manager'); })
         Button(selectionAction(this.selectionMode)).height(36).fontSize(13)
           .fontColor(this.selectionMode ? COLOR_MUTED_DARK : COLOR_PRIMARY_DARK).backgroundColor(COLOR_NEUTRAL_TINT)
           .borderRadius(18).enabled(!this.busy).onClick((): void => { this.toggleSelectionMode(); })
@@ -523,7 +632,11 @@ export struct VaultAttachmentGallery {
           Text('已在相册').fontSize(11).fontColor(COLOR_MUTED_DARK)
           Blank().width(7)
           Circle({ width: 8, height: 8 }).fill(COLOR_WARNING)
-          Text('未在相册').fontSize(11).fontColor(COLOR_MUTED_DARK)
+          Text('原图不在相册').fontSize(11).fontColor(COLOR_MUTED_DARK)
+          Blank().width(7)
+          Text('密').fontSize(8).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+            .width(17).height(17).backgroundColor(COLOR_PRIMARY_DARK).borderRadius(9)
+          Text('仅保存在密匣').fontSize(11).fontColor(COLOR_MUTED_DARK)
         }.width('100%').padding({ left: 17, right: 17, bottom: 8 })
         if (this.selectionMode) {
           Row() {
@@ -581,7 +694,7 @@ export struct VaultAttachmentGallery {
           Blank()
           if (!this.readOnly) {
             Button(ACTION_ADD).height(32).fontSize(13).fontColor(COLOR_PRIMARY_DARK).backgroundColor(COLOR_TRANSPARENT)
-              .enabled(!this.busy).onClick((): void => { this.importMedia(); })
+              .enabled(!this.busy).onClick((): void => { this.openAddMenu(); })
             Button(ACTION_MANAGE).height(32).fontSize(13).fontColor(COLOR_PRIMARY_DARK).backgroundColor(COLOR_TRANSPARENT)
               .enabled(!this.busy).onClick((): void => {
                 this.selectionMode = false; this.selectedIndexes = []; this.overlayMode = 'manager';
@@ -648,6 +761,45 @@ export struct VaultAttachmentGallery {
       this.fullScreenViewer()
     } else if (this.overlayMode === 'manager') {
       this.mediaManager()
+    } else if (this.overlayMode === 'add') {
+      this.addMediaMenu()
+    } else if (this.overlayMode === 'camera') {
+      PrivateCameraOverlay({
+        onComplete: (media: PickedMedia[]): void => { this.appendPrivateMedia(media); },
+        onCancel: (): void => { this.cancelPrivateCapture(); }
+      })
+    } else if (this.overlayMode === 'scanner') {
+      VaultDocumentScanner({
+        onComplete: (media: PickedMedia[]): void => { this.appendPrivateMedia(media); },
+        onCancel: (): void => { this.cancelPrivateCapture(); },
+        onUnavailable: (): void => { this.scannerUnavailable(); }
+      })
     }
+  }
+
+  @Builder
+  private addMediaMenu(): void {
+    Column() {
+      Blank().onClick((): void => { this.overlayMode = this.captureReturnMode; })
+      Column({ space: 8 }) {
+        Text('添加媒体').fontSize(18).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT_DEEP)
+          .width('100%').padding({ left: 4, bottom: 5 })
+        Button('从系统相册添加').width('100%').height(48).fontColor(COLOR_TEXT_DEEP)
+          .backgroundColor(COLOR_NEUTRAL_TINT).borderRadius(14)
+          .onClick((): void => { this.importFromAddMenu(); })
+        Button('私密拍摄').width('100%').height(48).fontColor(COLOR_TEXT_DEEP)
+          .backgroundColor(COLOR_NEUTRAL_TINT).borderRadius(14)
+          .onClick((): void => { this.beginPrivateCapture(); })
+        Button('文档扫描').width('100%').height(48).fontColor(COLOR_TEXT_DEEP)
+          .backgroundColor(COLOR_NEUTRAL_TINT).borderRadius(14)
+          .onClick((): void => { this.beginDocumentScan(); })
+        Text('私密拍摄和扫描结果不会进入系统相册。').fontSize(11).fontColor(COLOR_MUTED_DARK)
+          .width('100%').padding({ left: 4, top: 3 })
+        Button(ACTION_CANCEL).width('100%').height(44).fontColor(COLOR_MUTED_DARK)
+          .backgroundColor(COLOR_SURFACE_WASH).borderRadius(14)
+          .onClick((): void => { this.overlayMode = this.captureReturnMode; })
+      }.width('100%').padding({ left: 20, right: 20, top: 18, bottom: 22 })
+        .backgroundColor(COLOR_SURFACE_WASH).borderRadius({ topLeft: 24, topRight: 24 })
+    }.width('100%').height('100%').backgroundColor(COLOR_OVERLAY_STRONG)
   }
 }

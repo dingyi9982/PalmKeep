@@ -12,6 +12,7 @@ export default class EntryAbility extends UIAbility {
     AbilityContextHolder.setContext(this.context);
     AppStorage.setOrCreate<number>('vaultAutoLockMinutes', 10);
     AppStorage.setOrCreate<boolean>('vaultLifecycleSuppressed', false);
+    AppStorage.setOrCreate<boolean>('vaultAppForeground', true);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -32,6 +33,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    AppStorage.setOrCreate<boolean>('vaultAppForeground', false);
     if (AppStorage.get<boolean>('vaultLifecycleSuppressed') ?? false) {
       this.backgroundAt = 0;
       return;
@@ -46,6 +48,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    AppStorage.setOrCreate<boolean>('vaultAppForeground', true);
     if (this.backgroundAt === 0) {
       return;
     }
