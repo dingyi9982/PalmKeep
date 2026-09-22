@@ -6,6 +6,8 @@
     },
     { "name": "app_name", "value": "掌心密匣" },
     { "name": "module_desc", "value": "纯本地加密的个人信息保险箱" },
-    { "name": "entry_desc", "value": "安全保存账号、笔记、媒体和文件" }
+    { "name": "entry_desc", "value": "安全保存账号、笔记、媒体和文件" },
+    { "name": "share_receiver_label", "value": "收进掌心密匣" },
+    { "name": "share_receiver_desc", "value": "从系统分享面板将内容安全收进密匣" }
   ]
 }

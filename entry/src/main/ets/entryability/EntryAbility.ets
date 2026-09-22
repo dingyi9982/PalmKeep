@@ -8,11 +8,17 @@ import { vaultRepository } from '../services/VaultRepository';
 export default class EntryAbility extends UIAbility {
   private backgroundAt: number = 0;
 
-  onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+  onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     AbilityContextHolder.setContext(this.context);
     AppStorage.setOrCreate<number>('vaultAutoLockMinutes', 10);
     AppStorage.setOrCreate<boolean>('vaultLifecycleSuppressed', false);
     AppStorage.setOrCreate<boolean>('vaultAppForeground', true);
+    AppStorage.setOrCreate<string>('vaultShareRequestId', '');
+    this.publishShareRequest(want);
+  }
+
+  onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    this.publishShareRequest(want);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -66,5 +72,12 @@ export default class EntryAbility extends UIAbility {
     vaultRepository.close().catch((error: Error): void => {
       console.warn(`PalmVault close warning: ${error.message}`);
     });
+  }
+
+  private publishShareRequest(want: Want): void {
+    const value = want.parameters ? want.parameters['pvShareRequestId'] : undefined;
+    if (typeof value === 'string' && value.length > 0) {
+      AppStorage.setOrCreate<string>('vaultShareRequestId', value);
+    }
   }
 }

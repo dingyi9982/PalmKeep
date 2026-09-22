@@ -125,6 +125,26 @@ async function validateSchema(store: relationalStore.RdbStore): Promise<void> {
   }
 }
 
+async function persistSchemaVersion(store: relationalStore.RdbStore, version: number): Promise<void> {
+  try {
+    store.version = version;
+    return;
+  } catch (setterError) {
+    // A few HarmonyOS builds return 14800021 from the version property even though
+    // all schema writes have committed. PRAGMA writes the same SQLite user_version
+    // marker and keeps the migration recoverable on those devices.
+    try {
+      await store.executeSql(`PRAGMA user_version = ${version}`);
+      if (store.version === version) { return; }
+    } catch (pragmaError) {
+      logRecoverableError('database schema version fallback failed', pragmaError);
+    }
+    // The schema itself is authoritative for v1. Leaving user_version at zero is
+    // safe because every v1 operation is idempotent and will be retried next open.
+    logRecoverableError('database schema version marker could not be persisted', setterError);
+  }
+}
+
 export async function migrateVaultDatabase(store: relationalStore.RdbStore): Promise<void> {
   const installedVersion = store.version;
   if (installedVersion > DATABASE_SCHEMA_VERSION) {
@@ -140,28 +160,24 @@ export async function migrateVaultDatabase(store: relationalStore.RdbStore): Pro
     return;
   }
 
-  let transactionStarted = false;
   let migratingVersion = installedVersion + 1;
+  let migrationPhase = '创建数据库结构';
   try {
-    store.beginTransaction();
-    transactionStarted = true;
+    // Schema v1 consists only of idempotent CREATE/ALTER operations. Executing the
+    // steps directly avoids a platform issue where asynchronous DDL and the legacy
+    // transaction API can be dispatched on different RDB connections.
     while (migratingVersion <= DATABASE_SCHEMA_VERSION) {
       await applySchemaMigration(store, migratingVersion);
       migratingVersion += 1;
     }
+    migrationPhase = '补全数据库字段';
     await finalizeFirstSchema(store);
-    store.commit();
-    transactionStarted = false;
-    // HarmonyOS may serve schema queries from another connection which cannot
-    // observe uncommitted DDL. Validate only after the migration transaction is visible.
+    migrationPhase = '校验数据库结构';
     await validateSchema(store);
-    store.version = DATABASE_SCHEMA_VERSION;
+    migrationPhase = '记录数据库版本';
+    await persistSchemaVersion(store, DATABASE_SCHEMA_VERSION);
   } catch (error) {
-    if (transactionStarted) {
-      try { store.rollBack(); }
-      catch (rollbackError) { logRecoverableError('database migration rollback failed', rollbackError); }
-    }
     const failedVersion = Math.min(migratingVersion, DATABASE_SCHEMA_VERSION);
-    throw new Error(`数据库升级到 v${failedVersion} 失败：${normalizeError(error).message}`);
+    throw new Error(`数据库升级到 v${failedVersion} 失败（${migrationPhase}）：${normalizeError(error).message}`);
   }
 }

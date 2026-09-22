@@ -26,6 +26,33 @@
         ]
       }
     ],
+    "extensionAbilities": [
+      {
+        "name": "ShareReceiverAbility",
+        "srcEntry": "./ets/entryability/ShareReceiverAbility.ets",
+        "type": "share",
+        "description": "$string:share_receiver_desc",
+        "exported": true,
+        "label": "$string:share_receiver_label",
+        "icon": "$media:launcher_icon_layered",
+        "skills": [
+          {
+            "actions": ["ohos.want.action.sendData", "ohos.want.action.sendMultipleData"],
+            "uris": [
+              { "scheme": "file", "utd": "general.text", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "general.hyperlink", "maxFileSupported": 1 },
+              { "scheme": "file", "utd": "general.image", "maxFileSupported": 50 },
+              { "scheme": "file", "utd": "general.video", "maxFileSupported": 50 },
+              { "scheme": "file", "utd": "general.audio", "maxFileSupported": 50 },
+              { "scheme": "file", "utd": "general.file", "maxFileSupported": 50 },
+              { "scheme": "file", "utd": "general.composite-object", "maxFileSupported": 50 },
+              { "scheme": "file", "utd": "general.archive", "maxFileSupported": 50 },
+              { "scheme": "file", "utd": "general.object", "maxFileSupported": 50 }
+            ]
+          }
+        ]
+      }
+    ],
     "requestPermissions": [
       { "name": "ohos.permission.PRIVACY_WINDOW" },
       { "name": "ohos.permission.ACCESS_BIOMETRIC" },

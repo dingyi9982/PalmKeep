@@ -256,7 +256,7 @@ export struct VaultAttachmentGallery {
 
   private beginDocumentScan(): void {
     if (!canIUse('SystemCapability.AI.Component.DocScan')) {
-      try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到私密拍摄' }); }
+      try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到密匣相机' }); }
       catch (error) {}
       this.overlayMode = 'camera';
       return;
@@ -267,7 +267,7 @@ export struct VaultAttachmentGallery {
   private cancelPrivateCapture(): void { this.overlayMode = this.captureReturnMode; }
 
   private scannerUnavailable(): void {
-    try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到私密拍摄' }); }
+    try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到密匣相机' }); }
     catch (error) {}
     this.overlayMode = 'none';
     setTimeout((): void => { this.overlayMode = 'camera'; }, 120);
@@ -787,13 +787,13 @@ export struct VaultAttachmentGallery {
         Button('从系统相册添加').width('100%').height(48).fontColor(COLOR_TEXT_DEEP)
           .backgroundColor(COLOR_NEUTRAL_TINT).borderRadius(14)
           .onClick((): void => { this.importFromAddMenu(); })
-        Button('私密拍摄').width('100%').height(48).fontColor(COLOR_TEXT_DEEP)
+        Button('密匣相机').width('100%').height(48).fontColor(COLOR_TEXT_DEEP)
           .backgroundColor(COLOR_NEUTRAL_TINT).borderRadius(14)
           .onClick((): void => { this.beginPrivateCapture(); })
         Button('文档扫描').width('100%').height(48).fontColor(COLOR_TEXT_DEEP)
           .backgroundColor(COLOR_NEUTRAL_TINT).borderRadius(14)
           .onClick((): void => { this.beginDocumentScan(); })
-        Text('私密拍摄和扫描结果不会进入系统相册。').fontSize(11).fontColor(COLOR_MUTED_DARK)
+        Text('密匣相机和扫描结果不会进入系统相册。').fontSize(11).fontColor(COLOR_MUTED_DARK)
           .width('100%').padding({ left: 4, top: 3 })
         Button(ACTION_CANCEL).width('100%').height(44).fontColor(COLOR_MUTED_DARK)
           .backgroundColor(COLOR_SURFACE_WASH).borderRadius(14)

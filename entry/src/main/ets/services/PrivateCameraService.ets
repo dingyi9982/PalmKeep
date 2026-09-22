@@ -155,6 +155,15 @@ export class PrivateCameraService {
     }
   }
 
+  setFlashMode(mode: camera.FlashMode): void {
+    if (!this.session || !this.running) { return; }
+    try {
+      if (this.session.isFlashModeSupported(mode)) { this.session.setFlashMode(mode); }
+    } catch (error) {
+      // Unsupported flash changes must not interrupt capture.
+    }
+  }
+
   setZoom(value: number): void {
     if (!this.session || !this.running) { return; }
     try {

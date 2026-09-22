@@ -38,6 +38,7 @@ import { mediaPickerService, PickedMedia } from '../services/MediaPickerService'
 import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
 import { privateCaptureService } from '../services/PrivateCaptureService';
+import { PendingShareRequest, shareImportService } from '../services/ShareImportService';
 import { vaultRepository } from '../services/VaultRepository';
 import { PreparedVaultBackup, VaultBackupService } from '../services/VaultBackupService';
 import { vaultUiPreferences } from '../services/VaultUiPreferences';
@@ -67,6 +68,10 @@ struct Index {
   private autoLockMinutes: number = 10;
   @StorageLink('vaultLifecycleSuppressed')
   private lifecycleLockSuppressed: boolean = false;
+  @StorageLink('vaultAppForeground') @Watch('handleAppForeground')
+  private appForeground: boolean = true;
+  @StorageLink('vaultShareRequestId') @Watch('handleShareRequest')
+  private shareRequestId: string = '';
   @State private screen: string = 'loading';
   @State private activeTab: number = 0;
   @State private masterPassword: string = '';
@@ -85,7 +90,6 @@ struct Index {
   @State private searchHits: VaultSearchHit[] = [];
   @State private searchActive: boolean = false;
   @State private showNewItem: boolean = false;
-  @State private showCreateMenu: boolean = false;
   @State private captureMode: string = 'none';
   @State private captureReturnsToDraft: boolean = false;
   @State private showNewGroup: boolean = false;
@@ -144,7 +148,7 @@ struct Index {
   @State private recoveryNewPassword: string = '';
   @State private recoveryPasswordConfirm: string = '';
   @State private recoveryBusy: boolean = false;
-  @State private newType: VaultItemType = VaultItemType.Note;
+  @State private newType: VaultItemType = VaultItemType.Image;
   @State private newTitle: string = '';
   @State private newUsername: string = '';
   @State private newPassword: string = '';
@@ -199,7 +203,7 @@ struct Index {
   @State private healthStatusLabel: string = '检查数据库、附件与搜索索引';
   @State private healthBusy: boolean = false;
   @State private pendingMedia: PickedMedia[] = [];
-  private pendingFiles: PickedMedia[] = [];
+  @State private pendingFiles: PickedMedia[] = [];
   private mediaRecognitionVersion: number = 0;
   private searchVersion: number = 0;
   private vaultRefreshVersion: number = 0;
@@ -221,9 +225,11 @@ struct Index {
   private selectedBackupUri: string = '';
   private preparedBackup?: PreparedVaultBackup = undefined;
   private restoringFreshInstall: boolean = false;
-  private lastNewItemType: VaultItemType = VaultItemType.Note;
+  private lastNewItemType: VaultItemType = VaultItemType.Image;
   private securityService?: VaultSecurityService = undefined;
   private backupService?: VaultBackupService = undefined;
+  private consumingShareRequestId: string = '';
+  private lifecycleLockInProgress: boolean = false;
 
   private getSecurityService(): VaultSecurityService {
     if (!this.securityService) {
@@ -248,10 +254,6 @@ struct Index {
       this.captureMode = 'none';
       if (this.captureReturnsToDraft) { this.showNewItem = true; }
       this.captureReturnsToDraft = false;
-      return true;
-    }
-    if (this.showCreateMenu) {
-      this.showCreateMenu = false;
       return true;
     }
     if (this.showBatchMoveDialog) {
@@ -305,6 +307,7 @@ struct Index {
     try {
     try {
       privateCaptureService.cleanupTemporaryFiles();
+      shareImportService.cleanupStale(AbilityContextHolder.getContext(), this.shareRequestId);
       this.lastNewItemType = await vaultUiPreferences.getLastNewItemType();
       this.newType = this.lastNewItemType;
       const security = this.getSecurityService();
@@ -334,8 +337,20 @@ struct Index {
     }
     this.lifecycleLocked = false;
     if (this.screen === 'vault') {
-      this.lockVault();
+      this.lifecycleLockInProgress = true;
+      this.lockVault().finally((): void => { this.lifecycleLockInProgress = false; });
     }
+  }
+
+  private handleShareRequest(): void {
+    if (this.screen === 'vault' && this.appForeground && !this.lifecycleLocked) {
+      this.consumePendingShare();
+    }
+  }
+
+  private handleAppForeground(): void {
+    if (!this.appForeground) { return; }
+    setTimeout((): void => { this.consumePendingShare(); }, 0);
   }
 
   private async createVault(): Promise<void> {
@@ -662,7 +677,6 @@ struct Index {
     this.detailGroupId = 0;
     this.captureMode = 'none';
     this.captureReturnsToDraft = false;
-    this.showCreateMenu = false;
     this.resetNewItem();
     this.selectedItem = undefined;
     this.selectedAttachmentIndex = -1;
@@ -713,8 +727,65 @@ struct Index {
     try {
     await AbilityContextHolder.setPrivacyMode(false);
     this.screen = 'vault';
+    await this.consumePendingShare();
       } catch (error) {
       throw normalizeError(error);
+    }
+  }
+
+  private async consumePendingShare(): Promise<void> {
+    const requestId = this.shareRequestId;
+    if (this.screen !== 'vault' || !this.appForeground || this.lifecycleLocked || this.lifecycleLockInProgress ||
+      requestId.length === 0 ||
+      this.consumingShareRequestId === requestId) {
+      return;
+    }
+    this.consumingShareRequestId = requestId;
+    let request: PendingShareRequest | undefined = undefined;
+    let adopted = false;
+    try {
+      request = shareImportService.takeRequest(AbilityContextHolder.getContext(), requestId);
+      if (this.showNewItem && this.hasUnsavedNewItem()) {
+        const choice = await this.getUIContext().getPromptAction().showDialog({
+          title: '打开分享内容？',
+          message: '当前还有未保存的草稿。打开分享内容会放弃当前草稿。',
+          buttons: [{ text: '保留草稿', color: COLOR_MUTED }, { text: '打开分享内容', color: COLOR_PRIMARY }]
+        });
+        if (choice.index !== 1) {
+          this.getUIContext().getPromptAction().showToast({ message: '已保留当前草稿，分享内容未导入' });
+          return;
+        }
+      }
+
+      if (this.selectedItem) { await this.closeSelectedItem(false); }
+      if (this.selectedTrashEntry) { this.closeTrashDetail(); }
+      this.resetNewItem();
+      this.newType = request.type;
+      this.newTitle = request.title;
+      this.newNotes = request.notes;
+      if (request.type === VaultItemType.Image) {
+        this.pendingMedia = request.items;
+        this.selectedMediaCount = request.items.length;
+        this.selectedMediaPreviewIndex = Math.max(0, request.items.length - 1);
+      } else if (request.type === VaultItemType.File) {
+        this.pendingFiles = request.items;
+        this.selectedFileCount = request.items.length;
+      }
+      adopted = true;
+      this.activeTab = 0;
+      this.openNewItem(request.type);
+      if (request.type === VaultItemType.Image) { this.recognizePendingMedia(); }
+      const countText = request.items.length > 0 ? `${request.items.length} 项内容` : '文字内容';
+      this.getUIContext().getPromptAction().showToast({ message: `已接收${countText}，确认后保存` });
+    } catch (error) {
+      try { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
+      catch (toastError) { logRecoverableError('could not show shared content error', toastError); }
+    } finally {
+      if (request && !adopted) { privateCaptureService.removeMedia(request.items); }
+      if (this.shareRequestId === requestId) {
+        AppStorage.setOrCreate<string>('vaultShareRequestId', '');
+      }
+      this.consumingShareRequestId = '';
     }
   }
 
@@ -768,24 +839,17 @@ struct Index {
     this.requestNewItemTitleFocus(360);
   }
 
-  private openCreateMenu(): void {
-    this.clearHomeFocus();
-    this.showCreateMenu = true;
-  }
-
   private beginPrivateCapture(returnToDraft: boolean = false): void {
-    this.showCreateMenu = false;
     this.captureReturnsToDraft = returnToDraft;
     if (returnToDraft) { this.showNewItem = false; }
     this.captureMode = 'camera';
   }
 
   private beginDocumentScan(returnToDraft: boolean = false): void {
-    this.showCreateMenu = false;
     this.captureReturnsToDraft = returnToDraft;
     if (returnToDraft) { this.showNewItem = false; }
     if (!canIUse('SystemCapability.AI.Component.DocScan')) {
-      try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到私密拍摄' }); }
+      try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到密匣相机' }); }
       catch (error) {}
       this.captureMode = 'camera';
       return;
@@ -808,7 +872,7 @@ struct Index {
     this.selectedMediaCount = this.pendingMedia.length;
     this.selectedMediaPreviewIndex = this.pendingMedia.length - 1;
     if (this.newTitle.trim().length === 0) {
-      this.newTitle = `${scanned ? '文档扫描' : '私密拍摄'} ${this.captureTitleTime()}`;
+      this.newTitle = `${scanned ? '文档扫描' : '密匣相机'} ${this.captureTitleTime()}`;
     }
     this.captureReturnsToDraft = false;
     this.showNewItem = true;
@@ -823,7 +887,7 @@ struct Index {
 
   private handleScannerUnavailable(): void {
     this.captureMode = 'none';
-    try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到私密拍摄' }); }
+    try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到密匣相机' }); }
     catch (error) {}
     setTimeout((): void => { this.captureMode = 'camera'; }, 120);
   }
@@ -1397,9 +1461,9 @@ struct Index {
       await vaultUiPreferences.clearBackupStatus();
       const security = this.getSecurityService();
       await security.resetSecurity();
-      this.lastNewItemType = VaultItemType.Note;
-      this.newType = VaultItemType.Note;
-      await vaultUiPreferences.setLastNewItemType(VaultItemType.Note);
+      this.lastNewItemType = VaultItemType.Image;
+      this.newType = VaultItemType.Image;
+      await vaultUiPreferences.setLastNewItemType(VaultItemType.Image);
       this.autoLockMinutes = 10;
       this.preferredUnlock = 'password';
       this.sessionKey.fill(0);
@@ -2016,9 +2080,19 @@ struct Index {
       if (this.screen !== 'vault') {
         return;
       }
-      this.clearPendingFiles();
-      this.pendingFiles = files;
-      this.selectedFileCount = files.length;
+      const newFiles = files.filter((file: PickedMedia): boolean =>
+        this.pendingFiles.every((pending: PickedMedia): boolean => pending.uri !== file.uri));
+      const duplicateCount = files.length - newFiles.length;
+      if (newFiles.length > 0) {
+        this.pendingFiles = this.pendingFiles.concat(newFiles);
+        this.selectedFileCount = this.pendingFiles.length;
+      }
+      if (duplicateCount > 0) {
+        const message = newFiles.length === 0 ?
+          (duplicateCount === 1 ? '文件已存在，未重复添加' : `${duplicateCount} 个文件已存在，未重复添加`) :
+          `已添加 ${newFiles.length} 个文件，${duplicateCount} 个文件已存在，未重复添加`;
+        this.getUIContext().getPromptAction().showToast({ message: message });
+      }
     } catch (error) {
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
     }
@@ -2083,6 +2157,7 @@ struct Index {
 
   private removePendingFile(index: number): void {
     if (this.savingNewItem || index < 0 || index >= this.pendingFiles.length) { return; }
+    privateCaptureService.removeMedia([this.pendingFiles[index]]);
     this.pendingFiles = this.pendingFiles.filter((file: PickedMedia, fileIndex: number): boolean =>
       fileIndex !== index);
     this.selectedFileCount = this.pendingFiles.length;
@@ -2152,6 +2227,7 @@ struct Index {
           attachments.push({
             type: VaultItemType.File,
             uri: file.uri,
+            sourceUri: file.sourceUri !== undefined ? file.sourceUri : file.uri,
             name: file.name,
             ocrText: ''
           });
@@ -2297,6 +2373,7 @@ struct Index {
   }
 
   private clearPendingFiles(): void {
+    privateCaptureService.removeMedia(this.pendingFiles);
     this.pendingFiles = [];
     this.selectedFileCount = 0;
   }
@@ -3549,7 +3626,8 @@ struct Index {
       },
       onNewItem: (): void => {
         if (this.homeManaging || this.categoryManaging) { return; }
-        this.openCreateMenu();
+        this.clearHomeFocus();
+        this.openNewItem();
       }
     })
   }
@@ -3588,9 +3666,6 @@ struct Index {
       }
       if (this.showNewItem) {
         this.newItemOverlay()
-      }
-      if (this.showCreateMenu) {
-        this.createMenuOverlay()
       }
       if (this.showBatchMoveDialog) {
         this.batchMoveDialogOverlay()
@@ -3693,33 +3768,6 @@ struct Index {
   @Builder
   private modalHeader(title: string, closeAction: () => void): void {
     VaultDialogHeader({ title: title, onClose: closeAction })
-  }
-
-  @Builder
-  private createMenuOverlay(): void {
-    Column() {
-      Blank().onClick((): void => { this.showCreateMenu = false; })
-      Column({ space: 8 }) {
-        Text('添加到掌心密匣').fontSize(18).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-          .width('100%').padding({ left: 4, bottom: 5 })
-        Button('新建资料').width('100%').height(50).fontSize(15).fontColor(COLOR_TEXT)
-          .backgroundColor(COLOR_SURFACE_2).borderRadius(14)
-          .onClick((): void => { this.showCreateMenu = false; this.openNewItem(); })
-        Button('私密拍摄').width('100%').height(50).fontSize(15).fontColor(COLOR_TEXT)
-          .backgroundColor(COLOR_SURFACE_2).borderRadius(14)
-          .onClick((): void => { this.beginPrivateCapture(); })
-        Button('文档扫描').width('100%').height(50).fontSize(15).fontColor(COLOR_TEXT)
-          .backgroundColor(COLOR_SURFACE_2).borderRadius(14)
-          .onClick((): void => { this.beginDocumentScan(); })
-        Text('拍摄和扫描结果只会保存在密匣中，不会进入系统相册。')
-          .fontSize(11).fontColor(COLOR_MUTED).width('100%').padding({ left: 4, top: 3 })
-        Button(ACTION_CANCEL).width('100%').height(46).fontSize(14).fontColor(COLOR_MUTED)
-          .backgroundColor(COLOR_BG).borderRadius(14)
-          .onClick((): void => { this.showCreateMenu = false; })
-      }
-      .width('100%').padding({ left: 20, right: 20, top: 18, bottom: 22 })
-      .backgroundColor(COLOR_SURFACE).borderRadius({ topLeft: 24, topRight: 24 })
-    }.width('100%').height('100%').backgroundColor(COLOR_SCRIM)
   }
 
   @Builder
@@ -3878,9 +3926,9 @@ struct Index {
           }
           .width('100%')
           Row({ space: 4 }) {
+            this.typeChip(VaultItemType.Image)
             this.typeChip(VaultItemType.Note)
             this.typeChip(VaultItemType.Login)
-            this.typeChip(VaultItemType.Image)
             this.typeChip(VaultItemType.File)
           }
           .width('100%')
@@ -3911,7 +3959,7 @@ struct Index {
                 .backgroundColor(COLOR_DARK_ACTION).borderRadius(12)
                 .enabled(!this.recognizingMedia && !this.savingNewItem)
                 .onClick((): void => { this.chooseMedia(); })
-              Button('私密拍摄').layoutWeight(1).height(46).fontSize(12).fontColor(COLOR_PRIMARY)
+              Button('密匣相机').layoutWeight(1).height(46).fontSize(12).fontColor(COLOR_PRIMARY)
                 .backgroundColor(COLOR_DARK_ACTION).borderRadius(12)
                 .enabled(!this.recognizingMedia && !this.savingNewItem)
                 .onClick((): void => { this.beginPrivateCapture(true); })

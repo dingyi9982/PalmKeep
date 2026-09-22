@@ -17,7 +17,7 @@ class VaultUiPreferences {
   async getLastNewItemType(): Promise<VaultItemType> {
     try {
       const store = await preferences.getPreferences(AbilityContextHolder.getContext(), UI_PREFERENCES);
-      const value = store.getSync(KEY_LAST_NEW_ITEM_TYPE, VaultItemType.Note) as string;
+      const value = store.getSync(KEY_LAST_NEW_ITEM_TYPE, VaultItemType.Image) as string;
       if (value === VaultItemType.Login || value === VaultItemType.Note ||
         value === VaultItemType.Image || value === VaultItemType.File) {
         return value as VaultItemType;
@@ -25,7 +25,7 @@ class VaultUiPreferences {
     } catch (error) {
       logRecoverableError('could not read the last new item type', error);
     }
-    return VaultItemType.Note;
+    return VaultItemType.Image;
   }
 
   async setLastNewItemType(type: VaultItemType): Promise<void> {

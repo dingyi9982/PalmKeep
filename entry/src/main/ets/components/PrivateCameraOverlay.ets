@@ -6,7 +6,10 @@ import {
 } from '../services/PrivateCameraService';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { VaultThumbnail } from './VaultThumbnail';
-import { COLOR_MEDIA_CANVAS, COLOR_ON_DARK, COLOR_OVERLAY, COLOR_PRIMARY_BRIGHT } from './VaultTheme';
+import {
+  COLOR_MEDIA_CANVAS, COLOR_MUTED_ON_DARK, COLOR_ON_DARK, COLOR_OVERLAY,
+  COLOR_PRIMARY_BRIGHT
+} from './VaultTheme';
 
 @Component
 export struct PrivateCameraOverlay {
@@ -117,6 +120,7 @@ export struct PrivateCameraOverlay {
     if (this.flashModes.indexOf(this.flashMode) < 0) {
       this.flashMode = this.flashModes.length > 0 ? this.flashModes[0] : camera.FlashMode.FLASH_MODE_CLOSE;
     }
+    this.service.setFlashMode(this.flashMode);
   }
 
   private async handleForegroundChange(): Promise<void> {
@@ -139,12 +143,44 @@ export struct PrivateCameraOverlay {
     if (this.flashModes.length <= 1) { return; }
     const index = this.flashModes.indexOf(this.flashMode);
     this.flashMode = this.flashModes[(index + 1) % this.flashModes.length];
+    this.service.setFlashMode(this.flashMode);
   }
 
   private flashLabel(): string {
-    if (this.flashMode === camera.FlashMode.FLASH_MODE_AUTO) { return '闪光 自动'; }
-    if (this.flashMode === camera.FlashMode.FLASH_MODE_OPEN) { return '闪光 开'; }
-    return '闪光 关';
+    if (this.flashMode === camera.FlashMode.FLASH_MODE_AUTO) { return '⚡ 自动'; }
+    if (this.flashMode === camera.FlashMode.FLASH_MODE_OPEN) { return '⚡ 开启'; }
+    return '⚡ 关闭';
+  }
+
+  private flashColor(): string {
+    return this.flashMode === camera.FlashMode.FLASH_MODE_CLOSE ? COLOR_ON_DARK : '#FFD86B';
+  }
+
+  private zoomLabel(): string {
+    const rounded = Math.round(this.zoom);
+    return Math.abs(this.zoom - rounded) < 0.05 ? `${rounded}×` : `${this.zoom.toFixed(1)}×`;
+  }
+
+  private cycleZoom(): void {
+    if (!this.ready || this.maxZoom <= this.minZoom + 0.05) { return; }
+    const source: number[] = [this.minZoom, 1, 2, 3, 5, this.maxZoom];
+    const candidates: number[] = [];
+    source.forEach((value: number): void => {
+      const bounded = Math.max(this.minZoom, Math.min(this.maxZoom, value));
+      if (!candidates.some((candidate: number): boolean => Math.abs(candidate - bounded) < 0.05)) {
+        candidates.push(bounded);
+      }
+    });
+    candidates.sort((left: number, right: number): number => left - right);
+    let next = candidates[0];
+    for (let index = 0; index < candidates.length; index += 1) {
+      if (candidates[index] > this.zoom + 0.08) {
+        next = candidates[index];
+        break;
+      }
+    }
+    this.zoom = next;
+    this.service.setZoom(this.zoom);
   }
 
   private async takePhoto(): Promise<void> {
@@ -209,17 +245,100 @@ export struct PrivateCameraOverlay {
           ForEach(this.captures, (item: PickedMedia, index: number): void => {
             Stack({ alignContent: Alignment.TopEnd }) {
               VaultThumbnail({ itemId: '', mediaType: item.type, sourceUri: item.uri, thumbnailSize: 58 })
-              Text('×').fontSize(14).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
-                .width(22).height(22).borderRadius(11).backgroundColor(COLOR_OVERLAY)
+              Text('×').fontSize(13).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+                .width(22).height(22).borderRadius(11).backgroundColor('#CC1D2523')
                 .onClick((): void => { this.removeCapture(index); })
             }
-            .width(62).height(62).padding(2).borderRadius(12)
+            .width(64).height(64).padding(3).borderRadius(14).backgroundColor('#332DD6A6')
             .border({ width: this.previewIndex === index ? 2 : 0, color: COLOR_PRIMARY_BRIGHT })
             .onClick((): void => { this.previewIndex = index; this.previewOpen = true; })
           }, (item: PickedMedia): string => item.uri)
-        }.padding({ left: 14, right: 14 })
+        }.padding({ left: 16, right: 16 })
       }.width('100%').scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
     }
+  }
+
+  @Builder
+  private cameraGuides(): void {
+    Stack() {
+      Row() {
+        Blank().layoutWeight(1)
+        Column() {}.width(1).height('100%').backgroundColor('#55FFFFFF')
+        Blank().layoutWeight(1)
+        Column() {}.width(1).height('100%').backgroundColor('#55FFFFFF')
+        Blank().layoutWeight(1)
+      }.width('100%').height('100%')
+      Column() {
+        Blank().layoutWeight(1)
+        Row() {}.width('100%').height(1).backgroundColor('#55FFFFFF')
+        Blank().layoutWeight(1)
+        Row() {}.width('100%').height(1).backgroundColor('#55FFFFFF')
+        Blank().layoutWeight(1)
+      }.width('100%').height('100%')
+    }.width('100%').height('100%').padding({ top: 154, bottom: 230, left: 10, right: 10 })
+      .hitTestBehavior(HitTestMode.None)
+  }
+
+  @Builder
+  private cameraTopBar(): void {
+    Column({ space: 12 }) {
+      Row() {
+        Button('×').width(44).height(44).fontSize(24).fontColor(COLOR_ON_DARK)
+          .backgroundColor(COLOR_OVERLAY).borderRadius(22).onClick((): void => { this.cancel(); })
+        Blank()
+        Column({ space: 2 }) {
+          Text('密匣相机').fontSize(17).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK)
+          Text('仅保存到掌心密匣').fontSize(10).fontColor(COLOR_MUTED_ON_DARK)
+        }.alignItems(HorizontalAlign.Center)
+        Blank()
+        Button('切换').width(60).height(40).fontSize(12).fontColor(COLOR_ON_DARK)
+          .backgroundColor(COLOR_OVERLAY).borderRadius(20).enabled(this.ready && this.canSwitchCamera)
+          .opacity(this.canSwitchCamera ? 1 : 0.45).onClick((): void => { this.switchCamera(); })
+      }.width('100%')
+      Row() {
+        Button(this.flashLabel()).height(40).fontSize(12).fontWeight(FontWeight.Medium)
+          .fontColor(this.flashColor()).backgroundColor(COLOR_OVERLAY).borderRadius(20)
+          .enabled(this.ready && this.flashModes.length > 1).onClick((): void => { this.cycleFlash(); })
+        Blank()
+        Button(this.zoomLabel()).width(58).height(40).fontSize(13).fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_ON_DARK).backgroundColor(COLOR_OVERLAY).borderRadius(20)
+          .enabled(this.ready && this.maxZoom > this.minZoom + 0.05)
+          .opacity(this.maxZoom > this.minZoom + 0.05 ? 1 : 0.45)
+          .onClick((): void => { this.cycleZoom(); })
+      }.width('100%')
+    }.width('100%').padding({ left: 16, right: 16, top: 30, bottom: 8 })
+  }
+
+  @Builder
+  private shutterButton(): void {
+    Stack({ alignContent: Alignment.Center }) {
+      Circle().width(82).height(82).fill(Color.Transparent).stroke(COLOR_ON_DARK).strokeWidth(3)
+      Circle().width(68).height(68).fill(this.ready && this.captures.length < 50 ? COLOR_ON_DARK : '#88FFFFFF')
+      Circle().width(52).height(52).fill(this.ready && this.captures.length < 50 ? '#F3FFF9' : '#66FFFFFF')
+    }.width(88).height(88).enabled(this.ready && this.captures.length < 50)
+      .onClick((): void => { this.takePhoto(); })
+  }
+
+  @Builder
+  private cameraBottomBar(): void {
+    Column({ space: 12 }) {
+      this.captureStrip()
+      Text('轻触对焦 · 双指缩放').fontSize(11).fontColor(COLOR_MUTED_ON_DARK)
+      Row() {
+        Column({ space: 1 }) {
+          Text(`${this.captures.length}`).fontSize(20).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK)
+          Text('/ 50 张').fontSize(10).fontColor(COLOR_MUTED_ON_DARK)
+        }.width(72).alignItems(HorizontalAlign.Start)
+        Blank()
+        this.shutterButton()
+        Blank()
+        Button('完成').width(72).height(44).fontSize(14).fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_MEDIA_CANVAS).backgroundColor(COLOR_PRIMARY_BRIGHT).borderRadius(22)
+          .enabled(this.captures.length > 0).opacity(this.captures.length > 0 ? 1 : 0.4)
+          .onClick((): void => { this.finish(); })
+      }.width('100%').alignItems(VerticalAlign.Center)
+    }.width('100%').padding({ left: 18, right: 18, top: 14, bottom: 26 })
+      .backgroundColor('#D90A1210').borderRadius({ topLeft: 28, topRight: 28 })
   }
 
   build() {
@@ -249,39 +368,12 @@ export struct PrivateCameraOverlay {
         }.padding(20).backgroundColor(COLOR_OVERLAY).borderRadius(16)
       }
       if (this.permissionState === 'granted') {
+        if (this.ready) { this.cameraGuides() }
         Column() {
-          Row() {
-            Button('×').width(44).height(44).fontSize(25).fontColor(COLOR_ON_DARK).backgroundColor(COLOR_OVERLAY)
-              .borderRadius(22).onClick((): void => { this.cancel(); })
-            Blank()
-            Text('私密拍摄').fontSize(16).fontWeight(FontWeight.Bold).fontColor(COLOR_ON_DARK)
-            Blank()
-            Button(this.front ? '前摄' : '后摄').height(40).fontSize(12).fontColor(COLOR_ON_DARK)
-              .backgroundColor(COLOR_OVERLAY).enabled(this.ready && this.canSwitchCamera)
-              .opacity(this.canSwitchCamera ? 1 : 0.45).onClick((): void => { this.switchCamera(); })
-          }.width('100%').padding({ left: 14, right: 14, top: 32 })
-          Row() {
-            Button(this.flashLabel()).height(36).fontSize(11).fontColor(COLOR_ON_DARK).backgroundColor(COLOR_OVERLAY)
-              .enabled(this.ready && this.flashModes.length > 1).onClick((): void => { this.cycleFlash(); })
-            Blank()
-            Text(`${this.zoom.toFixed(1)}×`).fontSize(12).fontColor(COLOR_ON_DARK)
-              .padding({ left: 10, right: 10, top: 7, bottom: 7 }).backgroundColor(COLOR_OVERLAY).borderRadius(16)
-          }.width('100%').padding({ left: 16, right: 16, top: 10 })
+          this.cameraTopBar()
           Blank()
-          this.captureStrip()
-          Row() {
-            Text(`${this.captures.length}/50`).fontSize(12).fontColor(COLOR_ON_DARK).width(70)
-            Blank()
-            Button('●').width(76).height(76).fontSize(42).fontColor(COLOR_ON_DARK).backgroundColor('#33FFFFFF')
-              .border({ width: 4, color: COLOR_ON_DARK }).borderRadius(38)
-              .enabled(this.ready && this.captures.length < 50).onClick((): void => { this.takePhoto(); })
-            Blank()
-            Button('完成').width(70).height(42).fontSize(14).fontWeight(FontWeight.Bold)
-              .fontColor(COLOR_MEDIA_CANVAS).backgroundColor(COLOR_PRIMARY_BRIGHT).borderRadius(21)
-              .enabled(this.captures.length > 0).opacity(this.captures.length > 0 ? 1 : 0.45)
-              .onClick((): void => { this.finish(); })
-          }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 28 })
-        }.width('100%').height('100%')
+          this.cameraBottomBar()
+        }.width('100%').height('100%').hitTestBehavior(HitTestMode.Transparent)
       }
       if (this.previewOpen && this.previewIndex >= 0 && this.previewIndex < this.captures.length) {
         Stack({ alignContent: Alignment.Center }) {
