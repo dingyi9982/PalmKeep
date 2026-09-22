@@ -53,21 +53,7 @@ class VaultFilePreviewService {
       fs.closeSync(target);
       target = undefined;
       if (size <= 0) { throw new Error('文件内容不可用'); }
-
-      const uri = fileUri.getUriFromPath(path);
-      const context = AbilityContextHolder.getContext();
-      if (!await filePreview.canPreview(context, uri)) {
-        this.remove(path);
-        return VaultFilePreviewResult.Unsupported;
-      }
-      await filePreview.openPreview(context, {
-        title: attachment.name.length > 0 ? attachment.name : '未命名文件',
-        uri: uri,
-        mimeType: this.mimeType(attachment.name)
-      });
-      // Preview Kit may keep reading the file after openPreview returns. The copy stays in
-      // cache so the system can finish rendering it, and the OS can reclaim it safely later.
-      return VaultFilePreviewResult.Opened;
+      return await this.openCopiedPath(path, attachment.name);
     } catch (error) {
       if (target) {
         try { fs.closeSync(target); }
@@ -76,6 +62,54 @@ class VaultFilePreviewService {
       this.remove(path);
       throw new Error(`文件预览失败：${normalizeError(error).message}`);
     }
+  }
+
+  async openUri(sourceUri: string, name: string): Promise<VaultFilePreviewResult> {
+    const path = this.previewPath(name);
+    let source: fs.File | undefined = undefined;
+    let target: fs.File | undefined = undefined;
+    try {
+      source = fs.openSync(sourceUri, fs.OpenMode.READ_ONLY);
+      const size = fs.statSync(source.fd).size;
+      if (size <= 0) { throw new Error('文件内容不可用'); }
+      target = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      await fs.copyFile(source.fd, target.fd);
+      fs.fsyncSync(target.fd);
+      if (fs.statSync(target.fd).size !== size) { throw new Error('文件复制不完整'); }
+      fs.closeSync(target);
+      target = undefined;
+      fs.closeSync(source);
+      source = undefined;
+      return await this.openCopiedPath(path, name);
+    } catch (error) {
+      if (target) {
+        try { fs.closeSync(target); }
+        catch (closeError) { logRecoverableError('could not close pending preview target', closeError); }
+      }
+      if (source) {
+        try { fs.closeSync(source); }
+        catch (closeError) { logRecoverableError('could not close pending preview source', closeError); }
+      }
+      this.remove(path);
+      throw new Error(`文件预览失败：${normalizeError(error).message}`);
+    }
+  }
+
+  private async openCopiedPath(path: string, name: string): Promise<VaultFilePreviewResult> {
+    const uri = fileUri.getUriFromPath(path);
+    const context = AbilityContextHolder.getContext();
+    if (!await filePreview.canPreview(context, uri)) {
+      this.remove(path);
+      return VaultFilePreviewResult.Unsupported;
+    }
+    await filePreview.openPreview(context, {
+      title: name.length > 0 ? name : '未命名文件',
+      uri: uri,
+      mimeType: this.mimeType(name)
+    });
+    // Preview Kit may keep reading the file after openPreview returns. The copy stays in
+    // cache so the system can finish rendering it, and the OS can reclaim it safely later.
+    return VaultFilePreviewResult.Opened;
   }
 
   private previewPath(name: string): string {

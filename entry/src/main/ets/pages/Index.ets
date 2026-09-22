@@ -29,7 +29,7 @@ import { PrivateCameraOverlay } from '../components/PrivateCameraOverlay';
 import { VaultDocumentScanner } from '../components/VaultDocumentScanner';
 import { VaultDialogHeader } from '../components/VaultCommonComponents';
 import {
-  ACTION_CANCEL, ACTION_DELETE, ACTION_MANAGE, ACTION_SAVE, LABEL_CONTENT, LABEL_NAME, LABEL_NOTES
+  ACTION_CANCEL, ACTION_DELETE, ACTION_MANAGE, ACTION_PREVIEW, ACTION_SAVE, LABEL_CONTENT, LABEL_NAME, LABEL_NOTES
 } from '../components/VaultCopy';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { logRecoverableError, normalizeError } from '../services/ErrorUtils';
@@ -39,6 +39,7 @@ import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
 import { privateCaptureService } from '../services/PrivateCaptureService';
 import { PendingShareRequest, shareImportService } from '../services/ShareImportService';
+import { vaultFilePreviewService, VaultFilePreviewResult } from '../services/VaultFilePreviewService';
 import { vaultRepository } from '../services/VaultRepository';
 import { PreparedVaultBackup, VaultBackupService } from '../services/VaultBackupService';
 import { vaultUiPreferences } from '../services/VaultUiPreferences';
@@ -160,6 +161,7 @@ struct Index {
   @State private recognizingMedia: boolean = false;
   @State private recognitionProgressText: string = '';
   @State private selectedFileCount: number = 0;
+  @State private pendingFilePreviewIndex: number = -1;
   @State private savingNewItem: boolean = false;
   @State private saveProgress: number = 0;
   @State private saveProgressText: string = '';
@@ -2122,6 +2124,11 @@ struct Index {
         this.pendingMedia[index].ocrText = results[index];
       }
       this.pendingMedia = this.pendingMedia.slice();
+      if (this.pendingMedia.length === 1 && this.pendingMedia[0].type === VaultItemType.Image &&
+        this.newTitle.trim().length === 0) {
+        const suggestedTitle = this.suggestTitleFromOcr(results[0]);
+        if (suggestedTitle.length > 0) { this.newTitle = suggestedTitle; }
+      }
     } finally {
       if (recognitionVersion === this.mediaRecognitionVersion) {
         this.recognizingMedia = false;
@@ -2150,17 +2157,48 @@ struct Index {
     }
   }
 
+  private suggestTitleFromOcr(text: string): string {
+    const lines = text.split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index].trim().replace(/\s+/g, ' ');
+      if (line.length < 2 || !/[A-Za-z\u3400-\u9FFF]/.test(line)) { continue; }
+      return line.length > 40 ? line.substring(0, 40).trim() : line;
+    }
+    return '';
+  }
+
   private selectPendingMedia(index: number): void {
     if (index < 0 || index >= this.pendingMedia.length) { return; }
     this.selectedMediaPreviewIndex = index;
   }
 
   private removePendingFile(index: number): void {
-    if (this.savingNewItem || index < 0 || index >= this.pendingFiles.length) { return; }
+    if (this.savingNewItem || this.pendingFilePreviewIndex >= 0 || index < 0 || index >= this.pendingFiles.length) {
+      return;
+    }
     privateCaptureService.removeMedia([this.pendingFiles[index]]);
     this.pendingFiles = this.pendingFiles.filter((file: PickedMedia, fileIndex: number): boolean =>
       fileIndex !== index);
     this.selectedFileCount = this.pendingFiles.length;
+  }
+
+  private async previewPendingFile(index: number): Promise<void> {
+    if (this.savingNewItem || this.pendingFilePreviewIndex >= 0 || index < 0 || index >= this.pendingFiles.length) {
+      return;
+    }
+    const file = this.pendingFiles[index];
+    this.pendingFilePreviewIndex = index;
+    try {
+      const result = await vaultFilePreviewService.openUri(file.uri, file.name);
+      if (result === VaultFilePreviewResult.Unsupported) {
+        this.getUIContext().getPromptAction().showToast({ message: '该文件暂不支持预览，可保存后下载查看' });
+      }
+    } catch (error) {
+      try { this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) }); }
+      catch (toastError) { logRecoverableError('could not show pending file preview error', toastError); }
+    } finally {
+      this.pendingFilePreviewIndex = -1;
+    }
   }
 
   private async createItem(): Promise<void> {
@@ -2376,6 +2414,7 @@ struct Index {
     privateCaptureService.removeMedia(this.pendingFiles);
     this.pendingFiles = [];
     this.selectedFileCount = 0;
+    this.pendingFilePreviewIndex = -1;
   }
 
   private describeError(error: Object): string {
@@ -3880,11 +3919,19 @@ struct Index {
               Text(file.name)
                 .fontSize(12).fontColor(COLOR_TEXT).maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+              if (vaultFilePreviewService.canAttempt(file.name)) {
+                Button(this.pendingFilePreviewIndex === index ? '打开中' : ACTION_PREVIEW)
+                  .height(30).fontSize(11).fontColor(COLOR_PRIMARY)
+                  .backgroundColor(Color.Transparent).borderRadius(9)
+                  .enabled(!this.savingNewItem && this.pendingFilePreviewIndex < 0)
+                  .opacity(this.savingNewItem || this.pendingFilePreviewIndex >= 0 ? 0.45 : 1)
+                  .onClick((): void => { this.previewPendingFile(index); })
+              }
               Text('×')
                 .fontSize(17).fontColor(COLOR_MUTED).textAlign(TextAlign.Center)
                 .width(30).height(30).borderRadius(10).backgroundColor(COLOR_DIVIDER_SOFT)
-                .enabled(!this.savingNewItem)
-                .opacity(this.savingNewItem ? 0.45 : 1)
+                .enabled(!this.savingNewItem && this.pendingFilePreviewIndex < 0)
+                .opacity(this.savingNewItem || this.pendingFilePreviewIndex >= 0 ? 0.45 : 1)
                 .onClick((): void => { this.removePendingFile(index); })
             }
             .width('100%')
