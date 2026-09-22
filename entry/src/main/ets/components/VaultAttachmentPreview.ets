@@ -32,7 +32,16 @@ export struct VaultAttachmentPreview {
   }
 
   build() {
-    if (this.gridMode) {
+    if (this.fallbackType === VaultItemType.Audio) {
+      Stack({ alignContent: Alignment.Center }) {
+        Text('♪').fontSize(Math.max(18, this.thumbnailSize * 0.42)).fontColor(COLOR_PRIMARY)
+        if (this.attachments.length > 0) {
+          Text(`${this.attachments.length}`).fontSize(9).fontColor(COLOR_ON_DARK)
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 }).backgroundColor(COLOR_SCRIM)
+            .borderRadius(9).position({ right: 5, bottom: 5 })
+        }
+      }.width(this.thumbnailSize).height(this.thumbnailSize).backgroundColor('#E8F8F2').borderRadius(12)
+    } else if (this.gridMode) {
       Stack({ alignContent: Alignment.BottomEnd }) {
         if (this.attachments.length === 0) {
           VaultThumbnail({ itemId: this.itemId, mediaType: this.fallbackType,

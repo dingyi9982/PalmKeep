@@ -3,6 +3,7 @@ export enum VaultItemType {
   Note = 'note',
   Image = 'image',
   Video = 'video',
+  Audio = 'audio',
   File = 'file'
 }
 
@@ -70,6 +71,7 @@ export interface VaultTrashEntry {
 export interface VaultStorageStats {
   databaseBytes: number;
   mediaBytes: number;
+  audioBytes: number;
   fileBytes: number;
   orphanBytes: number;
   totalBytes: number;
@@ -104,6 +106,8 @@ export function itemTypeLabel(type: VaultItemType): string {
       return '媒体';
     case VaultItemType.Video:
       return '媒体';
+    case VaultItemType.Audio:
+      return '音频';
     case VaultItemType.File:
       return '文件';
     default:
@@ -127,6 +131,8 @@ export function itemTypeGlyph(type: VaultItemType): string {
       return '▧';
     case VaultItemType.Video:
       return '▶';
+    case VaultItemType.Audio:
+      return '♪';
     case VaultItemType.File:
       return '▤';
     default:

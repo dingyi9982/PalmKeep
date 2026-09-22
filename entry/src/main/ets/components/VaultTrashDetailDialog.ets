@@ -1,5 +1,6 @@
 import { VaultAttachmentGallery } from './VaultAttachmentGallery';
 import { VaultFileGallery } from './VaultFileGallery';
+import { VaultAudioGallery } from './VaultAudioGallery';
 import {
   VaultDialogHeader, VaultItemTimeInfo, VaultPasswordEyeButton, VaultScreenshotProtectionHint
 } from './VaultCommonComponents';
@@ -123,6 +124,9 @@ export struct VaultTrashDetailDialog {
             }
             if (this.entry.item.type === VaultItemType.File) {
               VaultFileGallery({ itemId: this.entry.item.id, readOnly: true })
+            }
+            if (this.entry.item.type === VaultItemType.Audio) {
+              VaultAudioGallery({ itemId: this.entry.item.id, readOnly: true })
             }
           }
           VaultItemTimeInfo({

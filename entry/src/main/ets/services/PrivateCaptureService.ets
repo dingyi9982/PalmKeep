@@ -8,6 +8,7 @@ import { VaultItemType } from '../models/VaultModels';
 const CAPTURE_PREFIX: string = 'pv-capture-';
 const SCAN_PREFIX: string = 'pv-scan-';
 const SHARE_PREFIX: string = 'pv-share-';
+const RECORD_PREFIX: string = 'pv-record-';
 
 class PrivateCaptureService {
   private cachePath(prefix: string): string {
@@ -93,7 +94,7 @@ class PrivateCaptureService {
   private isOwnedPath(path: string): boolean {
     const cacheDir = AbilityContextHolder.getContext().cacheDir;
     return path.startsWith(`${cacheDir}/${CAPTURE_PREFIX}`) || path.startsWith(`${cacheDir}/${SCAN_PREFIX}`) ||
-      path.startsWith(`${cacheDir}/${SHARE_PREFIX}`);
+      path.startsWith(`${cacheDir}/${SHARE_PREFIX}`) || path.startsWith(`${cacheDir}/${RECORD_PREFIX}`);
   }
 
   private removePath(path: string): void {

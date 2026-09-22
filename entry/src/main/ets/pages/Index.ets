@@ -28,6 +28,8 @@ import { VaultAttachmentPreview } from '../components/VaultAttachmentPreview';
 import { VaultFileSummary } from '../components/VaultFileSummary';
 import { PrivateCameraOverlay } from '../components/PrivateCameraOverlay';
 import { VaultDocumentScanner } from '../components/VaultDocumentScanner';
+import { AudioRecorderOverlay } from '../components/AudioRecorderOverlay';
+import { VaultAudioPlayer } from '../components/VaultAudioPlayer';
 import { VaultDialogHeader } from '../components/VaultCommonComponents';
 import {
   ACTION_CANCEL, ACTION_DELETE, ACTION_MANAGE, ACTION_PREVIEW, ACTION_SAVE, LABEL_CONTENT, LABEL_NAME, LABEL_NOTES
@@ -39,6 +41,8 @@ import { mediaPickerService, PickedMedia } from '../services/MediaPickerService'
 import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
 import { privateCaptureService } from '../services/PrivateCaptureService';
+import { audioRecordingService } from '../services/AudioRecordingService';
+import { MAX_AUDIO_ATTACHMENTS } from '../services/VaultLimits';
 import { PendingShareRequest, shareImportService } from '../services/ShareImportService';
 import { vaultFilePreviewService, VaultFilePreviewResult } from '../services/VaultFilePreviewService';
 import { vaultRepository } from '../services/VaultRepository';
@@ -87,6 +91,7 @@ struct Index {
   @State private loginCount: number = 0;
   @State private noteCount: number = 0;
   @State private mediaCount: number = 0;
+  @State private audioCount: number = 0;
   @State private fileCount: number = 0;
   @State private searchText: string = '';
   @State private searchHits: VaultSearchHit[] = [];
@@ -94,6 +99,7 @@ struct Index {
   @State private showNewItem: boolean = false;
   @State private captureMode: string = 'none';
   @State private captureReturnsToDraft: boolean = false;
+  @State private showAudioRecorder: boolean = false;
   @State private showNewGroup: boolean = false;
   @State private expandedGroupId: number = -1;
   @State private draggingGroupId: number = -1;
@@ -165,6 +171,8 @@ struct Index {
   @State private recognitionProgressText: string = '';
   @State private selectedFileCount: number = 0;
   @State private pendingFilePreviewIndex: number = -1;
+  @State private selectedAudioCount: number = 0;
+  @State private selectedAudioPreviewIndex: number = 0;
   @State private savingNewItem: boolean = false;
   @State private saveProgress: number = 0;
   @State private saveProgressText: string = '';
@@ -211,6 +219,7 @@ struct Index {
   @State private healthBusy: boolean = false;
   @State private pendingMedia: PickedMedia[] = [];
   @State private pendingFiles: PickedMedia[] = [];
+  @State private pendingAudios: PickedMedia[] = [];
   private mediaRecognitionVersion: number = 0;
   private searchVersion: number = 0;
   private vaultRefreshVersion: number = 0;
@@ -237,6 +246,11 @@ struct Index {
   private backupService?: VaultBackupService = undefined;
   private consumingShareRequestId: string = '';
   private lifecycleLockInProgress: boolean = false;
+  private recordingTargetItemId: string = '';
+  private suspendedAudioDraft: PickedMedia[] = [];
+  private suspendedAudioTitle: string = '';
+  private suspendedAudioNotes: string = '';
+  private suspendedAudioGroupId: number = 0;
 
   private getSecurityService(): VaultSecurityService {
     if (!this.securityService) {
@@ -253,10 +267,20 @@ struct Index {
   }
 
   aboutToAppear(): void {
+    audioRecordingService.setCompletionListener((audio: PickedMedia): void => {
+      if (this.screen === 'vault') {
+        audioRecordingService.takeCompleted();
+        this.handleRecordedAudio(audio);
+      }
+    });
     this.initialize();
   }
 
   onBackPress(): boolean {
+    if (this.showAudioRecorder) {
+      this.handleAudioRecorderBack();
+      return true;
+    }
     if (this.captureMode !== 'none') {
       this.captureMode = 'none';
       if (this.captureReturnsToDraft) { this.showNewItem = true; }
@@ -322,6 +346,7 @@ struct Index {
     try {
     try {
       privateCaptureService.cleanupTemporaryFiles();
+      audioRecordingService.cleanupTemporaryFiles(true);
       shareImportService.cleanupStale(AbilityContextHolder.getContext(), this.shareRequestId);
       this.lastNewItemType = await vaultUiPreferences.getLastNewItemType();
       this.newType = this.lastNewItemType;
@@ -365,6 +390,7 @@ struct Index {
 
   private handleAppForeground(): void {
     if (!this.appForeground) { return; }
+    if (this.screen === 'vault' && audioRecordingService.isActive()) { this.showAudioRecorder = true; }
     setTimeout((): void => { this.consumePendingShare(); }, 0);
   }
 
@@ -644,6 +670,7 @@ struct Index {
 
   private async lockVault(): Promise<void> {
     try {
+    this.suspendAudioDraftForLock();
     AbilityContextHolder.setPrivacyMode(false);
     this.trashEntries = [];
     this.trashRefreshVersion += 1;
@@ -710,6 +737,7 @@ struct Index {
     this.loginCount = 0;
     this.noteCount = 0;
     this.mediaCount = 0;
+    this.audioCount = 0;
     this.fileCount = 0;
     this.totalItemCount = 0;
     this.groups = [];
@@ -744,6 +772,7 @@ struct Index {
     try {
     await AbilityContextHolder.setPrivacyMode(false);
     this.screen = 'vault';
+    await this.resumeAudioAfterUnlock();
     await this.consumePendingShare();
       } catch (error) {
       throw normalizeError(error);
@@ -778,7 +807,8 @@ struct Index {
       if (this.selectedTrashEntry) { this.closeTrashDetail(); }
       this.resetNewItem();
       this.newType = request.type;
-      this.newTitle = request.title;
+      this.newTitle = request.title.length > 0 ? request.title :
+        (request.type === VaultItemType.Audio ? this.suggestImportedAudioTitle(request.items) : '');
       this.newNotes = request.notes;
       if (request.type === VaultItemType.Image) {
         this.pendingMedia = request.items;
@@ -787,6 +817,10 @@ struct Index {
       } else if (request.type === VaultItemType.File) {
         this.pendingFiles = request.items;
         this.selectedFileCount = request.items.length;
+      } else if (request.type === VaultItemType.Audio) {
+        this.pendingAudios = request.items;
+        this.selectedAudioCount = request.items.length;
+        this.selectedAudioPreviewIndex = Math.max(0, request.items.length - 1);
       }
       adopted = true;
       this.activeTab = 0;
@@ -902,6 +936,140 @@ struct Index {
     this.captureReturnsToDraft = false;
   }
 
+  private beginAudioRecording(itemId: string = ''): void {
+    if (audioRecordingService.isActive()) {
+      this.showAudioRecorder = true;
+      return;
+    }
+    this.recordingTargetItemId = itemId;
+    this.showAudioRecorder = true;
+  }
+
+  private async beginDetailAudioRecording(): Promise<void> {
+    const item = this.selectedItem;
+    if (!item || item.type !== VaultItemType.Audio) { return; }
+    if (this.detailTitle.trim().length === 0) {
+      this.getUIContext().getPromptAction().showToast({ message: '在线录音前请先填写资料名称' });
+      return;
+    }
+    const changed = item.title !== this.detailTitle.trim() || item.username !== this.detailUsername.trim() ||
+      item.password !== this.detailPassword || item.website !== this.detailWebsite.trim() ||
+      item.notes !== this.detailNotes || item.groupId !== this.detailGroupId;
+    if (changed && await this.saveSelectedItem() <= 0) { return; }
+    this.beginAudioRecording(item.id);
+  }
+
+  private async handleRecordedAudio(audio: PickedMedia): Promise<void> {
+    this.showAudioRecorder = false;
+    if (this.recordingTargetItemId.length > 0) {
+      if (this.screen !== 'vault') { return; }
+      try {
+        await vaultRepository.appendItemAttachments(this.recordingTargetItemId, [{
+          type: VaultItemType.Audio,
+          uri: audio.uri,
+          sourceUri: '',
+          name: audio.name,
+          ocrText: ''
+        }]);
+        privateCaptureService.removeMedia([audio]);
+        await this.refreshSelectedItemAfterAttachments();
+        this.getUIContext().getPromptAction().showToast({ message: '录音已添加到资料' });
+      } catch (error) {
+        this.pendingAudios = this.pendingAudios.concat([audio]);
+        this.selectedAudioCount = this.pendingAudios.length;
+        this.newType = VaultItemType.Audio;
+        this.showNewItem = true;
+        this.getUIContext().getPromptAction().showToast({ message: '无法追加到原资料，录音已保留为新草稿' });
+      }
+      this.recordingTargetItemId = '';
+      return;
+    }
+    if (this.pendingAudios.length >= MAX_AUDIO_ATTACHMENTS) {
+      privateCaptureService.removeMedia([audio]);
+      this.getUIContext().getPromptAction().showToast({ message: '每项音频资料最多保存 50 段音频' });
+      return;
+    }
+    this.pendingAudios = this.pendingAudios.concat([audio]);
+    this.selectedAudioCount = this.pendingAudios.length;
+    this.selectedAudioPreviewIndex = this.pendingAudios.length - 1;
+    this.newType = VaultItemType.Audio;
+    this.showNewItem = true;
+  }
+
+  private isRecordedAudio(audio: PickedMedia): boolean {
+    return audio.sourceUri === '' && audio.uri.replace(/\\/g, '/').indexOf('/pv-record-') >= 0;
+  }
+
+  private suggestImportedAudioTitle(audios: PickedMedia[]): string {
+    if (audios.length !== 1 || this.isRecordedAudio(audios[0])) { return ''; }
+    const name = audios[0].name.trim();
+    if (name.length === 0 || name.startsWith('未命名音频') || name.startsWith('收进密匣-')) { return ''; }
+    return name;
+  }
+
+  private async handleAudioRecorderBack(): Promise<void> {
+    if (!audioRecordingService.isActive()) { this.showAudioRecorder = false; return; }
+    try {
+      const choice = await this.getUIContext().getPromptAction().showDialog({
+        title: '退出录音？',
+        message: '可以继续录音、结束并保留，或放弃这段录音。',
+        buttons: [
+          { text: '继续录音', color: COLOR_MUTED },
+          { text: '结束并保留', color: COLOR_PRIMARY },
+          { text: '放弃录音', color: COLOR_DANGER }
+        ]
+      });
+      if (choice.index === 1) {
+        const audio = await audioRecordingService.finish();
+        audioRecordingService.takeCompleted();
+        if (audio) { await this.handleRecordedAudio(audio); }
+      } else if (choice.index === 2) {
+        await audioRecordingService.cancel();
+        this.showAudioRecorder = false;
+        this.recordingTargetItemId = '';
+      }
+    } catch (error) {}
+  }
+
+  private suspendAudioDraftForLock(): void {
+    if (!audioRecordingService.isActive() && this.pendingAudios.length === 0) { return; }
+    if (this.recordingTargetItemId.length === 0) {
+      this.suspendedAudioDraft = this.pendingAudios.slice();
+      this.suspendedAudioTitle = this.newTitle;
+      this.suspendedAudioNotes = this.newNotes;
+      this.suspendedAudioGroupId = this.newGroupId;
+      this.pendingAudios = [];
+      this.selectedAudioCount = 0;
+    }
+    this.showAudioRecorder = false;
+  }
+
+  private async resumeAudioAfterUnlock(): Promise<void> {
+    if (this.suspendedAudioDraft.length > 0 || this.suspendedAudioTitle.length > 0) {
+      this.newType = VaultItemType.Audio;
+      this.pendingAudios = this.suspendedAudioDraft.slice();
+      this.selectedAudioCount = this.pendingAudios.length;
+      this.selectedAudioPreviewIndex = Math.max(0, this.pendingAudios.length - 1);
+      this.newTitle = this.suspendedAudioTitle;
+      this.newNotes = this.suspendedAudioNotes;
+      if (this.suspendedAudioGroupId > 0) { this.newGroupId = this.suspendedAudioGroupId; }
+      this.suspendedAudioDraft = [];
+      this.suspendedAudioTitle = '';
+      this.suspendedAudioNotes = '';
+      this.suspendedAudioGroupId = 0;
+    }
+    if (audioRecordingService.isActive()) {
+      this.showAudioRecorder = true;
+      return;
+    }
+    const completed = audioRecordingService.takeCompleted();
+    if (completed.length > 0) {
+      await this.handleRecordedAudio(completed[completed.length - 1]);
+    } else if (this.pendingAudios.length > 0) {
+      this.showNewItem = true;
+    }
+  }
+
   private handleScannerUnavailable(): void {
     this.captureMode = 'none';
     try { this.getUIContext().getPromptAction().showToast({ message: '自动裁边不可用，已切换到密匣相机' }); }
@@ -926,7 +1094,7 @@ struct Index {
     return this.newTitle.length > 0 || this.newUsername.length > 0 || this.newPassword.length > 0 ||
       this.newWebsite.length > 0 ||
       this.newNotes.length > 0 || this.pendingMedia.length > 0 ||
-      this.pendingFiles.length > 0;
+      this.pendingFiles.length > 0 || this.pendingAudios.length > 0;
   }
 
   private async requestCloseNewItem(): Promise<void> {
@@ -963,6 +1131,9 @@ struct Index {
     }
     if (type !== VaultItemType.File && this.pendingFiles.length > 0) {
       this.clearPendingFiles();
+    }
+    if (type !== VaultItemType.Audio && this.pendingAudios.length > 0) {
+      this.clearPendingAudios();
     }
     if (type !== VaultItemType.Login && this.revealNewPassword) {
       this.revealNewPassword = false;
@@ -1617,7 +1788,7 @@ struct Index {
     this.healthStatusLabel = '正在检查数据库、附件与搜索索引…';
     try {
       const removedTemporaryCount = this.getBackupService().cleanupTemporaryWorkspaces() +
-        privateCaptureService.cleanupTemporaryFiles();
+        privateCaptureService.cleanupTemporaryFiles() + audioRecordingService.cleanupTemporaryFiles();
       const report = await vaultRepository.inspectDataHealth(true);
       this.storageUsageLabel = this.formatBackupSize(report.storage.totalBytes);
       const unresolvedCount = report.missingAttachmentCount + report.sizeMismatchCount +
@@ -1647,6 +1818,7 @@ struct Index {
       report.databaseOk ? '数据库：完整性正常' : '数据库：完整性检查未通过',
       `资料：${report.activeItemCount} 项 · 回收站 ${report.trashItemCount} 项`,
       `附件：${report.attachmentCount} 个 · 媒体 ${this.formatBackupSize(report.storage.mediaBytes)} · ` +
+        `音频 ${this.formatBackupSize(report.storage.audioBytes)} · ` +
         `文件 ${this.formatBackupSize(report.storage.fileBytes)}`,
       `数据库占用：${this.formatBackupSize(report.storage.databaseBytes)}`
     ];
@@ -1676,16 +1848,19 @@ struct Index {
     let loginCount = 0;
     let noteCount = 0;
     let mediaCount = 0;
+    let audioCount = 0;
     let fileCount = 0;
     items.forEach((item: VaultItem): void => {
       if (item.type === VaultItemType.Login) { loginCount += 1; }
       else if (item.type === VaultItemType.Note) { noteCount += 1; }
       else if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) { mediaCount += 1; }
+      else if (item.type === VaultItemType.Audio) { audioCount += 1; }
       else if (item.type === VaultItemType.File) { fileCount += 1; }
     });
     this.loginCount = loginCount;
     this.noteCount = noteCount;
     this.mediaCount = mediaCount;
+    this.audioCount = audioCount;
     this.fileCount = fileCount;
   }
 
@@ -2121,6 +2296,38 @@ struct Index {
     }
   }
 
+  private async chooseAudio(): Promise<void> {
+    if (this.savingNewItem) { return; }
+    try {
+      const audios = await mediaPickerService.pickAudio();
+      if (audios.length === 0 || this.screen !== 'vault') { return; }
+      const available = Math.max(0, MAX_AUDIO_ATTACHMENTS - this.pendingAudios.length);
+      if (available === 0) { throw new Error('每项音频资料最多保存 50 段音频'); }
+      const unique = audios.filter((audio: PickedMedia): boolean =>
+        this.pendingAudios.every((pending: PickedMedia): boolean => pending.uri !== audio.uri));
+      const accepted = unique.slice(0, available);
+      const duplicateCount = audios.length - unique.length;
+      if (accepted.length > 0) {
+        this.pendingAudios = this.pendingAudios.concat(accepted);
+        this.selectedAudioCount = this.pendingAudios.length;
+        this.selectedAudioPreviewIndex = this.pendingAudios.length - 1;
+        if (this.newTitle.trim().length === 0) {
+          this.newTitle = this.suggestImportedAudioTitle(this.pendingAudios);
+        }
+      }
+      const warning = mediaPickerService.takeAudioImportWarning();
+      if (warning.length > 0) {
+        this.getUIContext().getPromptAction().showToast({ message: warning });
+      }
+      if (duplicateCount > 0 || accepted.length === 0) {
+        this.getUIContext().getPromptAction().showToast({ message: accepted.length === 0 ?
+          '音频已存在，未重复添加' : `已添加 ${accepted.length} 段音频，${duplicateCount} 段已存在` });
+      }
+    } catch (error) {
+      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+    }
+  }
+
   private async recognizePendingMedia(): Promise<void> {
     try {
     if (this.pendingMedia.length === 0) { return; }
@@ -2219,6 +2426,16 @@ struct Index {
     this.selectedFileCount = this.pendingFiles.length;
   }
 
+  private removePendingAudio(index: number): void {
+    if (this.savingNewItem || index < 0 || index >= this.pendingAudios.length) { return; }
+    privateCaptureService.removeMedia([this.pendingAudios[index]]);
+    this.pendingAudios = this.pendingAudios.filter((_audio: PickedMedia, audioIndex: number): boolean =>
+      audioIndex !== index);
+    this.selectedAudioCount = this.pendingAudios.length;
+    this.selectedAudioPreviewIndex = Math.max(0, Math.min(this.selectedAudioPreviewIndex,
+      this.pendingAudios.length - 1));
+  }
+
   private async previewPendingFile(index: number): Promise<void> {
     if (this.savingNewItem || this.pendingFilePreviewIndex >= 0 || index < 0 || index >= this.pendingFiles.length) {
       return;
@@ -2290,6 +2507,42 @@ struct Index {
         this.closeNewItem();
         await this.refreshData();
         this.getUIContext().getPromptAction().showToast({ message: `已导入 ${importedCount} 项媒体` });
+        return;
+      }
+      if (this.newType === VaultItemType.Audio) {
+        if (this.pendingAudios.length === 0) { throw new Error('请先导入或录制音频'); }
+        if (this.newTitle.trim().length === 0) {
+          this.newTitle = this.suggestImportedAudioTitle(this.pendingAudios);
+        }
+        if (this.pendingAudios.some((audio: PickedMedia): boolean => this.isRecordedAudio(audio)) &&
+          this.newTitle.trim().length === 0) {
+          throw new Error('在线录音资料必须填写名称');
+        }
+        const attachments: VaultAttachmentInput[] = this.pendingAudios.map(
+          (audio: PickedMedia): VaultAttachmentInput => ({
+            type: VaultItemType.Audio,
+            uri: audio.uri,
+            sourceUri: audio.sourceUri !== undefined ? audio.sourceUri : audio.uri,
+            name: audio.name,
+            ocrText: ''
+          }));
+        this.saveProgressText = '正在写入本地数据';
+        const input: VaultItemInput = {
+          type: VaultItemType.Audio,
+          groupId: this.newGroupId,
+          title: this.newTitle.trim(),
+          username: '', password: '', website: '', notes: this.newNotes
+        };
+        await vaultRepository.createItemWithAttachments(input, attachments,
+          (completed: number, total: number): void => {
+            this.saveProgress = Math.round(completed / total * 100);
+          });
+        const count = this.pendingAudios.length;
+        await this.rememberNewItemType(VaultItemType.Audio);
+        this.resetNewItem();
+        this.closeNewItem();
+        await this.refreshData();
+        this.getUIContext().getPromptAction().showToast({ message: `已保存 ${count} 段音频` });
         return;
       }
       if (this.newType === VaultItemType.File) {
@@ -2430,6 +2683,19 @@ struct Index {
     }
   }
 
+  private async refreshSelectedItemAfterAttachments(): Promise<number> {
+    const id = this.recordingTargetItemId.length > 0 ? this.recordingTargetItemId :
+      (this.selectedItem ? this.selectedItem.id : '');
+    if (id.length === 0 || this.screen !== 'vault') { return 0; }
+    await this.refreshData();
+    const refreshed = this.allItems.find((item: VaultItem): boolean => item.id === id);
+    if (!refreshed) { return 0; }
+    this.selectedItem = refreshed;
+    this.detailCreatedAt = refreshed.createdAt;
+    this.detailUpdatedAt = refreshed.updatedAt;
+    return refreshed.updatedAt;
+  }
+
   private async trashSelectedItem(): Promise<void> {
     try {
     const item = this.selectedItem;
@@ -2459,6 +2725,7 @@ struct Index {
     this.newNotes = '';
     this.clearPendingMedia();
     this.clearPendingFiles();
+    this.clearPendingAudios();
   }
 
   private async rememberNewItemType(type: VaultItemType): Promise<void> {
@@ -2482,6 +2749,13 @@ struct Index {
     this.pendingFiles = [];
     this.selectedFileCount = 0;
     this.pendingFilePreviewIndex = -1;
+  }
+
+  private clearPendingAudios(): void {
+    privateCaptureService.removeMedia(this.pendingAudios);
+    this.pendingAudios = [];
+    this.selectedAudioCount = 0;
+    this.selectedAudioPreviewIndex = 0;
   }
 
   private describeError(error: Object): string {
@@ -2837,6 +3111,19 @@ struct Index {
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
           }
           VaultFileSummary({ itemId: item.id })
+        } else if (item.type === VaultItemType.Audio) {
+          Row({ space: 8 }) {
+            VaultAttachmentPreview({ itemId: item.id, fallbackType: VaultItemType.Audio,
+              maxVisibleCount: 1, thumbnailSize: 34 })
+            Column({ space: 2 }) {
+              Text(item.title.length > 0 ? item.title : '未命名音频')
+                .fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+              if (item.notes.length > 0) {
+                Text(item.notes).fontSize(11).fontColor(COLOR_MUTED).maxLines(1)
+              }
+            }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          }.width('100%')
         } else if (item.type === VaultItemType.Image || item.type === VaultItemType.Video) {
           if (item.title.length > 0) {
             Text(item.title)
@@ -3001,7 +3288,7 @@ struct Index {
       const type = visibleItems[index].type;
       if (type === VaultItemType.Image || type === VaultItemType.Video) {
         height += visibleItems[index].title.length > 0 ? 62 : 48;
-      } else if (type === VaultItemType.File) {
+      } else if (type === VaultItemType.File || type === VaultItemType.Audio) {
         height += 62;
       } else {
         height += 42;
@@ -3179,10 +3466,11 @@ struct Index {
           }
           .width('100%')
           Row({ space: 5 }) {
-            this.summaryPill(VaultItemType.Login)
-            this.summaryPill(VaultItemType.Note)
             this.summaryPill(VaultItemType.Image)
+            this.summaryPill(VaultItemType.Note)
+            this.summaryPill(VaultItemType.Login)
             this.summaryPill(VaultItemType.File)
+            this.summaryPill(VaultItemType.Audio)
           }
           .width('100%')
         }
@@ -3283,7 +3571,8 @@ struct Index {
   private summaryPill(type: VaultItemType): void {
     Text(`${itemTypeLabel(type)} ${type === VaultItemType.Login ? this.loginCount :
       (type === VaultItemType.Note ? this.noteCount :
-        (type === VaultItemType.File ? this.fileCount : this.mediaCount))}`)
+        (type === VaultItemType.File ? this.fileCount :
+          (type === VaultItemType.Audio ? this.audioCount : this.mediaCount)))}`)
       .fontSize(11).fontColor(COLOR_HERO_TEXT)
       .padding({ left: 10, right: 10, top: 6, bottom: 6 })
       .backgroundColor(COLOR_HERO_PILL)
@@ -3419,6 +3708,7 @@ struct Index {
       loginCount: this.loginCount,
       noteCount: this.noteCount,
       mediaCount: this.mediaCount,
+      audioCount: this.audioCount,
       fileCount: this.fileCount,
       managing: this.categoryManaging,
       selectedIds: this.categorySelectedIds,
@@ -3535,6 +3825,9 @@ struct Index {
       }.width('100%')
       if (entry.item.type === VaultItemType.Image || entry.item.type === VaultItemType.Video) {
         VaultAttachmentPreview({ itemId: entry.item.id, fallbackType: entry.item.type, maxVisibleCount: 5 })
+      } else if (entry.item.type === VaultItemType.Audio) {
+        VaultAttachmentPreview({ itemId: entry.item.id, fallbackType: VaultItemType.Audio,
+          maxVisibleCount: 1, thumbnailSize: 38 })
       } else if (entry.item.type === VaultItemType.Login && entry.item.username.length > 0) {
         Text(entry.item.username).fontSize(11).fontColor(COLOR_MUTED).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
@@ -3592,6 +3885,7 @@ struct Index {
           this.trashFilterChip(VaultItemType.Note, '笔记')
           this.trashFilterChip(VaultItemType.Image, '媒体')
           this.trashFilterChip(VaultItemType.File, '文件')
+          this.trashFilterChip(VaultItemType.Audio, '音频')
         }
       }.width('100%').scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
       if (this.showTrashMore && !this.trashManaging) {
@@ -3818,6 +4112,10 @@ struct Index {
           busy: this.detailSaving,
           onClose: (): void => { this.closeSelectedItem(); },
           onSave: async (): Promise<number> => await this.saveSelectedItem(),
+          onRecordAudio: (): void => {
+            this.beginDetailAudioRecording();
+          },
+          onAttachmentsChanged: async (): Promise<number> => await this.refreshSelectedItemAfterAttachments(),
           onTrash: (): void => { this.trashSelectedItem(); },
           onPasswordVisibilityChange: (visible: boolean): void => {
             AbilityContextHolder.setPrivacyMode(visible);
@@ -3871,6 +4169,12 @@ struct Index {
           onComplete: (media: PickedMedia[]): void => { this.handleCapturedMedia(media, true); },
           onCancel: (): void => { this.cancelCapture(); },
           onUnavailable: (): void => { this.handleScannerUnavailable(); }
+        })
+      }
+      if (this.showAudioRecorder) {
+        AudioRecorderOverlay({
+          onComplete: (audio: PickedMedia): void => { this.handleRecordedAudio(audio); },
+          onCancel: (): void => { this.showAudioRecorder = false; this.recordingTargetItemId = ''; }
         })
       }
     }
@@ -4064,6 +4368,36 @@ struct Index {
   }
 
   @Builder
+  private selectedAudiosPreview(): void {
+    Column({ space: 8 }) {
+      if (this.pendingAudios.length > 0 && this.selectedAudioPreviewIndex < this.pendingAudios.length) {
+        ForEach([this.pendingAudios[this.selectedAudioPreviewIndex]], (audio: PickedMedia): void => {
+          VaultAudioPlayer({ sourceUri: audio.uri, attachmentIndex: this.selectedAudioPreviewIndex })
+        }, (audio: PickedMedia): string => `pending-audio-${audio.uri}`)
+      }
+      Scroll() {
+        Column({ space: 5 }) {
+          ForEach(this.pendingAudios, (audio: PickedMedia, index: number): void => {
+            Row({ space: 9 }) {
+              Text('♪').fontSize(18).fontColor(COLOR_PRIMARY).textAlign(TextAlign.Center)
+                .width(32).height(32).backgroundColor(COLOR_PRIMARY_TINT).borderRadius(10)
+              Text(audio.name.length > 0 ? audio.name : '未命名音频')
+                .fontSize(12).fontColor(COLOR_TEXT).maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+              Text('×').fontSize(17).fontColor(COLOR_MUTED).textAlign(TextAlign.Center)
+                .width(30).height(30).backgroundColor(COLOR_DIVIDER_SOFT).borderRadius(10)
+                .enabled(!this.savingNewItem).onClick((): void => { this.removePendingAudio(index); })
+            }
+            .width('100%').padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .backgroundColor(index === this.selectedAudioPreviewIndex ? COLOR_PRIMARY_WASH : COLOR_SURFACE_2)
+            .borderRadius(11).onClick((): void => { this.selectedAudioPreviewIndex = index; })
+          }, (audio: PickedMedia, index: number): string => `${audio.uri}-${index}`)
+        }.width('100%')
+      }.width('100%').constraintSize({ maxHeight: 176 }).scrollBar(BarState.Auto)
+    }.width('100%')
+  }
+
+  @Builder
   private newItemOverlay(): void {
     Column() {
       Scroll() {
@@ -4088,6 +4422,7 @@ struct Index {
             this.typeChip(VaultItemType.Note)
             this.typeChip(VaultItemType.Login)
             this.typeChip(VaultItemType.File)
+            this.typeChip(VaultItemType.Audio)
           }
           .width('100%')
           TextInput({ placeholder: LABEL_NAME, text: this.newTitle })
@@ -4136,6 +4471,18 @@ struct Index {
                 Text(this.recognitionProgressText).fontSize(12).fontColor(COLOR_MUTED)
               }.width('100%')
             }
+          } else if (this.newType === VaultItemType.Audio) {
+            Row({ space: 8 }) {
+              Button('导入音频').layoutWeight(1).height(48).fontSize(13).fontColor(COLOR_PRIMARY)
+                .backgroundColor(COLOR_DARK_ACTION).borderRadius(12)
+                .enabled(!this.savingNewItem && this.pendingAudios.length < MAX_AUDIO_ATTACHMENTS)
+                .onClick((): void => { this.chooseAudio(); })
+              Button('在线录音').layoutWeight(1).height(48).fontSize(13).fontColor(COLOR_PRIMARY)
+                .backgroundColor(COLOR_DARK_ACTION).borderRadius(12)
+                .enabled(!this.savingNewItem && this.pendingAudios.length < MAX_AUDIO_ATTACHMENTS)
+                .onClick((): void => { this.beginAudioRecording(); })
+            }.width('100%')
+            if (this.selectedAudioCount > 0) { this.selectedAudiosPreview() }
           } else if (this.newType === VaultItemType.File) {
             Button('从文件系统添加')
               .width('100%').height(48).fontColor(COLOR_PRIMARY)

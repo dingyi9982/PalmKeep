@@ -19,7 +19,7 @@ class VaultUiPreferences {
       const store = await preferences.getPreferences(AbilityContextHolder.getContext(), UI_PREFERENCES);
       const value = store.getSync(KEY_LAST_NEW_ITEM_TYPE, VaultItemType.Image) as string;
       if (value === VaultItemType.Login || value === VaultItemType.Note ||
-        value === VaultItemType.Image || value === VaultItemType.File) {
+        value === VaultItemType.Image || value === VaultItemType.Audio || value === VaultItemType.File) {
         return value as VaultItemType;
       }
     } catch (error) {

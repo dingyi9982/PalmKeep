@@ -6,7 +6,7 @@ import { systemShare } from '@kit.ShareKit';
 import { VaultItemType } from '../models/VaultModels';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { PickedMedia } from './MediaPickerService';
-import { MAX_FILE_ATTACHMENT_BYTES } from './VaultLimits';
+import { MAX_FILE_ATTACHMENT_BYTES, MAX_IMPORTED_AUDIO_BYTES } from './VaultLimits';
 
 const SHARE_PREFIX: string = 'pv-share-';
 const REQUEST_PREFIX: string = 'pv-share-request-';
@@ -48,9 +48,10 @@ class ShareImportService {
         }
 
         const itemType = this.mediaType(record.utd);
-        const groupType = itemType === VaultItemType.File ? VaultItemType.File : VaultItemType.Image;
+        const groupType = itemType === VaultItemType.File ? VaultItemType.File :
+          (itemType === VaultItemType.Audio ? VaultItemType.Audio : VaultItemType.Image);
         if (requestType !== undefined && requestType !== groupType) {
-          throw new Error('媒体和普通文件请分开收进密匣');
+          throw new Error('媒体、音频和普通文件请分开收进密匣');
         }
         requestType = groupType;
         const name = this.sharedName(record, itemType, index + 1);
@@ -67,7 +68,7 @@ class ShareImportService {
       const request: PendingShareRequest = {
         id: id,
         type: type,
-        title: type === VaultItemType.File ? '' : this.requestTitle(suggestedTitle),
+        title: type === VaultItemType.File || type === VaultItemType.Audio ? '' : this.requestTitle(suggestedTitle),
         notes: textParts.join('\n\n'),
         items: items,
         createdAt: Date.now()
@@ -144,6 +145,7 @@ class ShareImportService {
   private mediaType(typeId: string): VaultItemType {
     if (this.belongsTo(typeId, utd.UniformDataType.IMAGE)) { return VaultItemType.Image; }
     if (this.belongsTo(typeId, utd.UniformDataType.VIDEO)) { return VaultItemType.Video; }
+    if (this.belongsTo(typeId, utd.UniformDataType.AUDIO)) { return VaultItemType.Audio; }
     return VaultItemType.File;
   }
 
@@ -163,6 +165,12 @@ class ShareImportService {
       if (size <= 0) { throw new Error(`“${name}”内容为空`); }
       if (type === VaultItemType.File && size > MAX_FILE_ATTACHMENT_BYTES) {
         throw new Error(`文件“${name}”超过 10 MB，请选择较小的文件`);
+      }
+      if (type === VaultItemType.Audio && size > MAX_IMPORTED_AUDIO_BYTES) {
+        throw new Error(`音频“${name}”超过 10 MB，请选择较小的文件`);
+      }
+      if (type === VaultItemType.Audio && !this.isSupportedAudioName(name)) {
+        throw new Error(`音频“${name}”格式不受支持`);
       }
       target = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       await fs.copyFile(source.fd, target.fd);
@@ -227,6 +235,12 @@ class ShareImportService {
     return cleaned.length > 120 ? cleaned.substring(0, 120) : cleaned;
   }
 
+  private isSupportedAudioName(name: string): boolean {
+    const lower = name.toLowerCase();
+    return ['.mp3', '.m4a', '.aac', '.wav', '.amr', '.flac', '.ogg']
+      .some((extension: string): boolean => lower.endsWith(extension));
+  }
+
   private typeExtension(typeId: string, type: VaultItemType): string {
     try {
       const extensions = utd.getTypeDescriptor(typeId).filenameExtensions;
@@ -236,6 +250,7 @@ class ShareImportService {
     } catch (error) {}
     if (type === VaultItemType.Image) { return '.jpg'; }
     if (type === VaultItemType.Video) { return '.mp4'; }
+    if (type === VaultItemType.Audio) { return '.m4a'; }
     return '';
   }
 

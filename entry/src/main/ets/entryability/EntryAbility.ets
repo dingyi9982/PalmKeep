@@ -4,6 +4,7 @@ import Want from '@ohos.app.ability.Want';
 import window from '@ohos.window';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
 import { vaultRepository } from '../services/VaultRepository';
+import { audioRecordingService } from '../services/AudioRecordingService';
 
 export default class EntryAbility extends UIAbility {
   private backgroundAt: number = 0;
@@ -15,6 +16,14 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>('vaultAppForeground', true);
     AppStorage.setOrCreate<string>('vaultShareRequestId', '');
     this.publishShareRequest(want);
+  }
+
+  onDestroy(): void {
+    if (audioRecordingService.isActive()) {
+      audioRecordingService.finish().catch((error: Error): void => {
+        console.warn(`PalmVault recording finalization warning: ${error.message}`);
+      });
+    }
   }
 
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {

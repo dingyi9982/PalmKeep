@@ -6,7 +6,7 @@ import fileUri from '@ohos.file.fileuri';
 import { AbilityContextHolder } from './AbilityContextHolder';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
-import { MAX_FILE_ATTACHMENT_BYTES } from './VaultLimits';
+import { MAX_AUDIO_ATTACHMENTS, MAX_FILE_ATTACHMENT_BYTES, MAX_IMPORTED_AUDIO_BYTES } from './VaultLimits';
 
 export interface PickedMedia {
   uri: string;
@@ -18,6 +18,51 @@ export interface PickedMedia {
 }
 
 export class MediaPickerService {
+  private audioImportWarning: string = '';
+
+  takeAudioImportWarning(): string {
+    const warning = this.audioImportWarning;
+    this.audioImportWarning = '';
+    return warning;
+  }
+
+  async pickAudio(): Promise<PickedMedia[]> {
+    try {
+      this.audioImportWarning = '';
+      const options = new picker.DocumentSelectOptions();
+      options.maxSelectNumber = MAX_AUDIO_ATTACHMENTS;
+      options.fileSuffixFilters = ['音频文件|.mp3,.m4a,.aac,.wav,.amr,.flac,.ogg'];
+      const uris = await new picker.DocumentViewPicker().select(options);
+      const picked: PickedMedia[] = [];
+      const rejected: string[] = [];
+      for (let index = 0; index < uris.length; index += 1) {
+        const uri = uris[index];
+        const name = this.fileName(uri, VaultItemType.Audio);
+        if (!this.isSupportedAudioName(name)) {
+          rejected.push(`“${name}”格式不受支持`);
+          continue;
+        }
+        if (this.fileSize(uri) > MAX_IMPORTED_AUDIO_BYTES) {
+          rejected.push(`“${name}”超过 10 MB`);
+          continue;
+        }
+        picked.push({ uri: uri, sourceUri: uri, type: VaultItemType.Audio, name: name, ocrText: '' });
+      }
+      if (rejected.length > 0) {
+        this.audioImportWarning = `${rejected.length} 个音频未导入：${rejected.slice(0, 2).join('；')}`;
+      }
+      if (picked.length === 0 && rejected.length > 0) { throw new Error(this.audioImportWarning); }
+      return picked;
+    } catch (error) {
+      const message = normalizeError(error).message;
+      if (this.audioImportWarning.length > 0) { throw new Error(this.audioImportWarning); }
+      if (message.indexOf('格式不受支持') >= 0 || message.indexOf('超过 10 MB') >= 0) {
+        throw new Error(message);
+      }
+      throw new Error('音频导入失败，请确认文件完整且格式受支持');
+    }
+  }
+
   async pickFiles(): Promise<PickedMedia[]> {
     try {
     const options = new picker.DocumentSelectOptions();
@@ -143,7 +188,14 @@ export class MediaPickerService {
     if (name.length > 0 && name.indexOf('.') > 0) { return this.safeFileName(name); }
     if (type === VaultItemType.Image) { return '私密图片.jpg'; }
     if (type === VaultItemType.Video) { return '私密视频.mp4'; }
+    if (type === VaultItemType.Audio) { return '未命名音频.m4a'; }
     return '私密文件';
+  }
+
+  private isSupportedAudioName(name: string): boolean {
+    const lower = name.toLowerCase();
+    return ['.mp3', '.m4a', '.aac', '.wav', '.amr', '.flac', '.ogg']
+      .some((extension: string): boolean => lower.endsWith(extension));
   }
 
   private fileSize(uri: string): number {

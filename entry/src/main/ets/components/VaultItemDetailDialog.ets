@@ -1,5 +1,6 @@
 import { VaultAttachmentGallery } from './VaultAttachmentGallery';
 import { VaultFileGallery } from './VaultFileGallery';
+import { VaultAudioGallery } from './VaultAudioGallery';
 import { VaultLoginFieldsEditor } from './VaultLoginFieldsEditor';
 import { VaultItemTimeInfo } from './VaultCommonComponents';
 import {
@@ -46,6 +47,13 @@ export struct VaultItemDetailDialog {
   onPasswordVisibilityChange: (visible: boolean) => void = (): void => {};
   onCopyLoginValue: (value: string, label: string) => void = (): void => {};
   onOpenWebsite: (website: string) => void = (): void => {};
+  onRecordAudio: () => void = (): void => {};
+  onAttachmentsChanged: () => Promise<number> = async (): Promise<number> => 0;
+
+  private async attachmentsChanged(): Promise<void> {
+    const changedAt = await this.onAttachmentsChanged();
+    if (changedAt > 0) { this.displayedUpdatedAt = changedAt; }
+  }
 
   aboutToAppear(): void {
     this.displayedUpdatedAt = this.updatedAt;
@@ -213,6 +221,11 @@ export struct VaultItemDetailDialog {
       this.groupPicker()
       if (this.item.type === VaultItemType.File) {
         VaultFileGallery({ itemId: this.item.id })
+      }
+      if (this.item.type === VaultItemType.Audio) {
+        VaultAudioGallery({ itemId: this.item.id,
+          onRecord: (): void => { this.onRecordAudio(); },
+          onChanged: (): void => { this.attachmentsChanged(); } })
       }
       TextInput({ placeholder: LABEL_NAME, text: this.title })
         .fontColor(COLOR_TEXT).backgroundColor(COLOR_SURFACE_2).height(44).borderRadius(11)

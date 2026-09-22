@@ -19,6 +19,7 @@ export struct VaultCategoryPanel {
   @Prop loginCount: number = 0;
   @Prop noteCount: number = 0;
   @Prop mediaCount: number = 0;
+  @Prop audioCount: number = 0;
   @Prop fileCount: number = 0;
   @Prop managing: boolean = false;
   @Prop selectedIds: string[] = [];
@@ -61,6 +62,7 @@ export struct VaultCategoryPanel {
     if (type === VaultItemType.Login) { return this.loginCount; }
     if (type === VaultItemType.Note) { return this.noteCount; }
     if (type === VaultItemType.File) { return this.fileCount; }
+    if (type === VaultItemType.Audio) { return this.audioCount; }
     return this.mediaCount;
   }
 
@@ -140,14 +142,19 @@ export struct VaultCategoryPanel {
       .onClick((): void => { this.activateItem(item); })
       .priorityGesture(LongPressGesture({ repeat: false, duration: 500 })
         .onAction((): void => { this.onEnterManagement(item.id); }))
-    } else if (this.selectedType === VaultItemType.File) {
+    } else if (this.selectedType === VaultItemType.File || this.selectedType === VaultItemType.Audio) {
       Column({ space: 5 }) {
         Row({ space: 8 }) {
           this.selectionMark(item)
           Column({ space: 4 }) {
             Text(itemDisplayTitle(item)).fontSize(14).fontWeight(FontWeight.Medium).fontColor(COLOR_TEXT)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-            VaultFileSummary({ itemId: item.id })
+            if (this.selectedType === VaultItemType.File) {
+              VaultFileSummary({ itemId: item.id })
+            } else {
+              VaultAttachmentPreview({ itemId: item.id, fallbackType: VaultItemType.Audio,
+                maxVisibleCount: 1, thumbnailSize: 34 })
+            }
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           Text('›').fontSize(19).fontColor(COLOR_CHEVRON)
         }.width('100%')
@@ -206,10 +213,11 @@ export struct VaultCategoryPanel {
   build() {
     Column({ space: 8 }) {
       Row({ space: 5 }) {
-        this.typeSwitch(VaultItemType.Login)
-        this.typeSwitch(VaultItemType.Note)
         this.typeSwitch(VaultItemType.Image)
+        this.typeSwitch(VaultItemType.Note)
+        this.typeSwitch(VaultItemType.Login)
         this.typeSwitch(VaultItemType.File)
+        this.typeSwitch(VaultItemType.Audio)
       }.width('100%')
       Row({ space: 6 }) {
         Scroll() {

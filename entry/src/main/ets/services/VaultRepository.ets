@@ -917,6 +917,7 @@ class VaultRepositoryImpl {
       let missingAttachmentCount = 0;
       let sizeMismatchCount = 0;
       let mediaBytes = 0;
+      let audioBytes = 0;
       let fileBytes = 0;
       const attachments = await store.querySql(
         'SELECT item_id, type, ocr_text, storage_name, size_bytes FROM vault_item_attachments ' +
@@ -939,6 +940,7 @@ class VaultRepositoryImpl {
             const actualSize = fs.statSync(this.storedAttachmentPath(storageName)).size;
             if (actualSize !== expectedSize) { sizeMismatchCount += 1; }
             if (type === VaultItemType.File) { fileBytes += actualSize; }
+            else if (type === VaultItemType.Audio) { audioBytes += actualSize; }
             else { mediaBytes += actualSize; }
           } catch (error) {
             missingAttachmentCount += 1;
@@ -996,9 +998,10 @@ class VaultRepositoryImpl {
       const storage: VaultStorageStats = {
         databaseBytes: databaseBytes,
         mediaBytes: mediaBytes,
+        audioBytes: audioBytes,
         fileBytes: fileBytes,
         orphanBytes: remainingOrphanBytes,
-        totalBytes: databaseBytes + mediaBytes + fileBytes + remainingOrphanBytes
+        totalBytes: databaseBytes + mediaBytes + audioBytes + fileBytes + remainingOrphanBytes
       };
       return {
         checkedAt: Date.now(), databaseOk: databaseOk, activeItemCount: activeItemCount,
