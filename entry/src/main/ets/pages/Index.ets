@@ -23,6 +23,7 @@ import {
   COLOR_SCRIM_STRONG, COLOR_SURFACE, COLOR_SURFACE_2, COLOR_TEXT, COLOR_TEXT_SECONDARY
 } from '../components/VaultTheme';
 import { VaultThumbnail } from '../components/VaultThumbnail';
+import { VaultMedia } from '../components/VaultMedia';
 import { VaultAttachmentPreview } from '../components/VaultAttachmentPreview';
 import { VaultFileSummary } from '../components/VaultFileSummary';
 import { PrivateCameraOverlay } from '../components/PrivateCameraOverlay';
@@ -158,6 +159,7 @@ struct Index {
   @State private newNotes: string = '';
   @State private selectedMediaCount: number = 0;
   @State private selectedMediaPreviewIndex: number = 0;
+  @State private pendingMediaFullScreenIndex: number = -1;
   @State private recognizingMedia: boolean = false;
   @State private recognitionProgressText: string = '';
   @State private selectedFileCount: number = 0;
@@ -256,6 +258,10 @@ struct Index {
       this.captureMode = 'none';
       if (this.captureReturnsToDraft) { this.showNewItem = true; }
       this.captureReturnsToDraft = false;
+      return true;
+    }
+    if (this.pendingMediaFullScreenIndex >= 0) {
+      this.closePendingMediaFullScreen();
       return true;
     }
     if (this.showBatchMoveDialog) {
@@ -2172,6 +2178,25 @@ struct Index {
     this.selectedMediaPreviewIndex = index;
   }
 
+  private openPendingMediaFullScreen(index: number): void {
+    if (index < 0 || index >= this.pendingMedia.length) { return; }
+    this.selectedMediaPreviewIndex = index;
+    this.pendingMediaFullScreenIndex = index;
+    AbilityContextHolder.setPrivacyMode(true);
+  }
+
+  private closePendingMediaFullScreen(): void {
+    this.pendingMediaFullScreenIndex = -1;
+    AbilityContextHolder.setPrivacyMode(false);
+  }
+
+  private movePendingMediaFullScreen(offset: number): void {
+    const nextIndex = this.pendingMediaFullScreenIndex + offset;
+    if (nextIndex < 0 || nextIndex >= this.pendingMedia.length) { return; }
+    this.pendingMediaFullScreenIndex = nextIndex;
+    this.selectedMediaPreviewIndex = nextIndex;
+  }
+
   private removePendingFile(index: number): void {
     if (this.savingNewItem || this.pendingFilePreviewIndex >= 0 || index < 0 || index >= this.pendingFiles.length) {
       return;
@@ -2406,6 +2431,7 @@ struct Index {
     this.pendingMedia = [];
     this.selectedMediaCount = 0;
     this.selectedMediaPreviewIndex = 0;
+    this.pendingMediaFullScreenIndex = -1;
     this.recognizingMedia = false;
     this.recognitionProgressText = '';
   }
@@ -3787,6 +3813,10 @@ struct Index {
       if (this.showBackupDialog) {
         this.backupDialogOverlay()
       }
+      if (this.pendingMediaFullScreenIndex >= 0 &&
+        this.pendingMediaFullScreenIndex < this.pendingMedia.length) {
+        this.pendingMediaFullScreenOverlay()
+      }
       if (this.captureMode === 'camera') {
         PrivateCameraOverlay({
           onComplete: (media: PickedMedia[]): void => { this.handleCapturedMedia(media, false); },
@@ -3854,18 +3884,55 @@ struct Index {
               .onClick((): void => { this.removePendingMedia(index); })
           }
           .width(72).height(72)
+          .padding(2)
+          .borderRadius(13)
+          .border({ width: index === this.selectedMediaPreviewIndex ? 2 : 0,
+            color: index === this.selectedMediaPreviewIndex ? COLOR_PRIMARY : Color.Transparent })
           Text(`${index + 1}`)
             .fontSize(10).fontColor(COLOR_MUTED).textAlign(TextAlign.Center).width(72)
         }
-        .margin({ right: 8, bottom: 8 })
-        .padding(2)
-        .borderRadius(13)
-        .border({ width: index === this.selectedMediaPreviewIndex ? 2 : 0,
-          color: index === this.selectedMediaPreviewIndex ? COLOR_PRIMARY : Color.Transparent })
-        .onClick((): void => { this.selectPendingMedia(index); })
+        .width('25%')
+        .margin({ bottom: 8 })
+        .onClick((): void => { this.openPendingMediaFullScreen(index); })
       }, (media: PickedMedia): string => media.uri)
     }
     .width('100%')
+  }
+
+  @Builder
+  private pendingMediaFullScreenOverlay(): void {
+    Stack({ alignContent: Alignment.Center }) {
+      ForEach(this.pendingMedia.slice(this.pendingMediaFullScreenIndex, this.pendingMediaFullScreenIndex + 1),
+        (media: PickedMedia): void => {
+          VaultMedia({
+            itemId: '',
+            sourceUri: media.uri,
+            mediaType: media.type,
+            attachmentIndex: this.pendingMediaFullScreenIndex,
+            fullScreenMode: true,
+            requestFullScreen: (): void => {}
+          })
+        }, (media: PickedMedia): string =>
+          `pending-fullscreen-${this.pendingMediaFullScreenIndex}-${media.uri}`)
+      Text(`${this.pendingMediaFullScreenIndex + 1} / ${this.pendingMedia.length}`)
+        .fontSize(12).fontColor(COLOR_ON_DARK)
+        .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+        .backgroundColor(COLOR_SCRIM).borderRadius(16)
+        .position({ top: 35, left: 16 }).zIndex(10)
+      Stack({ alignContent: Alignment.Center }) {
+        Text('×').fontSize(28).fontColor(COLOR_ON_DARK).textAlign(TextAlign.Center)
+          .width(42).height(42).backgroundColor(COLOR_SCRIM_STRONG).borderRadius(21)
+      }
+      .width(58).height(58).position({ top: 21, right: 6 }).zIndex(20)
+      .hitTestBehavior(HitTestMode.Block)
+      .priorityGesture(TapGesture().onAction((): void => { this.closePendingMediaFullScreen(); }))
+    }
+    .width('100%').height('100%').backgroundColor('#000000')
+    .gesture(PanGesture({ direction: PanDirection.Horizontal, distance: 30 })
+      .onActionEnd((event: GestureEvent): void => {
+        if (event.offsetX < -60) { this.movePendingMediaFullScreen(1); }
+        if (event.offsetX > 60) { this.movePendingMediaFullScreen(-1); }
+      }))
   }
 
   @Builder

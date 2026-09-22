@@ -15,6 +15,7 @@ import {
 @Component
 export struct VaultMedia {
   itemId: string = '';
+  sourceUri: string = '';
   mediaType: VaultItemType = VaultItemType.Image;
   attachmentIndex: number = 0;
   fullScreenMode: boolean = false;
@@ -213,11 +214,18 @@ export struct VaultMedia {
     let data: Uint8Array = new Uint8Array(0);
     try {
       if (this.mediaType === VaultItemType.Image) {
-        data = await vaultRepository.readAttachment(this.itemId, this.attachmentIndex);
-        if (this.disposed) { return; }
-        if (data.length === 0) { throw new Error('此资料没有媒体附件'); }
-        const source = image.createImageSource(data.buffer as ArrayBuffer);
+        let sourceFile: fs.File | undefined = undefined;
+        let source: image.ImageSource | undefined = undefined;
         try {
+          if (this.sourceUri.length > 0) {
+            sourceFile = fs.openSync(this.sourceUri, fs.OpenMode.READ_ONLY);
+            source = image.createImageSource(sourceFile.fd);
+          } else {
+            data = await vaultRepository.readAttachment(this.itemId, this.attachmentIndex);
+            if (this.disposed) { return; }
+            if (data.length === 0) { throw new Error('此资料没有媒体附件'); }
+            source = image.createImageSource(data.buffer as ArrayBuffer);
+          }
           const info = await source.getImageInfo();
           const ratio = Math.min(1, 2048 / Math.max(info.size.width, info.size.height));
           const bitmap = await source.createPixelMap({ desiredSize: {
@@ -226,13 +234,26 @@ export struct VaultMedia {
           } });
           if (this.disposed) { await bitmap.release(); return; }
           this.bitmap = bitmap;
-        } finally { await source.release(); }
+        } finally {
+          if (source) { await source.release(); }
+          if (sourceFile) { fs.closeSync(sourceFile); }
+        }
       } else {
         const path = `${AbilityContextHolder.getContext().cacheDir}/pv-play-${util.generateRandomUUID()}`;
         this.videoPath = path;
         const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
         this.file = file;
-        this.byteLength = await vaultRepository.writeAttachmentToFd(this.itemId, file.fd, this.attachmentIndex);
+        if (this.sourceUri.length > 0) {
+          const sourceFile = fs.openSync(this.sourceUri, fs.OpenMode.READ_ONLY);
+          try {
+            this.byteLength = fs.statSync(sourceFile.fd).size;
+            await fs.copyFile(sourceFile.fd, file.fd);
+          } finally {
+            fs.closeSync(sourceFile);
+          }
+        } else {
+          this.byteLength = await vaultRepository.writeAttachmentToFd(this.itemId, file.fd, this.attachmentIndex);
+        }
         if (this.byteLength <= 0) { throw new Error('此资料没有媒体附件'); }
         fs.fsyncSync(file.fd);
         fs.lseek(file.fd, 0);
@@ -322,7 +343,7 @@ export struct VaultMedia {
             .onLoad((): void => { this.surfaceId = this.surface.getXComponentSurfaceId(); this.prepareVideo(); })
           if (!this.playing && this.playbackTime === 0) {
             VaultThumbnail({ itemId: this.itemId, mediaType: VaultItemType.Video,
-              attachmentIndex: this.attachmentIndex, fillContainer: true })
+              attachmentIndex: this.attachmentIndex, sourceUri: this.sourceUri, fillContainer: true })
               .hitTestBehavior(HitTestMode.None)
           }
           if (!this.ready && this.message.length === 0) {
