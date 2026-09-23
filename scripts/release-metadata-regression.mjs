@@ -21,14 +21,24 @@ const template = json('build-profile.example.json5');
 const entryProfile = json('entry/build-profile.json5');
 const hvigor = read('entry/hvigorfile.ts');
 const limits = read('entry/src/main/ets/services/VaultLimits.ets');
+const corePolicy = read('entry/src/main/ets/services/VaultCorePolicy.ets');
 const picker = read('entry/src/main/ets/services/MediaPickerService.ets');
 const sharedImport = read('entry/src/main/ets/services/ShareImportService.ets');
 const repository = read('entry/src/main/ets/services/VaultRepository.ets');
 const shareAbility = read('entry/src/main/ets/entryability/ShareReceiverAbility.ets');
+const preflight = read('scripts/preflight.ps1');
+const testRunner = read('scripts/test-core.ps1');
+const preCommitHook = read('.githooks/pre-commit');
+const hookInstaller = read('scripts/install-git-hooks.ps1');
+const lockfile = json('oh-package-lock.json5');
 
 assert(app.bundleName === 'com.palmvault.app', 'bundleName must remain com.palmvault.app');
 assert(rootPackage.license === 'UNLICENSED' && entryPackage.license === 'UNLICENSED',
   'both packages must remain proprietary (UNLICENSED)');
+assert(rootPackage.devDependencies?.['@ohos/hypium'] === '1.0.18',
+  'the core-test framework version must remain pinned');
+assert(lockfile.specifiers?.['@ohos/hypium@1.0.18'] === '@ohos/hypium@1.0.18',
+  'the core-test framework must remain in the dependency lockfile');
 assert(!rootPackage.description.includes('纯本地加密'), 'package description must not overstate attachment encryption');
 assert(strings.some((item) => item.name === 'module_desc' && !item.value.includes('纯本地加密')),
   'module description must not overstate attachment encryption');
@@ -51,19 +61,36 @@ assert(limits.includes('MAX_IMPORTED_VIDEO_BYTES: number = 500 * 1024 * 1024'),
   'the 500 MB video import limit must remain explicit');
 assert(limits.includes('MAX_SHARED_IMPORT_BYTES: number = 1024 * 1024 * 1024'),
   'the 1 GB shared-import aggregate limit must remain explicit');
-assert(picker.includes('size > MAX_IMPORTED_IMAGE_BYTES') &&
-  picker.includes('size > MAX_IMPORTED_VIDEO_BYTES') &&
-  picker.includes('totalBytes > MAX_MEDIA_IMPORT_BATCH_BYTES'),
+assert(corePolicy.includes('size > MAX_IMPORTED_IMAGE_BYTES') &&
+  corePolicy.includes('size > MAX_IMPORTED_VIDEO_BYTES'),
+  'the shared core policy must enforce per-file media limits');
+assert(picker.includes('validateImportedAttachmentSize(type, size, name)') &&
+  picker.includes('checkedTotalBytes(totalBytes, size, MAX_MEDIA_IMPORT_BATCH_BYTES'),
   'the system media picker must enforce per-file and aggregate limits');
-assert(sharedImport.includes('size > MAX_IMPORTED_IMAGE_BYTES') &&
-  sharedImport.includes('size > MAX_IMPORTED_VIDEO_BYTES') &&
-  sharedImport.includes('totalBytes > MAX_SHARED_IMPORT_BYTES'),
+assert(sharedImport.includes('validateImportedAttachmentSize(type, size, name)') &&
+  sharedImport.includes('checkedTotalBytes(totalBytes, size, MAX_SHARED_IMPORT_BYTES'),
   'shared media import must enforce per-file and aggregate limits');
-assert(repository.includes('size > MAX_IMPORTED_IMAGE_BYTES') &&
-  repository.includes('size > MAX_IMPORTED_VIDEO_BYTES'),
+assert(repository.includes('validateStoredAttachmentSize(attachment.type, size, attachment.name)'),
   'the repository must reject oversized media as a final safeguard');
 assert(shareAbility.includes("import { BUNDLE_NAME } from 'BuildProfile'") &&
   shareAbility.includes('bundleName: BUNDLE_NAME'),
   'the share extension must launch the configured application bundle');
+assert(hvigor.includes("postDependencies: ['assembleHap']") &&
+  hvigor.includes("name: 'palmVaultCoreTest'") && testRunner.includes('test_result.txt'),
+  'every HAP build must execute and verify core unit tests');
+assert(preflight.includes('assembleHap') && preflight.includes('palmVaultCoreTest'),
+  'release preflight must rely on the mandatory Hvigor core-test gate');
+assert(preCommitHook.includes('scripts/test-core.ps1') &&
+  preCommitHook.includes('commit aborted') && hookInstaller.includes('core.hooksPath .githooks'),
+  'Git commits must be protected by the repository core-test hook');
+for (const testFile of [
+  'entry/src/test/VaultCorePolicy.test.ets',
+  'entry/src/test/VaultBackupValidation.test.ets',
+  'entry/src/test/VaultSchemaDefinition.test.ets',
+  'entry/src/test/VaultModels.test.ets',
+  'entry/src/test/VaultByteUtils.test.ets'
+]) {
+  assert(fs.existsSync(path.join(root, testFile)), `missing core test file: ${testFile}`);
+}
 
 console.log('Release metadata regression checks passed.');

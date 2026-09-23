@@ -1,0 +1,25 @@
+#!/bin/sh
+
+repo_root=$(git rev-parse --show-toplevel) || exit 1
+
+if command -v pwsh.exe >/dev/null 2>&1; then
+  powershell_command=pwsh.exe
+elif command -v powershell.exe >/dev/null 2>&1; then
+  powershell_command=powershell.exe
+elif command -v pwsh >/dev/null 2>&1; then
+  powershell_command=pwsh
+else
+  echo "PalmVault: PowerShell was not found; commit aborted." >&2
+  exit 1
+fi
+
+echo "PalmVault: running core unit tests before commit..."
+"$powershell_command" -NoProfile -ExecutionPolicy Bypass \
+  -File "$repo_root/scripts/test-core.ps1"
+status=$?
+if [ "$status" -ne 0 ]; then
+  echo "PalmVault: core unit tests failed; commit aborted." >&2
+  exit "$status"
+fi
+
+exit 0

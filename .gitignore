@@ -2,6 +2,7 @@
 .idea/
 build/
 entry/build/
+entry/.test/
 entry/.preview/
 entry/.cxx/
 entry/src/main/ets/generated/

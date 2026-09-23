@@ -6,6 +6,7 @@ import util from '@ohos.util';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import common from '@ohos.app.ability.common';
 import { BusinessError } from '@ohos.base';
+import { constantTimeBytesEqual } from './VaultByteUtils';
 
 const SECURITY_STORE: string = 'palmvault_security';
 const KEY_INITIALIZED: string = 'initialized';
@@ -118,7 +119,7 @@ export class VaultSecurityService {
     const material = this.derive(password, salt);
     const databaseKey = material.slice(0, 32);
     const actual = material.slice(32, 64);
-    const accepted = this.constantTimeEquals(actual, expected);
+    const accepted = constantTimeBytesEqual(actual, expected);
     material.fill(0);
     actual.fill(0);
     expected.fill(0);
@@ -207,7 +208,7 @@ export class VaultSecurityService {
     const material = this.derive(this.patternText(pattern), salt);
     const wrappingKey = material.slice(0, 32);
     const actual = material.slice(32, 64);
-    const accepted = this.constantTimeEquals(actual, expected);
+    const accepted = constantTimeBytesEqual(actual, expected);
     let databaseKey: Uint8Array | undefined = undefined;
     let lockedOut = false;
     if (accepted) {
@@ -703,14 +704,4 @@ export class VaultSecurityService {
     }
   }
 
-  private constantTimeEquals(left: Uint8Array, right: Uint8Array): boolean {
-    if (left.length !== right.length) {
-      return false;
-    }
-    let difference: number = 0;
-    for (let index: number = 0; index < left.length; index += 1) {
-      difference |= left[index] ^ right[index];
-    }
-    return difference === 0;
-  }
 }

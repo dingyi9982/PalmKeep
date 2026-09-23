@@ -10,11 +10,14 @@
 
 ```powershell
 Copy-Item .\build-profile.example.json5 .\build-profile.json5
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-git-hooks.ps1
 ```
 
 然后在 DevEco Studio 的 `File > Project Structure > Project > Signing Configs` 中生成本机调试签名，或配置应用市场正式发布签名。`build-profile.json5` 已被 Git 忽略，不得把证书路径、密钥库或密码复制回模板。
 
 模板固定三个产品：`debug` 用于开发、`localRelease` 用于本机 Release 验证、`default` 用于正式发布。三者统一使用 compatible API 12 和 target API 21。
+
+`assembleHap` 已将核心单元测试注册为强制前置任务，DevEco Studio 和命令行编译均会在测试失败时停止。Git `pre-commit` 使用同一测试脚本，失败时拒绝普通提交。Git 的安全模型不允许克隆出的仓库自动修改本地 hooks 配置，所以每个新工作副本只需运行一次 `install-git-hooks.ps1`。
 
 ## 一键发布
 
@@ -29,7 +32,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 1.0.0
 脚本会依次完成：
 
 1. 检查工作区、UTF-8/LF 文本、包名、许可证、版本号、SDK 配置、资源 JSON 和本机构建工具。
-2. 执行一次 Debug 预检构建。
+2. 执行一次 Debug 预检构建；构建系统会先强制执行不涉及界面的核心本地单元测试。
 3. 首次发布直接使用已配置的 `1.0.0 / 1`；后续发布更新 `versionName` 并将 `versionCode` 自动增加 1。
 4. 同步 `AppScope/app.json5`、`oh-package.json5` 和 `entry/oh-package.json5`。
 5. 创建“发布 x.y.z 版本”提交和 `vx.y.z` Git 标签。
@@ -72,6 +75,8 @@ git show <构建标识中的提交哈希>
 `entry/src/main/ets/generated/BuildMetadata.ets` 由 Hvigor 自动生成并已忽略，不要手工提交。
 
 `.gitattributes` 和 `.editorconfig` 统一文本编码与换行。`scripts/check-text-encoding.ps1` 会拒绝 UTF-8 BOM、CRLF 和损坏字符；`scripts/release-metadata-regression.mjs` 会防止包名、SDK、许可证、媒体限制和 Release 混淆配置意外回退。预检会自动运行这两项检查。
+
+首次构建或依赖变化后执行 `D:\DevEco Studio\tools\ohpm\bin\ohpm.bat install`。测试依赖版本和完整性记录在 `oh-package-lock.json5`。每次 `assembleHap` 和普通 Git 提交都会自动运行 `scripts/test-core.ps1`；也可手工单独执行。测试只覆盖核心业务逻辑，不启动页面，也不依赖真机或模拟器。
 
 ## 首次发布前的签名配置
 
@@ -123,6 +128,7 @@ Hvigor: D:\DevEco Studio\tools\hvigor\bin\hvigorw.js
 - [ ] 软件介绍和隐私声明没有宣称当前未实现的“全部资料加密存储”
 - [ ] `LICENSE`、`oh-package.json5` 和 `entry/oh-package.json5` 均保持专有/`UNLICENSED`
 - [ ] 一键发布脚本执行成功
+- [ ] 核心本地单元测试全部通过
 - [ ] 设置页中的版本和构建标识正确
 - [ ] `release` 中的 HAP 来自对应 Git 标签
 - [ ] 隐私声明、权限和核心功能已复核

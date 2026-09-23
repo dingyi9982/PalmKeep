@@ -7,11 +7,15 @@ import util from '@ohos.util';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { vaultRepository } from './VaultRepository';
 import {
+  validateBackupDataset,
+  validateBackupManifest,
+  validateBackupStorageName
+} from './VaultBackupValidation';
+import { constantTimeBytesEqual, isZeroByteArray } from './VaultByteUtils';
+import {
   BACKUP_FORMAT_VERSION,
   BackupAttachmentRecord,
   BackupFileRecord,
-  BackupGroupRecord,
-  BackupGroupTombstoneRecord,
   BackupItemRecord,
   BackupManifest,
   BackupProgress,
@@ -106,7 +110,7 @@ export class VaultBackupService {
         dataSha256: await this.sha256(dataPath),
         files: files
       };
-      this.validateDataset(dataset, manifest);
+      validateBackupDataset(dataset, manifest);
       const manifestPath = `${workspace}/${MANIFEST_FILE}`;
       this.writeText(manifestPath, JSON.stringify(manifest));
       archiveInputs.push(manifestPath);
@@ -212,7 +216,7 @@ export class VaultBackupService {
       stage = '读取备份清单';
       const manifest = JSON.parse(fs.readTextSync(manifestPath)) as BackupManifest;
       stage = '校验备份版本和清单';
-      this.validateManifest(manifest);
+      validateBackupManifest(manifest, DATABASE_VERSION);
       stage = '校验资料数据';
       if (await this.sha256(dataPath) !== manifest.dataSha256) {
         throw new Error('备份内容校验失败');
@@ -220,7 +224,7 @@ export class VaultBackupService {
       stage = '校验备份附件';
       for (let index = 0; index < manifest.files.length; index += 1) {
         const file = manifest.files[index];
-        this.validateStorageName(file.storageName);
+        validateBackupStorageName(file.storageName);
         const path = `${extractedPath}/${file.storageName}`;
         if (fs.statSync(path).size !== file.sizeBytes || await this.sha256(path) !== file.sha256) {
           throw new Error('备份中的附件不完整');
@@ -230,7 +234,7 @@ export class VaultBackupService {
       stage = '读取资料索引';
       const dataset = JSON.parse(fs.readTextSync(dataPath)) as VaultBackupDataset;
       stage = '校验资料索引';
-      this.validateDataset(dataset, manifest);
+      validateBackupDataset(dataset, manifest);
       const restoreDataset = this.activeRestoreDataset(dataset);
       let restoreAttachmentBytes = 0;
       restoreDataset.attachments.forEach((attachment: BackupAttachmentRecord): void => {
@@ -348,11 +352,11 @@ export class VaultBackupService {
       const iv = header.slice(32, 44);
       fs.lseek(source.fd, sourceSize - TAG_SIZE, fs.WhenceType.SEEK_SET);
       const tag = this.readExact(source.fd, TAG_SIZE, '备份完整性标签缺失');
-      if (this.isZeroBytes(tag)) { throw new Error('备份完整性标签缺失'); }
+      if (isZeroByteArray(tag)) { throw new Error('备份完整性标签缺失'); }
       const cipherSize = sourceSize - HEADER_SIZE - TAG_SIZE;
       keyBytes = this.deriveKey(password, salt);
       const storedPasswordCheck = header.slice(60, 64);
-      if (!this.constantTimeEquals(storedPasswordCheck, this.passwordCheck(keyBytes, salt))) {
+      if (!constantTimeBytesEqual(storedPasswordCheck, this.passwordCheck(keyBytes, salt))) {
         throw new Error('备份密码不正确');
       }
       const key = cryptoFramework.createSymKeyGenerator('AES256').convertKeySync({ data: keyBytes });
@@ -421,21 +425,14 @@ export class VaultBackupService {
     }
   }
 
-  private constantTimeEquals(left: Uint8Array, right: Uint8Array): boolean {
-    if (left.length !== right.length) { return false; }
-    let difference = 0;
-    for (let index = 0; index < left.length; index += 1) { difference |= left[index] ^ right[index]; }
-    return difference === 0;
-  }
-
   private validateHeader(header: Uint8Array): void {
     for (let index = 0; index < MAGIC.length; index += 1) {
       if (header[index] !== MAGIC[index]) { throw new Error('不是掌心密匣备份文件'); }
     }
     if (header[8] > BACKUP_FORMAT_VERSION) { throw new Error('备份版本高于当前应用支持的版本'); }
     if (header[8] !== BACKUP_FORMAT_VERSION) { throw new Error('备份格式版本无效'); }
-    if (header[9] !== HEADER_LAYOUT_VERSION || !this.isZeroBytes(header.slice(10, 12)) ||
-      !this.isZeroBytes(header.slice(44, 60))) { throw new Error('备份文件头布局无效'); }
+    if (header[9] !== HEADER_LAYOUT_VERSION || !isZeroByteArray(header.slice(10, 12)) ||
+      !isZeroByteArray(header.slice(44, 60))) { throw new Error('备份文件头布局无效'); }
     const iterations = header[12] | (header[13] << 8) | (header[14] << 16) | (header[15] << 24);
     if (iterations !== KDF_ITERATIONS) { throw new Error('备份密码参数无效'); }
   }
@@ -476,77 +473,6 @@ export class VaultBackupService {
     }
   }
 
-  private validateManifest(manifest: BackupManifest): void {
-    if (!manifest || manifest.formatVersion !== BACKUP_FORMAT_VERSION) { throw new Error('备份格式版本无效'); }
-    if (manifest.databaseVersion > DATABASE_VERSION) { throw new Error('备份数据库版本过新'); }
-    if (manifest.itemCount === 0) { throw new Error('备份中没有任何资料，无法恢复'); }
-    if ((manifest.groupCount !== undefined && manifest.groupCount < 0) ||
-      (manifest.groupTombstoneCount !== undefined && manifest.groupTombstoneCount < 0) || manifest.itemCount < 0 ||
-      manifest.attachmentCount < 0 || manifest.attachmentBytes < 0 ||
-      manifest.files.length !== manifest.attachmentCount) { throw new Error('备份清单无效'); }
-    const names = new Set<string>();
-    manifest.files.forEach((file: BackupFileRecord): void => {
-      this.validateStorageName(file.storageName);
-      if (names.has(file.storageName) || file.sizeBytes <= 0 || file.sha256.length !== 64) {
-        throw new Error('备份附件清单无效');
-      }
-      names.add(file.storageName);
-    });
-  }
-
-  private validateDataset(dataset: VaultBackupDataset, manifest: BackupManifest): void {
-    if (!dataset || !dataset.groups || !dataset.items || !dataset.attachments ||
-      !dataset.groupTombstones || !dataset.itemTombstones) { throw new Error('备份数据结构不完整'); }
-    if (manifest.groupCount !== undefined && dataset.groups.length !== manifest.groupCount) {
-      throw new Error(`备份分组数量不一致：清单 ${manifest.groupCount}，实际 ${dataset.groups.length}`);
-    }
-    if (manifest.groupTombstoneCount !== undefined &&
-      dataset.groupTombstones.length !== manifest.groupTombstoneCount) {
-      throw new Error(`备份已删除分组数量不一致：清单 ${manifest.groupTombstoneCount}，` +
-        `实际 ${dataset.groupTombstones.length}`);
-    }
-    if (dataset.items.length !== manifest.itemCount) {
-      throw new Error(`备份资料数量不一致：清单 ${manifest.itemCount}，实际 ${dataset.items.length}`);
-    }
-    if (dataset.attachments.length !== manifest.attachmentCount) {
-      throw new Error(`备份附件数量不一致：清单 ${manifest.attachmentCount}，` +
-        `实际 ${dataset.attachments.length}`);
-    }
-    const activeGroupIds = new Set<number>();
-    dataset.groups.forEach((group: BackupGroupRecord): void => {
-      if (activeGroupIds.has(group.id)) { throw new Error('备份中存在重复分组'); }
-      activeGroupIds.add(group.id);
-    });
-    const deletedGroupIds = new Set<number>();
-    dataset.groupTombstones.forEach((group: BackupGroupTombstoneRecord): void => {
-      if (activeGroupIds.has(group.groupId) || deletedGroupIds.has(group.groupId)) {
-        throw new Error('备份中的分组状态冲突');
-      }
-      deletedGroupIds.add(group.groupId);
-    });
-    const itemIds = new Set<string>();
-    dataset.items.forEach((item: BackupItemRecord): void => {
-      if (itemIds.has(item.id)) { throw new Error('备份中存在重复资料'); }
-      itemIds.add(item.id);
-      if (item.deletedAt === 0 && !activeGroupIds.has(item.groupId)) {
-        throw new Error(`资料“${item.title}”缺少对应的分组信息`);
-      }
-      if (item.deletedAt > 0 && !activeGroupIds.has(item.groupId) && !deletedGroupIds.has(item.groupId)) {
-        throw new Error(`回收站资料“${item.title}”缺少原分组信息`);
-      }
-    });
-    const fileNames = new Set<string>();
-    manifest.files.forEach((file: BackupFileRecord): void => { fileNames.add(file.storageName); });
-    const fileHashes = new Map<string, string>();
-    manifest.files.forEach((file: BackupFileRecord): void => { fileHashes.set(file.storageName, file.sha256); });
-    dataset.attachments.forEach((attachment): void => {
-      if (!fileNames.has(attachment.storageName) || !itemIds.has(attachment.itemId) ||
-        attachment.sha256.length !== 64 || fileHashes.get(attachment.storageName) !== attachment.sha256) {
-        throw new Error('备份附件引用无效');
-      }
-    });
-  }
-
   private freshPreview(dataset: VaultBackupDataset, manifest: BackupManifest): BackupRestorePreview {
     return { createdAt: manifest.createdAt, itemCount: manifest.itemCount, trashCount: manifest.trashCount,
       attachmentCount: manifest.attachmentCount, attachmentBytes: manifest.attachmentBytes,
@@ -565,13 +491,6 @@ export class VaultBackupService {
       activeItemIds.has(attachment.itemId));
     return { groups: dataset.groups, items: items, attachments: attachments,
       groupTombstones: [], itemTombstones: [] };
-  }
-
-  private validateStorageName(name: string): void {
-    if (name.length === 0 || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0 || name.indexOf('..') >= 0 ||
-      name === DATA_FILE || name === MANIFEST_FILE) {
-      throw new Error('备份中包含不安全的文件名');
-    }
   }
 
   private createWorkspace(): string {
@@ -644,13 +563,6 @@ export class VaultBackupService {
     } catch (error) {
       throw normalizeError(error);
     }
-  }
-
-  private isZeroBytes(data: Uint8Array): boolean {
-    for (let index = 0; index < data.length; index += 1) {
-      if (data[index] !== 0) { return false; }
-    }
-    return true;
   }
 
   private describeInspectionFailure(stage: string, detail: string): string {

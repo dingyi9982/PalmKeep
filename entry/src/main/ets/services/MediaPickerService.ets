@@ -7,11 +7,12 @@ import { AbilityContextHolder } from './AbilityContextHolder';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
 import {
+  checkedTotalBytes,
+  isSupportedAudioFileName,
+  validateImportedAttachmentSize
+} from './VaultCorePolicy';
+import {
   MAX_AUDIO_ATTACHMENTS,
-  MAX_FILE_ATTACHMENT_BYTES,
-  MAX_IMPORTED_AUDIO_BYTES,
-  MAX_IMPORTED_IMAGE_BYTES,
-  MAX_IMPORTED_VIDEO_BYTES,
   MAX_MEDIA_IMPORT_BATCH_BYTES
 } from './VaultLimits';
 
@@ -45,14 +46,12 @@ export class MediaPickerService {
       for (let index = 0; index < uris.length; index += 1) {
         const uri = uris[index];
         const name = this.fileName(uri, VaultItemType.Audio);
-        if (!this.isSupportedAudioName(name)) {
+        if (!isSupportedAudioFileName(name)) {
           rejected.push(`“${name}”格式不受支持`);
           continue;
         }
-        if (this.fileSize(uri) > MAX_IMPORTED_AUDIO_BYTES) {
-          rejected.push(`“${name}”超过 10 MB`);
-          continue;
-        }
+        try { validateImportedAttachmentSize(VaultItemType.Audio, this.fileSize(uri), name); }
+        catch (error) { rejected.push(normalizeError(error).message); continue; }
         picked.push({ uri: uri, sourceUri: uri, type: VaultItemType.Audio, name: name, ocrText: '' });
       }
       if (rejected.length > 0) {
@@ -80,9 +79,7 @@ export class MediaPickerService {
       for (let index = 0; index < uris.length; index += 1) {
         const uri = uris[index];
         const name = this.fileName(uri, VaultItemType.File);
-        if (this.fileSize(uri) > MAX_FILE_ATTACHMENT_BYTES) {
-          throw new Error(`文件“${name}”超过 10 MB，请选择较小的文件`);
-        }
+        validateImportedAttachmentSize(VaultItemType.File, this.fileSize(uri), name);
         picked.push({
           uri: uri,
           type: VaultItemType.File,
@@ -116,17 +113,9 @@ export class MediaPickerService {
         const type = await this.detectMediaType(uri);
         const name = this.fileName(uri, type);
         const size = this.fileSize(uri);
-        if (size <= 0) { throw new Error(`媒体“${name}”内容为空`); }
-        if (type === VaultItemType.Image && size > MAX_IMPORTED_IMAGE_BYTES) {
-          throw new Error(`图片“${name}”超过 64 MB，请选择较小的图片`);
-        }
-        if (type === VaultItemType.Video && size > MAX_IMPORTED_VIDEO_BYTES) {
-          throw new Error(`视频“${name}”超过 500 MB，请选择较小的视频`);
-        }
-        totalBytes += size;
-        if (totalBytes > MAX_MEDIA_IMPORT_BATCH_BYTES) {
-          throw new Error('一次导入的图片和视频总大小不能超过 1 GB');
-        }
+        validateImportedAttachmentSize(type, size, name);
+        totalBytes = checkedTotalBytes(totalBytes, size, MAX_MEDIA_IMPORT_BATCH_BYTES,
+          '一次导入的图片和视频总大小不能超过 1 GB');
         picked.push({ uri: uri, sourceUri: uri, type: type, name: name, ocrText: '' });
       }
       return picked;
@@ -217,12 +206,6 @@ export class MediaPickerService {
     if (type === VaultItemType.Video) { return '私密视频.mp4'; }
     if (type === VaultItemType.Audio) { return '未命名音频.m4a'; }
     return '私密文件';
-  }
-
-  private isSupportedAudioName(name: string): boolean {
-    const lower = name.toLowerCase();
-    return ['.mp3', '.m4a', '.aac', '.wav', '.amr', '.flac', '.ogg']
-      .some((extension: string): boolean => lower.endsWith(extension));
   }
 
   private fileSize(uri: string): number {

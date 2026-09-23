@@ -68,6 +68,8 @@ if ($wrongTargetProducts.Count -gt 0) {
 $env:DEVECO_SDK_HOME = $DevEcoSdkHome
 $env:JAVA_HOME = $JavaHome
 $env:Path = (Join-Path $JavaHome 'bin') + ';' + $env:Path
+# assembleHap depends on the palmVaultCoreTest Hvigor task. A failing test
+# therefore aborts this build and every regular IDE/CLI HAP build.
 & $NodePath $HvigorPath --no-daemon --mode module -p product=default -p buildMode=debug assembleHap
 if ($LASTEXITCODE -ne 0) {
   throw 'Debug preflight build failed.'

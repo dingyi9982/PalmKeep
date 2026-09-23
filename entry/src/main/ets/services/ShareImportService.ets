@@ -6,13 +6,8 @@ import { systemShare } from '@kit.ShareKit';
 import { VaultItemType } from '../models/VaultModels';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { PickedMedia } from './MediaPickerService';
-import {
-  MAX_FILE_ATTACHMENT_BYTES,
-  MAX_IMPORTED_AUDIO_BYTES,
-  MAX_IMPORTED_IMAGE_BYTES,
-  MAX_IMPORTED_VIDEO_BYTES,
-  MAX_SHARED_IMPORT_BYTES
-} from './VaultLimits';
+import { checkedTotalBytes, isSupportedAudioFileName, validateImportedAttachmentSize } from './VaultCorePolicy';
+import { MAX_SHARED_IMPORT_BYTES } from './VaultLimits';
 
 const SHARE_PREFIX: string = 'pv-share-';
 const REQUEST_PREFIX: string = 'pv-share-request-';
@@ -105,11 +100,9 @@ class ShareImportService {
           throw new Error('分享内容已失效，请重新分享');
         }
         const size = fs.statSync(item.uri).size;
-        this.validateItemSize(item.type, size, item.name);
-        totalBytes += size;
-        if (totalBytes > MAX_SHARED_IMPORT_BYTES) {
-          throw new Error('一次分享内容总大小不能超过 1 GB');
-        }
+        validateImportedAttachmentSize(item.type, size, item.name);
+        totalBytes = checkedTotalBytes(totalBytes, size, MAX_SHARED_IMPORT_BYTES,
+          '一次分享内容总大小不能超过 1 GB');
       });
       this.removePath(path);
       return request;
@@ -178,9 +171,9 @@ class ShareImportService {
     try {
       source = fs.openSync(uri, fs.OpenMode.READ_ONLY);
       const size = fs.statSync(source.fd).size;
-      this.validateItemSize(type, size, name);
-      if (size > remainingBytes) { throw new Error('一次分享内容总大小不能超过 1 GB'); }
-      if (type === VaultItemType.Audio && !this.isSupportedAudioName(name)) {
+      validateImportedAttachmentSize(type, size, name);
+      checkedTotalBytes(0, size, remainingBytes, '一次分享内容总大小不能超过 1 GB');
+      if (type === VaultItemType.Audio && !isSupportedAudioFileName(name)) {
         throw new Error(`音频“${name}”格式不受支持`);
       }
       target = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
@@ -201,22 +194,6 @@ class ShareImportService {
         catch (error) { logRecoverableError(`could not close shared source ${uri}`, error); }
       }
       if (!completed) { this.removePath(path); }
-    }
-  }
-
-  private validateItemSize(type: VaultItemType, size: number, name: string): void {
-    if (size <= 0) { throw new Error(`“${name}”内容为空`); }
-    if (type === VaultItemType.File && size > MAX_FILE_ATTACHMENT_BYTES) {
-      throw new Error(`文件“${name}”超过 10 MB，请选择较小的文件`);
-    }
-    if (type === VaultItemType.Audio && size > MAX_IMPORTED_AUDIO_BYTES) {
-      throw new Error(`音频“${name}”超过 10 MB，请选择较小的文件`);
-    }
-    if (type === VaultItemType.Image && size > MAX_IMPORTED_IMAGE_BYTES) {
-      throw new Error(`图片“${name}”超过 64 MB，请选择较小的图片`);
-    }
-    if (type === VaultItemType.Video && size > MAX_IMPORTED_VIDEO_BYTES) {
-      throw new Error(`视频“${name}”超过 500 MB，请选择较小的视频`);
     }
   }
 
@@ -261,12 +238,6 @@ class ShareImportService {
   private safeName(name: string): string {
     const cleaned = name.replace(/[\\/:*?"<>|]/g, '_').trim();
     return cleaned.length > 120 ? cleaned.substring(0, 120) : cleaned;
-  }
-
-  private isSupportedAudioName(name: string): boolean {
-    const lower = name.toLowerCase();
-    return ['.mp3', '.m4a', '.aac', '.wav', '.amr', '.flac', '.ogg']
-      .some((extension: string): boolean => lower.endsWith(extension));
   }
 
   private typeExtension(typeId: string, type: VaultItemType): string {

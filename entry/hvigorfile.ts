@@ -1,7 +1,9 @@
+import { HvigorNode, HvigorPlugin } from '@ohos/hvigor';
 import { hapTasks } from '@ohos/hvigor-ohos-plugin';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import process from 'node:process';
 
 function gitOutput(repoRoot: string, args: string[]): string {
   try {
@@ -34,9 +36,42 @@ function generateBuildMetadata(): void {
   }
 }
 
+function runCoreTests(repoRoot: string): void {
+  const shell = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
+  const testScript = path.resolve(repoRoot, 'scripts', 'test-core.ps1');
+  console.log('PalmVault: running core unit tests before compilation...');
+  execFileSync(shell, [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    testScript
+  ], {
+    cwd: repoRoot,
+    stdio: 'inherit'
+  });
+}
+
+const coreTestGatePlugin: HvigorPlugin = {
+  pluginId: 'palmvault-core-test-gate',
+  apply(node: HvigorNode): void {
+    // test-core.ps1 starts a nested Hvigor `test` task. Do not attach the
+    // assemble gate in that child process, otherwise future task-graph changes
+    // could make the test runner recursively invoke itself.
+    if (process.env.PALMVAULT_CORE_TEST_RUNNING === '1') {
+      return;
+    }
+    node.registerTask({
+      name: 'palmVaultCoreTest',
+      postDependencies: ['assembleHap'],
+      run: (): void => runCoreTests(path.resolve(process.cwd()))
+    });
+  }
+};
+
 generateBuildMetadata();
 
 export default {
   system: hapTasks,
-  plugins: []
+  plugins: [coreTestGatePlugin]
 };

@@ -38,15 +38,26 @@
 
 ```powershell
 Copy-Item .\build-profile.example.json5 .\build-profile.json5
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-git-hooks.ps1
 ```
 
 随后在 DevEco Studio 中配置本机调试签名或正式发布签名。`build-profile.json5`、证书、Profile、密钥库和密码不得提交到仓库。
+
+所有标准 HAP 编译（DevEco Studio 或命令行 `assembleHap`）都会先运行核心单元测试；测试失败时构建立即失败。仓库的 `pre-commit` 钩子会在每次普通 Git 提交前再次运行同一组测试并阻止失败的提交。Git 不允许仓库在克隆时自行修改本地配置，因此新克隆只需执行一次上述钩子安装脚本。
 
 发布前执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\preflight.ps1
 ```
+
+只运行不涉及界面的核心本地单元测试：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-core.ps1
+```
+
+测试覆盖资料字段校验、附件大小与格式限制、备份清单和引用完整性、备份路径穿越防护、常量时间字节比较、数据库建表与数据修订触发器，以及资料类型显示规则。首次运行前需执行 `D:\DevEco Studio\tools\ohpm\bin\ohpm.bat install` 安装锁定版本的测试依赖。
 
 详细步骤见 [发布说明](docs/release-guide.md)。Vision Kit 文档扫描仅在支持该能力的 HarmonyOS 真机和地区可用。
 

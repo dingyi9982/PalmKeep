@@ -4,11 +4,7 @@ import fs from '@ohos.file.fs';
 import cryptoFramework from '@ohos.security.cryptoFramework';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { migrateVaultDatabase } from './VaultDatabaseMigrations';
-import {
-  MAX_FILE_ATTACHMENT_BYTES,
-  MAX_IMPORTED_IMAGE_BYTES,
-  MAX_IMPORTED_VIDEO_BYTES
-} from './VaultLimits';
+import { validateStoredAttachmentSize, validateVaultItemFields } from './VaultCorePolicy';
 import {
   createVaultId,
   VaultAttachmentInput,
@@ -362,26 +358,9 @@ class VaultRepositoryImpl {
     return text.trim();
   }
 
-  private validateItemFields(type: VaultItemType, title: string, username: string,
-    password: string, website: string, notes: string): void {
-    if (type === VaultItemType.Note && title.trim().length === 0) {
-      throw new Error('名称不能为空');
-    }
-    if (type === VaultItemType.Login) {
-      if (title.trim().length === 0 && website.trim().length === 0) {
-        throw new Error('名称和网址至少填写一个');
-      }
-      if (username.trim().length === 0) { throw new Error('账号不能为空'); }
-      if (password.trim().length === 0) { throw new Error('密码不能为空'); }
-    }
-    if (type === VaultItemType.Note && notes.trim().length === 0) {
-      throw new Error('内容不能为空');
-    }
-  }
-
   async createItem(input: VaultItemInput): Promise<string> {
     try {
-    this.validateItemFields(input.type, input.title, input.username, input.password, input.website, input.notes);
+    validateVaultItemFields(input.type, input.title, input.username, input.password, input.website, input.notes);
     await this.requireGroup(input.groupId);
     const now = Date.now();
     const id = createVaultId();
@@ -409,7 +388,7 @@ class VaultRepositoryImpl {
   async createItemWithAttachments(input: VaultItemInput, attachments: VaultAttachmentInput[],
     onProgress?: (completed: number, total: number) => void): Promise<string> {
     try {
-    this.validateItemFields(input.type, input.title, input.username, input.password, input.website, input.notes);
+    validateVaultItemFields(input.type, input.title, input.username, input.password, input.website, input.notes);
     await this.requireGroup(input.groupId);
     if (attachments.length === 0) { throw new Error('请先选择附件'); }
     const storedAttachments = await this.storeAttachments(attachments, onProgress);
@@ -619,7 +598,7 @@ class VaultRepositoryImpl {
 
   async updateItem(item: VaultItem): Promise<void> {
     try {
-    this.validateItemFields(item.type, item.title, item.username, item.password, item.website, item.notes);
+    validateVaultItemFields(item.type, item.title, item.username, item.password, item.website, item.notes);
     await this.requireGroup(item.groupId);
     const values: relationalStore.ValuesBucket = {
       type: item.type,
@@ -1311,15 +1290,7 @@ class VaultRepositoryImpl {
       source = fs.openSync(attachment.uri, fs.OpenMode.READ_ONLY);
       const size = fs.statSync(source.fd).size;
       if (size <= 0) { throw new Error('所选附件为空'); }
-      if (attachment.type === VaultItemType.File && size > MAX_FILE_ATTACHMENT_BYTES) {
-        throw new Error(`文件“${attachment.name}”超过 10 MB，请选择较小的文件`);
-      }
-      if (attachment.type === VaultItemType.Image && size > MAX_IMPORTED_IMAGE_BYTES) {
-        throw new Error(`图片“${attachment.name}”超过 64 MB，请选择较小的图片`);
-      }
-      if (attachment.type === VaultItemType.Video && size > MAX_IMPORTED_VIDEO_BYTES) {
-        throw new Error(`视频“${attachment.name}”超过 500 MB，请选择较小的视频`);
-      }
+      validateStoredAttachmentSize(attachment.type, size, attachment.name);
       target = fs.openSync(targetPath, fs.OpenMode.WRITE_ONLY | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
       await fs.copyFile(source.fd, target.fd);
       fs.fsyncSync(target.fd);

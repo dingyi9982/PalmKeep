@@ -9,7 +9,7 @@ $textExtensions = @(
   '.ets', '.ts', '.js', '.mjs', '.ps1', '.cmd', '.json', '.json5', '.md', '.txt',
   '.xml', '.svg', '.css', '.html', '.c', '.h', '.cpp', '.hpp'
 )
-$textNames = @('.editorconfig', '.gitattributes', '.gitignore', 'LICENSE')
+$textNames = @('.editorconfig', '.gitattributes', '.gitignore', 'LICENSE', 'pre-commit')
 $skipPattern = '\\(\.git|\.hvigor|\.idea|\.cxx|build|entry\\build|oh_modules|node_modules|release)\\'
 
 function Invoke-GitLines {
