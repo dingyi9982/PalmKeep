@@ -142,6 +142,7 @@ struct Index {
   @State private selectedItem?: VaultItem = undefined;
   @State private selectedAttachmentIndex: number = -1;
   @State private detailSaving: boolean = false;
+  @State private showDetailCloseConfirm: boolean = false;
   @State private revealPassword: boolean = false;
   @State private showChangePassword: boolean = false;
   @State private currentPassword: string = '';
@@ -251,6 +252,8 @@ struct Index {
   private suspendedAudioTitle: string = '';
   private suspendedAudioNotes: string = '';
   private suspendedAudioGroupId: number = 0;
+  private detailCloseRefresh: boolean = true;
+  private detailCloseResolver?: (closed: boolean) => void = undefined;
 
   private getSecurityService(): VaultSecurityService {
     if (!this.securityService) {
@@ -277,6 +280,10 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (this.showDetailCloseConfirm) {
+      this.cancelDetailCloseConfirm();
+      return true;
+    }
     if (this.showAudioRecorder) {
       this.handleAudioRecorderBack();
       return true;
@@ -719,6 +726,7 @@ struct Index {
     this.detailGroupId = 0;
     this.detailCreatedAt = 0;
     this.detailUpdatedAt = 0;
+    this.cancelDetailCloseConfirm();
     this.captureMode = 'none';
     this.captureReturnsToDraft = false;
     this.resetNewItem();
@@ -1199,28 +1207,48 @@ struct Index {
 
   private async requestCloseSelectedItem(refresh: boolean = true): Promise<boolean> {
     if (!this.selectedItem || this.detailSaving) { return false; }
+    if (!this.hasUnsavedSelectedItemChanges()) {
+      await this.closeSelectedItem(refresh);
+      return true;
+    }
+    if (this.showDetailCloseConfirm) { return false; }
+    this.detailCloseRefresh = refresh;
+    this.showDetailCloseConfirm = true;
+    return new Promise<boolean>((resolve): void => {
+      this.detailCloseResolver = resolve;
+    });
+  }
+
+  private resolveDetailCloseConfirm(closed: boolean): void {
+    const resolver = this.detailCloseResolver;
+    this.detailCloseResolver = undefined;
+    if (resolver) { resolver(closed); }
+  }
+
+  private cancelDetailCloseConfirm(): void {
+    if (!this.showDetailCloseConfirm && !this.detailCloseResolver) { return; }
+    this.showDetailCloseConfirm = false;
+    this.resolveDetailCloseConfirm(false);
+  }
+
+  private async discardDetailChangesAndClose(): Promise<void> {
+    const refresh = this.detailCloseRefresh;
+    this.showDetailCloseConfirm = false;
+    await this.closeSelectedItem(refresh);
+    this.resolveDetailCloseConfirm(true);
+  }
+
+  private async saveDetailChangesAndClose(): Promise<void> {
+    if (this.detailSaving) { return; }
+    const refresh = this.detailCloseRefresh;
+    this.showDetailCloseConfirm = false;
+    await this.saveSelectedItem();
     if (this.hasUnsavedSelectedItemChanges()) {
-      try {
-        const choice = await this.getUIContext().getPromptAction().showDialog({
-          title: '保存对资料的修改？',
-          message: '当前修改尚未保存。',
-          buttons: [
-            { text: '继续编辑', color: COLOR_MUTED },
-            { text: '不保存', color: COLOR_DANGER },
-            { text: '保存', color: COLOR_PRIMARY }
-          ]
-        });
-        if (choice.index === 0 || choice.index < 0) { return false; }
-        if (choice.index === 2) {
-          await this.saveSelectedItem();
-          if (this.hasUnsavedSelectedItemChanges()) { return false; }
-        }
-      } catch (error) {
-        return false;
-      }
+      this.resolveDetailCloseConfirm(false);
+      return;
     }
     await this.closeSelectedItem(refresh);
-    return true;
+    this.resolveDetailCloseConfirm(true);
   }
 
   private closeGestureSetup(): void {
@@ -4172,6 +4200,9 @@ struct Index {
           onOpenWebsite: (website: string): void => { this.openLoginWebsite(website); }
         })
       }
+      if (this.showDetailCloseConfirm && this.selectedItem) {
+        this.detailCloseConfirmOverlay()
+      }
       if (this.showGestureSetup) {
         GestureSetupDialog({
           step: this.gestureSetupStep,
@@ -4231,6 +4262,35 @@ struct Index {
   @Builder
   private modalHeader(title: string, closeAction: () => void): void {
     VaultDialogHeader({ title: title, onClose: closeAction })
+  }
+
+  @Builder
+  private detailCloseConfirmOverlay(): void {
+    Stack({ alignContent: Alignment.Center }) {
+      Column({ space: 16 }) {
+        this.modalHeader('保存对资料的修改？', (): void => { this.cancelDetailCloseConfirm(); })
+        Text('当前修改尚未保存。')
+          .fontSize(14).fontColor(COLOR_MUTED).width('100%')
+        Row({ space: 10 }) {
+          Button('不保存')
+            .layoutWeight(1).height(48).fontSize(14).fontColor(COLOR_DANGER)
+            .backgroundColor(COLOR_DANGER_TINT).borderRadius(13)
+            .onClick((): void => { this.discardDetailChangesAndClose(); })
+          Button('保存')
+            .layoutWeight(1).height(48).fontSize(14).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
+            .backgroundColor(COLOR_PRIMARY).borderRadius(13)
+            .onClick((): void => { this.saveDetailChangesAndClose(); })
+        }
+        .width('100%')
+      }
+      .width('86%')
+      .padding(20)
+      .backgroundColor(COLOR_SURFACE)
+      .borderRadius(20)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(COLOR_SCRIM_STRONG)
   }
 
   @Builder

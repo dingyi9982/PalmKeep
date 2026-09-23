@@ -27,6 +27,8 @@ export default function vaultCorePolicyTest(): void {
         VaultItemType.Note, '合同', '', '', '', '装修合同内容'))).assertEqual('');
       expect(capturedError((): void => validateVaultItemFields(
         VaultItemType.Login, '', 'user', 'secret', 'https://example.com', ''))).assertEqual('');
+      expect(capturedError((): void => validateVaultItemFields(
+        VaultItemType.Login, '银行卡', 'user', '', '', ''))).assertEqual('');
     });
 
     it('rejects incomplete notes', 0, (): void => {
@@ -41,8 +43,6 @@ export default function vaultCorePolicyTest(): void {
         VaultItemType.Login, '', 'user', 'secret', '', ''))).assertEqual('名称和网址至少填写一个');
       expect(capturedError((): void => validateVaultItemFields(
         VaultItemType.Login, '银行', ' ', 'secret', '', ''))).assertEqual('账号不能为空');
-      expect(capturedError((): void => validateVaultItemFields(
-        VaultItemType.Login, '银行', 'user', ' ', '', ''))).assertEqual('密码不能为空');
     });
 
     it('accepts attachment sizes at exact boundaries', 0, (): void => {

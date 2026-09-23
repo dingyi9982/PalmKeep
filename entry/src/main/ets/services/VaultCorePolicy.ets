@@ -16,7 +16,6 @@ export function validateVaultItemFields(type: VaultItemType, title: string, user
       throw new Error('名称和网址至少填写一个');
     }
     if (username.trim().length === 0) { throw new Error('账号不能为空'); }
-    if (password.trim().length === 0) { throw new Error('密码不能为空'); }
   }
   if (type === VaultItemType.Note && notes.trim().length === 0) {
     throw new Error('内容不能为空');
