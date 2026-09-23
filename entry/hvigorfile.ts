@@ -39,7 +39,7 @@ function generateBuildMetadata(): void {
 function runCoreTests(repoRoot: string): void {
   const shell = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
   const testScript = path.resolve(repoRoot, 'scripts', 'test-core.ps1');
-  console.log('PalmVault: running core unit tests before compilation...');
+  console.log('PalmKeep: running core unit tests before compilation...');
   execFileSync(shell, [
     '-NoProfile',
     '-ExecutionPolicy',
@@ -53,16 +53,16 @@ function runCoreTests(repoRoot: string): void {
 }
 
 const coreTestGatePlugin: HvigorPlugin = {
-  pluginId: 'palmvault-core-test-gate',
+  pluginId: 'palmkeep-core-test-gate',
   apply(node: HvigorNode): void {
     // test-core.ps1 starts a nested Hvigor `test` task. Do not attach the
     // assemble gate in that child process, otherwise future task-graph changes
     // could make the test runner recursively invoke itself.
-    if (process.env.PALMVAULT_CORE_TEST_RUNNING === '1') {
+    if (process.env.PALMKEEP_CORE_TEST_RUNNING === '1') {
       return;
     }
     node.registerTask({
-      name: 'palmVaultCoreTest',
+      name: 'palmKeepCoreTest',
       postDependencies: ['assembleHap'],
       run: (): void => runCoreTests(path.resolve(process.cwd()))
     });

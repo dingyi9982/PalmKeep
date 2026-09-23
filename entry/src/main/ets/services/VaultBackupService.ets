@@ -26,6 +26,7 @@ import {
 } from '../models/VaultBackupModels';
 
 const HEADER_SIZE: number = 64;
+// Keep the original magic bytes so backups created before the PalmKeep rename remain restorable.
 const MAGIC: Uint8Array = new Uint8Array([80, 65, 76, 77, 86, 76, 84, 49]); // PALMVLT1
 const SALT_SIZE: number = 16;
 const IV_SIZE: number = 12;
@@ -58,7 +59,7 @@ export class VaultBackupService {
     try {
       const options = new picker.DocumentSelectOptions();
       options.maxSelectNumber = 1;
-      options.fileSuffixFilters = ['掌心密匣备份|.palmvault'];
+      options.fileSuffixFilters = ['掌心密匣备份|.palmkeep', '旧版掌心密匣备份|.palmvault'];
       const uris = await new picker.DocumentViewPicker(this.context).select(options);
       return uris.length > 0 ? uris[0] : undefined;
     } catch (error) {
@@ -74,7 +75,7 @@ export class VaultBackupService {
       this.progress(onProgress, '准备资料', 0, 1);
       const dataset = await vaultRepository.exportBackupDataset();
       if (dataset.items.length === 0) {
-        throw new Error('保险库中没有任何资料，无需创建备份');
+        throw new Error('密匣中没有任何资料，无需创建备份');
       }
       const files: BackupFileRecord[] = [];
       let attachmentBytes = 0;
@@ -119,7 +120,7 @@ export class VaultBackupService {
       const zipPath = `${workspace}/payload.zip`;
       await zlib.compressFiles(archiveInputs, zipPath,
         { level: zlib.CompressLevel.COMPRESS_LEVEL_BEST_SPEED });
-      const encryptedPath = `${workspace}/PalmVault.palmvault`;
+      const encryptedPath = `${workspace}/PalmKeep.palmkeep`;
       this.progress(onProgress, '加密备份', 0, 1);
       await this.encryptFile(zipPath, encryptedPath, password, onProgress);
 
@@ -136,7 +137,7 @@ export class VaultBackupService {
 
       const saveOptions = new picker.DocumentSaveOptions();
       saveOptions.newFileNames = [this.backupFileName()];
-      saveOptions.fileSuffixChoices = ['掌心密匣备份|.palmvault'];
+      saveOptions.fileSuffixChoices = ['掌心密匣备份|.palmkeep'];
       let targets: string[] = [];
       try {
         targets = await new picker.DocumentViewPicker(this.context).save(saveOptions);
@@ -148,7 +149,7 @@ export class VaultBackupService {
       this.progress(onProgress, '保存备份', 0, 1);
       await this.copyFile(encryptedPath, targets[0]);
       this.progress(onProgress, '校验已保存文件', 0, 1);
-      const savedCopyPath = `${workspace}/saved-copy.palmvault`;
+      const savedCopyPath = `${workspace}/saved-copy.palmkeep`;
       await this.copyFile(targets[0], savedCopyPath);
       if (await this.sha256(encryptedPath) !== await this.sha256(savedCopyPath)) {
         throw new Error('已保存的备份文件校验失败，请更换保存位置后重试');
@@ -173,7 +174,7 @@ export class VaultBackupService {
     try {
       const names = fs.listFileSync(this.context.tempDir);
       names.forEach((name: string): void => {
-        if (!name.startsWith('palmvault-backup-')) { return; }
+        if (!name.startsWith('palmkeep-backup-') && !name.startsWith('palmvault-backup-')) { return; }
         const path = `${this.context.tempDir}/${name}`;
         try {
           if (!fs.statSync(path).isDirectory()) { return; }
@@ -192,7 +193,7 @@ export class VaultBackupService {
   async inspectBackup(uri: string, password: string,
     onProgress?: (progress: BackupProgress) => void, freshInstall: boolean = false): Promise<PreparedVaultBackup> {
     const workspace = this.createWorkspace();
-    const encryptedPath = `${workspace}/selected.palmvault`;
+    const encryptedPath = `${workspace}/selected.palmkeep`;
     const zipPath = `${workspace}/payload.zip`;
     const extractedPath = `${workspace}/extracted`;
     let stage = '读取选中的备份文件';
@@ -495,7 +496,7 @@ export class VaultBackupService {
 
   private createWorkspace(): string {
     try {
-    const path = `${this.context.tempDir}/palmvault-backup-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+    const path = `${this.context.tempDir}/palmkeep-backup-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
     fs.mkdirSync(path, true);
     return path;
     } catch (error) {
@@ -613,8 +614,8 @@ export class VaultBackupService {
   private backupFileName(): string {
     const now = new Date();
     const two = (value: number): string => value.toString().padStart(2, '0');
-    return `PalmVault-${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-` +
-      `${two(now.getHours())}${two(now.getMinutes())}.palmvault`;
+    return `PalmKeep-${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-` +
+      `${two(now.getHours())}${two(now.getMinutes())}.palmkeep`;
   }
 
   private progress(callback: ((progress: BackupProgress) => void) | undefined,

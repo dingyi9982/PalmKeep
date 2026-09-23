@@ -15,7 +15,7 @@ export class AbilityContextHolder {
   static getContext(): common.UIAbilityContext {
     const context = AbilityContextHolder.abilityContext;
     if (!context) {
-      throw new Error('PalmVault ability context is not ready');
+      throw new Error('PalmKeep ability context is not ready');
     }
     return context;
   }

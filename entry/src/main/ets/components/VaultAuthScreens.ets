@@ -44,7 +44,7 @@ export struct VaultSetupScreen {
       Column({ space: 22 }) {
         Row() { brandMark(58) }.width('100%').justifyContent(FlexAlign.Center)
         Column({ space: 7 }) {
-          Text('创建你的本地保险库')
+          Text('创建你的本地密匣')
             .fontSize(28).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
           Text('密码不会离开这台设备，也无法由我们找回。')
             .fontSize(14).fontColor(COLOR_MUTED).textAlign(TextAlign.Center)
@@ -61,7 +61,7 @@ export struct VaultSetupScreen {
           if (this.errorMessage.length > 0) {
             Text(this.errorMessage).fontSize(13).fontColor(COLOR_DANGER).width('100%')
           }
-          Button(this.busy ? '正在创建…' : '创建本地保险库')
+          Button(this.busy ? '正在创建…' : '创建本地密匣')
             .width('100%').height(52).fontSize(16).fontWeight(FontWeight.Bold)
             .fontColor(COLOR_BG).backgroundColor(COLOR_PRIMARY).borderRadius(14)
             .enabled(!this.busy).onClick((): void => { this.onCreateVault(); })
@@ -112,9 +112,9 @@ export struct VaultLockedScreen {
         brandMark(66)
         Column({ space: 7 }) {
           Text('掌心密匣已锁定').fontSize(28).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
-          Text(this.unlockMode === 'gesture' ? '绘制手势解锁本地保险库' :
+          Text(this.unlockMode === 'gesture' ? '绘制手势解锁本地密匣' :
             (this.unlockMode === 'fingerprint' ? '使用指纹验证身份' :
-              (this.unlockMode === 'face' ? '使用人脸验证身份' : '输入密码解锁本地保险库')))
+              (this.unlockMode === 'face' ? '使用人脸验证身份' : '输入密码解锁本地密匣')))
             .fontSize(14).fontColor(COLOR_MUTED)
         }
         Column({ space: 12 }) {

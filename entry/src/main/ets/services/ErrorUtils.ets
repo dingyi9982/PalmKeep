@@ -13,5 +13,5 @@ export function normalizeError(error: Object): Error {
 
 export function logRecoverableError(operation: string, error: Object): void {
   if (!DEBUG) { return; }
-  console.warn(`PalmVault ${operation}: ${normalizeError(error).message}`);
+  console.warn(`PalmKeep ${operation}: ${normalizeError(error).message}`);
 }

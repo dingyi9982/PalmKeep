@@ -8,7 +8,7 @@ import common from '@ohos.app.ability.common';
 import { BusinessError } from '@ohos.base';
 import { constantTimeBytesEqual } from './VaultByteUtils';
 
-const SECURITY_STORE: string = 'palmvault_security';
+const SECURITY_STORE: string = 'palmkeep_security';
 const KEY_INITIALIZED: string = 'initialized';
 const KEY_SALT: string = 'master_salt';
 const KEY_VERIFIER: string = 'master_verifier';
@@ -26,8 +26,8 @@ const KEY_GESTURE_FAILURES: string = 'gesture_failures';
 const KEY_GESTURE_LOCKOUT_UNTIL: string = 'gesture_lockout_until';
 const KEY_PREFERRED_UNLOCK_MODE: string = 'preferred_unlock_mode';
 const KEY_AUTO_LOCK_MINUTES: string = 'auto_lock_minutes';
-const FINGERPRINT_KEY_ALIAS: string = 'PalmVault.Fingerprint.DatabaseKey.v1';
-const BIOMETRIC_AAD: Uint8Array = new Uint8Array([80, 97, 108, 109, 86, 97, 117, 108, 116]);
+const FINGERPRINT_KEY_ALIAS: string = 'PalmKeep.Fingerprint.AccessKey.v1';
+const BIOMETRIC_AAD: Uint8Array = new Uint8Array([80, 97, 108, 109, 75, 101, 101, 112]);
 const PBKDF_ITERATIONS: number = 210000;
 
 export interface QuickUnlockStatus {
@@ -86,7 +86,7 @@ export class VaultSecurityService {
     }
     const salt = cryptoFramework.createRandom().generateRandomSync(16).data;
     const material = this.derive(password, salt);
-    const databaseKey = material.slice(0, 32);
+    const accessKey = material.slice(0, 32);
     const verifier = material.slice(32, 64);
     material.fill(0);
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
@@ -96,7 +96,7 @@ export class VaultSecurityService {
     await store.flush();
     verifier.fill(0);
     salt.fill(0);
-    return databaseKey;
+    return accessKey;
       } catch (error) {
       throw normalizeError(error);
     }
@@ -117,7 +117,7 @@ export class VaultSecurityService {
     const salt = this.base64.decodeSync(saltText);
     const expected = this.base64.decodeSync(expectedText);
     const material = this.derive(password, salt);
-    const databaseKey = material.slice(0, 32);
+    const accessKey = material.slice(0, 32);
     const actual = material.slice(32, 64);
     const accepted = constantTimeBytesEqual(actual, expected);
     material.fill(0);
@@ -125,7 +125,7 @@ export class VaultSecurityService {
     expected.fill(0);
     salt.fill(0);
     if (!accepted) {
-      databaseKey.fill(0);
+      accessKey.fill(0);
       const failures = (store.getSync(KEY_PASSWORD_FAILURES, 0) as number) + 1;
       if (failures >= 5) {
         const level = Math.min((store.getSync(KEY_PASSWORD_LOCKOUT_LEVEL, 0) as number) + 1, 5);
@@ -145,7 +145,7 @@ export class VaultSecurityService {
     await store.put(KEY_PASSWORD_LOCKOUT_LEVEL, 0);
     await store.put(KEY_PASSWORD_LOCKOUT_UNTIL, 0);
     await store.flush();
-    return databaseKey;
+    return accessKey;
       } catch (error) {
       throw normalizeError(error);
     }
@@ -162,14 +162,14 @@ export class VaultSecurityService {
     }
   }
 
-  async enableGesture(pattern: number[], databaseKey: Uint8Array): Promise<void> {
+  async enableGesture(pattern: number[], accessKey: Uint8Array): Promise<void> {
     try {
     this.validatePattern(pattern);
     const salt = cryptoFramework.createRandom().generateRandomSync(16).data;
     const material = this.derive(this.patternText(pattern), salt);
     const wrappingKey = material.slice(0, 32);
     const verifier = material.slice(32, 64);
-    const wrapped = this.xor(databaseKey, wrappingKey);
+    const wrapped = this.xor(accessKey, wrappingKey);
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     await store.put(KEY_GESTURE_SALT, this.base64.encodeToStringSync(salt));
     await store.put(KEY_GESTURE_VERIFIER, this.base64.encodeToStringSync(verifier));
@@ -209,10 +209,10 @@ export class VaultSecurityService {
     const wrappingKey = material.slice(0, 32);
     const actual = material.slice(32, 64);
     const accepted = constantTimeBytesEqual(actual, expected);
-    let databaseKey: Uint8Array | undefined = undefined;
+    let accessKey: Uint8Array | undefined = undefined;
     let lockedOut = false;
     if (accepted) {
-      databaseKey = this.xor(wrapped, wrappingKey);
+      accessKey = this.xor(wrapped, wrappingKey);
       await store.put(KEY_GESTURE_FAILURES, 0);
       await store.put(KEY_GESTURE_LOCKOUT_UNTIL, 0);
       await store.flush();
@@ -235,7 +235,7 @@ export class VaultSecurityService {
     wrapped.fill(0);
     salt.fill(0);
     if (lockedOut) { throw new Error('手势错误次数过多，请在 30 秒后重试'); }
-    return databaseKey;
+    return accessKey;
       } catch (error) {
       throw normalizeError(error);
     }
@@ -261,7 +261,7 @@ export class VaultSecurityService {
     }
   }
 
-  async enableFingerprint(databaseKey: Uint8Array): Promise<void> {
+  async enableFingerprint(accessKey: Uint8Array): Promise<void> {
     try {
     if (!this.isBiometricAvailable(userAuth.UserAuthType.FINGERPRINT)) {
       throw new Error('当前设备未录入指纹或不支持指纹认证');
@@ -269,7 +269,7 @@ export class VaultSecurityService {
     await this.authenticateBiometric('启用指纹登录', userAuth.UserAuthType.FINGERPRINT);
     await this.ensureFingerprintKey();
     const nonce = cryptoFramework.createRandom().generateRandomSync(12).data;
-    const wrapped = await this.huksCrypt(databaseKey, nonce, true);
+    const wrapped = await this.huksCrypt(accessKey, nonce, true);
     const store = await preferences.getPreferences(this.context, SECURITY_STORE);
     await store.put(KEY_FINGERPRINT_NONCE, this.base64.encodeToStringSync(nonce));
     await store.put(KEY_FINGERPRINT_WRAPPED, this.base64.encodeToStringSync(wrapped));
@@ -332,7 +332,7 @@ export class VaultSecurityService {
     }
   }
 
-  async enableFace(databaseKey: Uint8Array): Promise<void> {
+  async enableFace(accessKey: Uint8Array): Promise<void> {
     try {
       if (!this.isBiometricAvailable(userAuth.UserAuthType.FACE)) {
         throw new Error('当前设备未录入或不支持人脸认证');
@@ -340,7 +340,7 @@ export class VaultSecurityService {
       await this.authenticateBiometric('启用人脸登录', userAuth.UserAuthType.FACE);
       await this.ensureFingerprintKey();
       const nonce = cryptoFramework.createRandom().generateRandomSync(12).data;
-      const wrapped = await this.huksCrypt(databaseKey, nonce, true);
+      const wrapped = await this.huksCrypt(accessKey, nonce, true);
       const store = await preferences.getPreferences(this.context, SECURITY_STORE);
       await store.put(KEY_FACE_NONCE, this.base64.encodeToStringSync(nonce));
       await store.put(KEY_FACE_WRAPPED, this.base64.encodeToStringSync(wrapped));
@@ -480,7 +480,7 @@ export class VaultSecurityService {
       if (newPassword.length === 0) { throw new Error('新密码不能为空'); }
       const salt = cryptoFramework.createRandom().generateRandomSync(16).data;
       const material = this.derive(newPassword, salt);
-      const databaseKey = material.slice(0, 32);
+      const accessKey = material.slice(0, 32);
       const verifier = material.slice(32, 64);
       material.fill(0);
       const store = await preferences.getPreferences(this.context, SECURITY_STORE);
@@ -507,7 +507,7 @@ export class VaultSecurityService {
       }
       salt.fill(0);
       verifier.fill(0);
-      return databaseKey;
+      return accessKey;
     } catch (error) {
       authenticatedKey.fill(0);
       throw normalizeError(error);
@@ -674,7 +674,7 @@ export class VaultSecurityService {
   }
 
   private patternText(pattern: number[]): string {
-    return `PalmVault.Gesture.v1:${pattern.join('-')}`;
+    return `PalmKeep.Gesture.v1:${pattern.join('-')}`;
   }
 
   private xor(left: Uint8Array, right: Uint8Array): Uint8Array {

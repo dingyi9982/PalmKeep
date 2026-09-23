@@ -20,16 +20,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'oh_modules\@ohos\hypium')
 $env:DEVECO_SDK_HOME = $DevEcoSdkHome
 $env:JAVA_HOME = $JavaHome
 $env:Path = (Join-Path $JavaHome 'bin') + ';' + $env:Path
-$previousTestRunning = $env:PALMVAULT_CORE_TEST_RUNNING
+$previousTestRunning = $env:PALMKEEP_CORE_TEST_RUNNING
 try {
-  $env:PALMVAULT_CORE_TEST_RUNNING = '1'
+  $env:PALMKEEP_CORE_TEST_RUNNING = '1'
   & $NodePath $HvigorPath --no-daemon --mode module -p product=default -p buildMode=debug test
   if ($LASTEXITCODE -ne 0) { throw 'Core unit tests failed.' }
 } finally {
   if ($null -eq $previousTestRunning) {
-    Remove-Item Env:PALMVAULT_CORE_TEST_RUNNING -ErrorAction SilentlyContinue
+    Remove-Item Env:PALMKEEP_CORE_TEST_RUNNING -ErrorAction SilentlyContinue
   } else {
-    $env:PALMVAULT_CORE_TEST_RUNNING = $previousTestRunning
+    $env:PALMKEEP_CORE_TEST_RUNNING = $previousTestRunning
   }
 }
 

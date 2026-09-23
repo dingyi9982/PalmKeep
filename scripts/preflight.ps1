@@ -13,7 +13,7 @@ $requiredCompatibleSdk = '5.0.0(12)'
 $requiredTargetSdk = '6.0.1(21)'
 $requiredMinApiVersion = 50000012
 $requiredTargetApiVersion = 60001021
-$requiredBundleName = 'com.palmvault.app'
+$requiredBundleName = 'com.palmkeep.app'
 
 foreach ($path in @($JavaHome, $NodePath, $HvigorPath)) {
   if (-not (Test-Path -LiteralPath $path)) {
@@ -68,7 +68,7 @@ if ($wrongTargetProducts.Count -gt 0) {
 $env:DEVECO_SDK_HOME = $DevEcoSdkHome
 $env:JAVA_HOME = $JavaHome
 $env:Path = (Join-Path $JavaHome 'bin') + ';' + $env:Path
-# assembleHap depends on the palmVaultCoreTest Hvigor task. A failing test
+# assembleHap depends on the palmKeepCoreTest Hvigor task. A failing test
 # therefore aborts this build and every regular IDE/CLI HAP build.
 & $NodePath $HvigorPath --no-daemon --mode module -p product=default -p buildMode=debug assembleHap
 if ($LASTEXITCODE -ne 0) {

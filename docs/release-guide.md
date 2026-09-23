@@ -1,8 +1,8 @@
 # 掌心密匣发布说明
 
-本文档用于发布 PalmVault。日常开发不需要修改版本号；只有准备生成正式安装包时才执行发布脚本。
+本文档用于发布 PalmKeep。日常开发不需要修改版本号；只有准备生成正式安装包时才执行发布脚本。
 
-应用最终包名固定为 `com.palmvault.app`。应用市场创建应用、正式签名 Profile 和构建产物必须使用同一个包名，发布后不要再更换。
+应用最终包名固定为 `com.palmkeep.app`。应用市场创建应用、正式签名 Profile 和构建产物必须使用同一个包名，发布后不要再更换。
 
 ## 首次克隆与本地配置
 
@@ -43,8 +43,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 1.0.0
 产物名称格式为：
 
 ```text
-release/PalmVault-1.0.0-1.hap
-release/PalmVault-1.0.0-1.hap.sha256
+release/PalmKeep-1.0.0-1.hap
+release/PalmKeep-1.0.0-1.hap.sha256
 ```
 
 如果只想在本地生成版本，不推送远程仓库：
@@ -85,7 +85,7 @@ git show <构建标识中的提交哈希>
 - `default` 产品使用正式发布签名。
 - `default` 产品绑定 `entry@default` target。
 - 所有产品的 `compatibleSdkVersion` 保持为 `5.0.0(12)`，`targetSdkVersion` 保持为 `6.0.1(21)`；发布预检会同时校验配置和构建产物的最低 API 版本。
-- 正式签名 Profile 中的包名必须是 `com.palmvault.app`。
+- 正式签名 Profile 中的包名必须是 `com.palmkeep.app`。
 - 不要提交 `.p12`、`.cer`、`.p7b`、签名密码或带本机绝对路径的签名配置。
 
 目前本机配置若仍是自动调试签名，脚本虽然可以产出已签名 HAP，但该 HAP 只能用于开发验证，不能代替应用市场正式签名。
@@ -124,8 +124,9 @@ Hvigor: D:\DevEco Studio\tools\hvigor\bin\hvigorw.js
 - [ ] `versionName` 符合发布计划
 - [ ] `versionCode` 大于应用市场历史版本
 - [ ] `default` 使用正式发布签名
-- [ ] 正式签名 Profile 与应用市场应用均使用 `com.palmvault.app`
-- [ ] 软件介绍和隐私声明没有宣称当前未实现的“全部资料加密存储”
+- [ ] 正式签名 Profile 与应用市场应用均使用 `com.palmkeep.app`
+- [ ] 软件介绍和隐私声明明确说明应用内资料存放于应用私有沙箱，不宣称额外的数据库或附件逐文件加密
+- [ ] 软件介绍准确区分应用内沙箱存储与密码加密的导出备份
 - [ ] `LICENSE`、`oh-package.json5` 和 `entry/oh-package.json5` 均保持专有/`UNLICENSED`
 - [ ] 一键发布脚本执行成功
 - [ ] 核心本地单元测试全部通过

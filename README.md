@@ -1,6 +1,6 @@
-# 掌心密匣 PalmVault
+# 掌心密匣 PalmKeep
 
-面向 HarmonyOS 5.0+（compatible API 12，target API 21）的本地个人资料管理应用，最终包名固定为 `com.palmvault.app`。
+面向 HarmonyOS 5.0+（compatible API 12，target API 21）的本地个人资料管理应用，最终包名固定为 `com.palmkeep.app`。
 
 ## 当前已实现
 
@@ -16,7 +16,7 @@
 
 ## 当前数据边界
 
-业务数据和附件保存在应用私有目录，不主动上传到网络。当前数据库和附件文件尚未实现完整的静态逐文件加密，因此发布前的产品文案不得宣称“所有资料均已加密存储”。访问密码、生物认证和窗口隐私保护不能替代设备被攻破、应用沙箱被绕过时的静态数据加密。
+业务数据和附件保存在 HarmonyOS 为 PalmKeep 分配的应用私有沙箱中，不主动上传到网络，也不会在未操作导出的情况下写入公共媒体目录。应用内资料不额外实施数据库或附件逐文件加密；访问密码、生物认证和窗口隐私保护用于限制应用界面访问。用户主动导出的备份文件仍使用密码派生密钥与 AES-256-GCM 加密。
 
 ## 工程结构
 
@@ -42,6 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-git-hooks.
 ```
 
 随后在 DevEco Studio 中配置本机调试签名或正式发布签名。`build-profile.json5`、证书、Profile、密钥库和密码不得提交到仓库。
+从旧包名切换后，必须在 DevEco Studio 中重新生成绑定 `com.palmkeep.app` 的签名 Profile。
 
 所有标准 HAP 编译（DevEco Studio 或命令行 `assembleHap`）都会先运行核心单元测试；测试失败时构建立即失败。仓库的 `pre-commit` 钩子会在每次普通 Git 提交前再次运行同一组测试并阻止失败的提交。Git 不允许仓库在克隆时自行修改本地配置，因此新克隆只需执行一次上述钩子安装脚本。
 

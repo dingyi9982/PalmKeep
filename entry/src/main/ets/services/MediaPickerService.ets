@@ -245,7 +245,7 @@ export class MediaPickerService {
 
   private safeFileName(name: string): string {
     const cleaned = name.replace(/[\\/:*?"<>|]/g, '_').trim();
-    return cleaned.length > 0 ? cleaned : 'PalmVault文件';
+    return cleaned.length > 0 ? cleaned : 'PalmKeep文件';
   }
 
   private albumTitle(name: string): string {

@@ -17,6 +17,7 @@ const app = json('AppScope/app.json5').app;
 const rootPackage = json('oh-package.json5');
 const entryPackage = json('entry/oh-package.json5');
 const strings = json('entry/src/main/resources/base/element/string.json').string;
+const englishStrings = json('entry/src/main/resources/en_US/element/string.json').string;
 const template = json('build-profile.example.json5');
 const entryProfile = json('entry/build-profile.json5');
 const hvigor = read('entry/hvigorfile.ts');
@@ -32,16 +33,23 @@ const preCommitHook = read('.githooks/pre-commit');
 const hookInstaller = read('scripts/install-git-hooks.ps1');
 const lockfile = json('oh-package-lock.json5');
 
-assert(app.bundleName === 'com.palmvault.app', 'bundleName must remain com.palmvault.app');
+assert(app.bundleName === 'com.palmkeep.app', 'bundleName must remain com.palmkeep.app');
+assert(app.vendor === 'PalmKeep', 'vendor must remain PalmKeep');
 assert(rootPackage.license === 'UNLICENSED' && entryPackage.license === 'UNLICENSED',
   'both packages must remain proprietary (UNLICENSED)');
 assert(rootPackage.devDependencies?.['@ohos/hypium'] === '1.0.18',
   'the core-test framework version must remain pinned');
 assert(lockfile.specifiers?.['@ohos/hypium@1.0.18'] === '@ohos/hypium@1.0.18',
   'the core-test framework must remain in the dependency lockfile');
-assert(!rootPackage.description.includes('纯本地加密'), 'package description must not overstate attachment encryption');
-assert(strings.some((item) => item.name === 'module_desc' && !item.value.includes('纯本地加密')),
-  'module description must not overstate attachment encryption');
+assert(rootPackage.name === 'palmkeep' && rootPackage.author === 'PalmKeep' && entryPackage.author === 'PalmKeep',
+  'package metadata must use the PalmKeep brand');
+assert(englishStrings.some((item) => item.name === 'app_name' && item.value === 'PalmKeep'),
+  'the English application name must remain PalmKeep');
+assert(!rootPackage.description.includes('资料加密存储') && !rootPackage.description.includes('附件加密存储'),
+  'package description must not claim additional at-rest encryption');
+assert(strings.some((item) => item.name === 'module_desc' &&
+  !item.value.includes('资料加密存储') && !item.value.includes('附件加密存储')),
+  'module description must not claim additional at-rest encryption');
 
 const products = new Map(template.app.products.map((product) => [product.name, product]));
 for (const name of ['default', 'localRelease', 'debug']) {
@@ -76,9 +84,9 @@ assert(shareAbility.includes("import { BUNDLE_NAME } from 'BuildProfile'") &&
   shareAbility.includes('bundleName: BUNDLE_NAME'),
   'the share extension must launch the configured application bundle');
 assert(hvigor.includes("postDependencies: ['assembleHap']") &&
-  hvigor.includes("name: 'palmVaultCoreTest'") && testRunner.includes('test_result.txt'),
+  hvigor.includes("name: 'palmKeepCoreTest'") && testRunner.includes('test_result.txt'),
   'every HAP build must execute and verify core unit tests');
-assert(preflight.includes('assembleHap') && preflight.includes('palmVaultCoreTest'),
+assert(preflight.includes('assembleHap') && preflight.includes('palmKeepCoreTest'),
   'release preflight must rely on the mandatory Hvigor core-test gate');
 assert(preCommitHook.includes('scripts/test-core.ps1') &&
   preCommitHook.includes('commit aborted') && hookInstaller.includes('core.hooksPath .githooks'),

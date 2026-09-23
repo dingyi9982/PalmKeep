@@ -1,0 +1,21 @@
+{
+  "string": [
+    {
+      "name": "camera_permission_reason",
+      "value": "Used to take photos and scan documents with the in-app camera"
+    },
+    {
+      "name": "microphone_permission_reason",
+      "value": "Used to record audio inside PalmKeep"
+    },
+    {
+      "name": "background_recording_permission_reason",
+      "value": "Used to finish a recording you started after switching apps or locking the screen"
+    },
+    { "name": "app_name", "value": "PalmKeep" },
+    { "name": "module_desc", "value": "Manage accounts, notes, media, audio, and files locally" },
+    { "name": "entry_desc", "value": "Manage accounts, notes, media, audio, and files on this device" },
+    { "name": "share_receiver_label", "value": "Save to PalmKeep" },
+    { "name": "share_receiver_desc", "value": "Save shared content to PalmKeep from the system share panel" }
+  ]
+}

@@ -4,7 +4,7 @@ import { BackupStatusRecord } from '../models/VaultBackupModels';
 import { AbilityContextHolder } from './AbilityContextHolder';
 import { logRecoverableError } from './ErrorUtils';
 
-const UI_PREFERENCES: string = 'palmvault_ui_preferences';
+const UI_PREFERENCES: string = 'palmkeep_ui_preferences';
 const KEY_LAST_NEW_ITEM_TYPE: string = 'last_new_item_type';
 const KEY_BACKUP_TIME: string = 'last_backup_time';
 const KEY_BACKUP_ITEM_COUNT: string = 'last_backup_item_count';

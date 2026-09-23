@@ -85,14 +85,14 @@ export struct RecoveryCenterDialog {
             TextInput({ placeholder: '再次输入新密码', text: this.confirmPassword })
               .type(InputType.Password).height(48).backgroundColor(COLOR_SURFACE_2).borderRadius(RADIUS_CONTROL)
               .onChange((value: string): void => { this.confirmPassword = value; })
-            Button(this.busy ? '正在重设…' : '重设密码并进入保险库')
+            Button(this.busy ? '正在重设…' : '重设密码并进入密匣')
               .width('100%').height(48).fontWeight(FontWeight.Bold).fontColor(COLOR_BG)
               .backgroundColor(COLOR_PRIMARY).borderRadius(RADIUS_CONTROL).enabled(!this.busy)
               .onClick((): void => { this.onResetPassword(); })
           }
           Divider().color(COLOR_BORDER).margin({ top: 4, bottom: 2 })
           Text('无法通过上述方式恢复？').fontSize(12).fontColor(COLOR_MUTED).width('100%')
-          Button('永久清除本地保险库').width('100%').height(44).fontSize(13).fontColor(COLOR_DANGER)
+          Button('永久清除本地密匣').width('100%').height(44).fontSize(13).fontColor(COLOR_DANGER)
             .backgroundColor(COLOR_DANGER_TINT).borderRadius(RADIUS_CONTROL).enabled(!this.busy)
             .onClick((): void => { this.onClearVault(); })
         }.width('100%').padding(18)
@@ -114,7 +114,7 @@ export struct ResetVaultDialog {
   build() {
     Column() {
       Column({ space: 10 }) {
-        VaultDialogHeader({ title: '清除本地保险库', onClose: this.onClose })
+        VaultDialogHeader({ title: '清除本地密匣', onClose: this.onClose })
         Text('此操作会永久删除全部资料、附件、分组和登录设置，且无法恢复。')
           .fontSize(13).fontColor(COLOR_DANGER).lineHeight(20).width('100%')
         Text('请输入“清除全部数据”以确认').fontSize(12).fontColor(COLOR_MUTED).width('100%')

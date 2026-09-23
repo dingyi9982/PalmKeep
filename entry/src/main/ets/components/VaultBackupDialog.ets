@@ -59,7 +59,7 @@ export struct VaultBackupDialog {
         }.width('100%')
 
         if (this.stage === 'password') {
-          Text(this.action === 'create' ? '使用当前保险库密码加密备份。' : '请输入创建该备份时使用的保险库密码。')
+          Text(this.action === 'create' ? '使用当前密匣密码加密备份。' : '请输入创建该备份时使用的密匣密码。')
             .fontSize(13).fontColor(COLOR_MUTED).width('100%')
           TextInput({ placeholder: '密码', text: this.password })
             .type(InputType.Password).height(48).fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER)

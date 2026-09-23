@@ -129,7 +129,7 @@ try {
     throw 'The signed Release HAP was not found.'
   }
   New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
-  $artifactName = "PalmVault-$VersionName-$actualVersionCode.hap"
+  $artifactName = "PalmKeep-$VersionName-$actualVersionCode.hap"
   $artifactPath = Join-Path $releaseDirectory $artifactName
   Copy-Item -LiteralPath $signedHap.FullName -Destination $artifactPath -Force
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifactPath).Hash.ToLowerInvariant()

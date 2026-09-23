@@ -237,7 +237,7 @@ struct Index {
   private groupDragLastReorderX: number = 0;
   private groupDragLastReorderY: number = 0;
   private sessionKey: Uint8Array = new Uint8Array(0);
-  private recoveryDatabaseKey: Uint8Array = new Uint8Array(0);
+  private recoveryAccessKey: Uint8Array = new Uint8Array(0);
   private firstGesture: number[] = [];
   private selectedBackupUri: string = '';
   private preparedBackup?: PreparedVaultBackup = undefined;
@@ -1621,8 +1621,8 @@ struct Index {
   }
 
   private openRecoveryCenter(): void {
-    this.recoveryDatabaseKey.fill(0);
-    this.recoveryDatabaseKey = new Uint8Array(0);
+    this.recoveryAccessKey.fill(0);
+    this.recoveryAccessKey = new Uint8Array(0);
     this.recoveryAuthenticated = false;
     this.recoveryAuthLabel = '';
     this.recoveryNewPassword = '';
@@ -1632,8 +1632,8 @@ struct Index {
 
   private closeRecoveryCenter(): void {
     if (this.recoveryBusy) { return; }
-    this.recoveryDatabaseKey.fill(0);
-    this.recoveryDatabaseKey = new Uint8Array(0);
+    this.recoveryAccessKey.fill(0);
+    this.recoveryAccessKey = new Uint8Array(0);
     this.recoveryAuthenticated = false;
     this.recoveryAuthLabel = '';
     this.recoveryNewPassword = '';
@@ -1647,8 +1647,8 @@ struct Index {
       try {
         const security = this.getSecurityService();
         const key = mode === 'face' ? await security.unlockWithFace() : await security.unlockWithFingerprint();
-        this.recoveryDatabaseKey.fill(0);
-        this.recoveryDatabaseKey = key.slice();
+        this.recoveryAccessKey.fill(0);
+        this.recoveryAccessKey = key.slice();
         key.fill(0);
         this.recoveryAuthenticated = true;
         this.recoveryAuthLabel = this.unlockModeLabel(mode);
@@ -1664,7 +1664,7 @@ struct Index {
 
   private async resetRecoveredPassword(): Promise<void> {
     try {
-      if (!this.recoveryAuthenticated || this.recoveryDatabaseKey.length !== 32) {
+      if (!this.recoveryAuthenticated || this.recoveryAccessKey.length !== 32) {
         this.getUIContext().getPromptAction().showToast({ message: '请先验证身份' });
         return;
       }
@@ -1680,8 +1680,8 @@ struct Index {
       try {
         const security = this.getSecurityService();
         const key = await security.resetPasswordWithAuthenticatedKey(
-          this.recoveryDatabaseKey, this.recoveryNewPassword);
-        this.recoveryDatabaseKey = new Uint8Array(0);
+          this.recoveryAccessKey, this.recoveryNewPassword);
+        this.recoveryAccessKey = new Uint8Array(0);
         await this.openWithKey(key);
         await this.refreshQuickUnlockStatus();
         await this.refreshData();
@@ -1690,8 +1690,8 @@ struct Index {
         await this.showVaultScreen();
         this.getUIContext().getPromptAction().showToast({ message: '密码已重设，快捷登录已关闭' });
       } catch (error) {
-        this.recoveryDatabaseKey.fill(0);
-        this.recoveryDatabaseKey = new Uint8Array(0);
+        this.recoveryAccessKey.fill(0);
+        this.recoveryAccessKey = new Uint8Array(0);
         this.recoveryAuthenticated = false;
         this.recoveryBusy = false;
         this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
@@ -1732,7 +1732,7 @@ struct Index {
       this.closeResetVault();
       this.closeRecoveryCenter();
       this.screen = 'setup';
-      this.getUIContext().getPromptAction().showToast({ message: '本地保险库已清除' });
+      this.getUIContext().getPromptAction().showToast({ message: '本地密匣已清除' });
     } catch (error) {
       this.resetVaultBusy = false;
       this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });

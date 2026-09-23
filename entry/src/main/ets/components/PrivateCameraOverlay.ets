@@ -343,7 +343,7 @@ export struct PrivateCameraOverlay {
 
   build() {
     Stack({ alignContent: Alignment.Center }) {
-      XComponent({ id: 'palmvault-private-camera', type: XComponentType.SURFACE, controller: this.controller })
+      XComponent({ id: 'palmkeep-private-camera', type: XComponentType.SURFACE, controller: this.controller })
         .width('100%').height('100%')
         .onLoad((): void => {
           this.surfaceId = this.controller.getXComponentSurfaceId();

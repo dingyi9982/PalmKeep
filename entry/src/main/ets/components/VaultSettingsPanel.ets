@@ -232,9 +232,9 @@ export struct VaultSettingsPanel {
         }
         .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(17)
         .border({ width: 1, color: COLOR_BORDER })
-        Button('立即锁定保险库').width('100%').height(50).fontColor(COLOR_PRIMARY)
+        Button('立即锁定密匣').width('100%').height(50).fontColor(COLOR_PRIMARY)
           .backgroundColor(COLOR_DARK_ACTION).borderRadius(14).onClick((): void => { this.onLockVault(); })
-        Text('掌心密匣 PalmVault').fontSize(12).fontColor(COLOR_PLACEHOLDER)
+        Text('掌心密匣 PalmKeep').fontSize(12).fontColor(COLOR_PLACEHOLDER)
           .width('100%').textAlign(TextAlign.Center)
       }
       .width('100%').padding({ left: 18, right: 18, top: 12, bottom: 105 })

@@ -30,8 +30,8 @@ import {
 } from '../models/VaultBackupModels';
 
 // Keep this file name stable. Future database changes must use schema migrations.
-const DATABASE_NAME: string = 'palmvault.db';
-const ATTACHMENT_DIRECTORY_NAME: string = 'palmvault-attachments';
+const DATABASE_NAME: string = 'palmkeep.db';
+const ATTACHMENT_DIRECTORY_NAME: string = 'palmkeep-attachments';
 
 enum BackupMergeDecision {
   Add = 'add',
@@ -58,13 +58,13 @@ class VaultRepositoryImpl {
   private store?: relationalStore.RdbStore;
   private attachmentRoot: string = '';
 
-  async open(context: common.UIAbilityContext, databaseKey: Uint8Array): Promise<void> {
+  async open(context: common.UIAbilityContext, accessKey: Uint8Array): Promise<void> {
     try {
       if (this.store) {
-        databaseKey.fill(0);
+        accessKey.fill(0);
         return;
       }
-      databaseKey.fill(0);
+      accessKey.fill(0);
       this.attachmentRoot = `${context.filesDir}/${ATTACHMENT_DIRECTORY_NAME}`;
       this.ensureAttachmentDirectory();
       const config: relationalStore.StoreConfig = {
@@ -78,7 +78,7 @@ class VaultRepositoryImpl {
       await this.assignUngroupedItems();
       await this.cleanupOrphanedAttachments();
     } catch (error) {
-      databaseKey.fill(0);
+      accessKey.fill(0);
       const failedStore = this.store;
       this.store = undefined;
       if (failedStore) {
@@ -1794,7 +1794,7 @@ class VaultRepositoryImpl {
 
   private requireStore(): relationalStore.RdbStore {
     if (!this.store) {
-      throw new Error('保险库尚未解锁');
+      throw new Error('密匣尚未解锁');
     }
     return this.store;
   }
