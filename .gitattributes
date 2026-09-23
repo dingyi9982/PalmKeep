@@ -1,0 +1,44 @@
+* text=auto
+.editorconfig text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+*.ets text eol=lf
+*.ts text eol=lf
+*.d.ts text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.ps1 text eol=lf
+*.cmd text eol=lf
+*.json text eol=lf
+*.json5 text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.svg text eol=lf
+*.xml text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.mp3 binary
+*.m4a binary
+*.aac binary
+*.wav binary
+*.amr binary
+*.flac binary
+*.ogg binary
+*.mp4 binary
+*.mov binary
+*.so binary
+*.har binary
+*.hap binary
+*.app binary

@@ -6,7 +6,14 @@ import fileUri from '@ohos.file.fileuri';
 import { AbilityContextHolder } from './AbilityContextHolder';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { VaultItemType } from '../models/VaultModels';
-import { MAX_AUDIO_ATTACHMENTS, MAX_FILE_ATTACHMENT_BYTES, MAX_IMPORTED_AUDIO_BYTES } from './VaultLimits';
+import {
+  MAX_AUDIO_ATTACHMENTS,
+  MAX_FILE_ATTACHMENT_BYTES,
+  MAX_IMPORTED_AUDIO_BYTES,
+  MAX_IMPORTED_IMAGE_BYTES,
+  MAX_IMPORTED_VIDEO_BYTES,
+  MAX_MEDIA_IMPORT_BATCH_BYTES
+} from './VaultLimits';
 
 export interface PickedMedia {
   uri: string;
@@ -103,13 +110,33 @@ export class MediaPickerService {
     const result = await new photoAccessHelper.PhotoViewPicker().select(options);
     const picked: PickedMedia[] = [];
     try {
+      let totalBytes = 0;
       for (let index = 0; index < result.photoUris.length; index += 1) {
         const uri = result.photoUris[index];
         const type = await this.detectMediaType(uri);
-        picked.push({ uri: uri, type: type, name: this.fileName(uri, type), ocrText: '' });
+        const name = this.fileName(uri, type);
+        const size = this.fileSize(uri);
+        if (size <= 0) { throw new Error(`媒体“${name}”内容为空`); }
+        if (type === VaultItemType.Image && size > MAX_IMPORTED_IMAGE_BYTES) {
+          throw new Error(`图片“${name}”超过 64 MB，请选择较小的图片`);
+        }
+        if (type === VaultItemType.Video && size > MAX_IMPORTED_VIDEO_BYTES) {
+          throw new Error(`视频“${name}”超过 500 MB，请选择较小的视频`);
+        }
+        totalBytes += size;
+        if (totalBytes > MAX_MEDIA_IMPORT_BATCH_BYTES) {
+          throw new Error('一次导入的图片和视频总大小不能超过 1 GB');
+        }
+        picked.push({ uri: uri, sourceUri: uri, type: type, name: name, ocrText: '' });
       }
       return picked;
     } catch (error) {
+      const message = normalizeError(error).message;
+      if (message.indexOf('超过 64 MB') >= 0 || message.indexOf('超过 500 MB') >= 0 ||
+        message.indexOf('不能超过 1 GB') >= 0 ||
+        message.indexOf('内容为空') >= 0) {
+        throw new Error(message);
+      }
       throw new Error('媒体导入失败，请确认所选文件完整且受支持');
     }
       } catch (error) {

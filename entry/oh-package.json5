@@ -1,9 +1,9 @@
 {
   "name": "entry",
   "version": "1.0.0",
-  "description": "PalmVault HarmonyOS application",
+  "description": "掌心密匣 HarmonyOS 应用",
   "main": "",
   "author": "PalmVault",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "dependencies": {}
 }

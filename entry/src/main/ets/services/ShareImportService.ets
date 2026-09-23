@@ -6,7 +6,13 @@ import { systemShare } from '@kit.ShareKit';
 import { VaultItemType } from '../models/VaultModels';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { PickedMedia } from './MediaPickerService';
-import { MAX_FILE_ATTACHMENT_BYTES, MAX_IMPORTED_AUDIO_BYTES } from './VaultLimits';
+import {
+  MAX_FILE_ATTACHMENT_BYTES,
+  MAX_IMPORTED_AUDIO_BYTES,
+  MAX_IMPORTED_IMAGE_BYTES,
+  MAX_IMPORTED_VIDEO_BYTES,
+  MAX_SHARED_IMPORT_BYTES
+} from './VaultLimits';
 
 const SHARE_PREFIX: string = 'pv-share-';
 const REQUEST_PREFIX: string = 'pv-share-request-';
@@ -34,6 +40,7 @@ class ShareImportService {
     const textParts: string[] = [];
     let requestType: VaultItemType | undefined = undefined;
     let suggestedTitle = '';
+    let copiedBytes = 0;
     try {
       for (let index = 0; index < records.length; index += 1) {
         const record = records[index];
@@ -56,7 +63,8 @@ class ShareImportService {
         requestType = groupType;
         const name = this.sharedName(record, itemType, index + 1);
         const path = this.cachePath(context, id, index + 1, name);
-        await this.copyRecord(record.uri, path, itemType, name);
+        copiedBytes += await this.copyRecord(record.uri, path, itemType, name,
+          MAX_SHARED_IMPORT_BYTES - copiedBytes);
         items.push({ uri: path, sourceUri: '', type: itemType, name: name, ocrText: '' });
         if (!suggestedTitle && record.title) { suggestedTitle = this.titleWithoutExtension(record.title.trim()); }
       }
@@ -91,9 +99,16 @@ class ShareImportService {
       if (request.id !== requestId || !Array.isArray(request.items)) {
         throw new Error('分享请求已损坏');
       }
+      let totalBytes = 0;
       request.items.forEach((item: PickedMedia): void => {
         if (!this.isOwnedPath(context, item.uri, requestId) || !fs.accessSync(item.uri)) {
           throw new Error('分享内容已失效，请重新分享');
+        }
+        const size = fs.statSync(item.uri).size;
+        this.validateItemSize(item.type, size, item.name);
+        totalBytes += size;
+        if (totalBytes > MAX_SHARED_IMPORT_BYTES) {
+          throw new Error('一次分享内容总大小不能超过 1 GB');
         }
       });
       this.removePath(path);
@@ -155,20 +170,16 @@ class ShareImportService {
     catch (error) { return false; }
   }
 
-  private async copyRecord(uri: string, path: string, type: VaultItemType, name: string): Promise<void> {
+  private async copyRecord(uri: string, path: string, type: VaultItemType, name: string,
+    remainingBytes: number): Promise<number> {
     let source: fs.File | undefined = undefined;
     let target: fs.File | undefined = undefined;
     let completed = false;
     try {
       source = fs.openSync(uri, fs.OpenMode.READ_ONLY);
       const size = fs.statSync(source.fd).size;
-      if (size <= 0) { throw new Error(`“${name}”内容为空`); }
-      if (type === VaultItemType.File && size > MAX_FILE_ATTACHMENT_BYTES) {
-        throw new Error(`文件“${name}”超过 10 MB，请选择较小的文件`);
-      }
-      if (type === VaultItemType.Audio && size > MAX_IMPORTED_AUDIO_BYTES) {
-        throw new Error(`音频“${name}”超过 10 MB，请选择较小的文件`);
-      }
+      this.validateItemSize(type, size, name);
+      if (size > remainingBytes) { throw new Error('一次分享内容总大小不能超过 1 GB'); }
       if (type === VaultItemType.Audio && !this.isSupportedAudioName(name)) {
         throw new Error(`音频“${name}”格式不受支持`);
       }
@@ -177,6 +188,7 @@ class ShareImportService {
       fs.fsyncSync(target.fd);
       if (fs.statSync(target.fd).size !== size) { throw new Error(`“${name}”接收不完整`); }
       completed = true;
+      return size;
     } catch (error) {
       throw normalizeError(error);
     } finally {
@@ -189,6 +201,22 @@ class ShareImportService {
         catch (error) { logRecoverableError(`could not close shared source ${uri}`, error); }
       }
       if (!completed) { this.removePath(path); }
+    }
+  }
+
+  private validateItemSize(type: VaultItemType, size: number, name: string): void {
+    if (size <= 0) { throw new Error(`“${name}”内容为空`); }
+    if (type === VaultItemType.File && size > MAX_FILE_ATTACHMENT_BYTES) {
+      throw new Error(`文件“${name}”超过 10 MB，请选择较小的文件`);
+    }
+    if (type === VaultItemType.Audio && size > MAX_IMPORTED_AUDIO_BYTES) {
+      throw new Error(`音频“${name}”超过 10 MB，请选择较小的文件`);
+    }
+    if (type === VaultItemType.Image && size > MAX_IMPORTED_IMAGE_BYTES) {
+      throw new Error(`图片“${name}”超过 64 MB，请选择较小的图片`);
+    }
+    if (type === VaultItemType.Video && size > MAX_IMPORTED_VIDEO_BYTES) {
+      throw new Error(`视频“${name}”超过 500 MB，请选择较小的视频`);
     }
   }
 

@@ -2,6 +2,7 @@ import ShareExtensionAbility from '@ohos.app.ability.ShareExtensionAbility';
 import UIExtensionContentSession from '@ohos.app.ability.UIExtensionContentSession';
 import Want from '@ohos.app.ability.Want';
 import { systemShare } from '@kit.ShareKit';
+import { BUNDLE_NAME } from 'BuildProfile';
 import { logRecoverableError, normalizeError } from '../services/ErrorUtils';
 import { shareImportService } from '../services/ShareImportService';
 
@@ -29,7 +30,7 @@ export default class ShareReceiverAbility extends ShareExtensionAbility {
       const request = await shareImportService.stage(this.context, data);
       stagedRequestId = request.id;
       await this.context.startAbility({
-        bundleName: 'com.palmvault.app',
+        bundleName: BUNDLE_NAME,
         moduleName: 'entry',
         abilityName: 'EntryAbility',
         parameters: { pvShareRequestId: request.id }

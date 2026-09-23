@@ -2,10 +2,10 @@
   "modelVersion": "6.0.1",
   "name": "palmvault",
   "version": "1.0.0",
-  "description": "掌心密匣：纯本地加密的个人信息保险箱",
+  "description": "掌心密匣：本地管理账号、笔记、媒体、音频和文件",
   "main": "",
   "author": "PalmVault",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "dependencies": {},
   "devDependencies": {}
 }

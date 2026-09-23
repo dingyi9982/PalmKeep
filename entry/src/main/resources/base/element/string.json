@@ -2,7 +2,7 @@
   "string": [
     {
       "name": "camera_permission_reason",
-      "value": "用于在掌心密匣内直接拍摄私密照片和扫描文档"
+      "value": "用于使用密匣相机拍摄照片和扫描文档"
     },
     {
       "name": "microphone_permission_reason",
@@ -13,9 +13,9 @@
       "value": "用于在切换应用或锁屏后继续完成用户主动开始的录音"
     },
     { "name": "app_name", "value": "掌心密匣" },
-    { "name": "module_desc", "value": "纯本地加密的个人信息保险箱" },
-    { "name": "entry_desc", "value": "安全保存账号、笔记、媒体、音频和文件" },
+    { "name": "module_desc", "value": "本地管理账号、笔记、媒体、音频和文件" },
+    { "name": "entry_desc", "value": "在本机管理账号、笔记、媒体、音频和文件" },
     { "name": "share_receiver_label", "value": "收进掌心密匣" },
-    { "name": "share_receiver_desc", "value": "从系统分享面板将内容安全收进密匣" }
+    { "name": "share_receiver_desc", "value": "从系统分享面板将内容收进密匣" }
   ]
 }

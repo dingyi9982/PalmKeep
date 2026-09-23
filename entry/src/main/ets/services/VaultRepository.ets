@@ -4,7 +4,11 @@ import fs from '@ohos.file.fs';
 import cryptoFramework from '@ohos.security.cryptoFramework';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { migrateVaultDatabase } from './VaultDatabaseMigrations';
-import { MAX_FILE_ATTACHMENT_BYTES } from './VaultLimits';
+import {
+  MAX_FILE_ATTACHMENT_BYTES,
+  MAX_IMPORTED_IMAGE_BYTES,
+  MAX_IMPORTED_VIDEO_BYTES
+} from './VaultLimits';
 import {
   createVaultId,
   VaultAttachmentInput,
@@ -1309,6 +1313,12 @@ class VaultRepositoryImpl {
       if (size <= 0) { throw new Error('所选附件为空'); }
       if (attachment.type === VaultItemType.File && size > MAX_FILE_ATTACHMENT_BYTES) {
         throw new Error(`文件“${attachment.name}”超过 10 MB，请选择较小的文件`);
+      }
+      if (attachment.type === VaultItemType.Image && size > MAX_IMPORTED_IMAGE_BYTES) {
+        throw new Error(`图片“${attachment.name}”超过 64 MB，请选择较小的图片`);
+      }
+      if (attachment.type === VaultItemType.Video && size > MAX_IMPORTED_VIDEO_BYTES) {
+        throw new Error(`视频“${attachment.name}”超过 500 MB，请选择较小的视频`);
       }
       target = fs.openSync(targetPath, fs.OpenMode.WRITE_ONLY | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
       await fs.copyFile(source.fd, target.fd);
