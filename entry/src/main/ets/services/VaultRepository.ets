@@ -1175,7 +1175,7 @@ class VaultRepositoryImpl {
         this.deleteStoredAttachments(oldStorageNames);
         await this.cleanupOrphanedAttachments();
       } catch (error) {
-        console.error(`PalmVault deferred post-restore attachment cleanup: ${normalizeError(error).message}`);
+        logRecoverableError('restore-attachment-cleanup', error as Object);
       }
       return { addedCount: preview.addedCount, updatedCount: preview.updatedCount,
         retainedCount: preview.retainedCount, newerCount: preview.newerCount,

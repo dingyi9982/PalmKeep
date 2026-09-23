@@ -35,18 +35,20 @@ export class PrivateCameraService {
   private captureBusy: boolean = false;
   private front: boolean = false;
   private generation: number = 0;
+  private permissionRequested: boolean = false;
 
   getPermissionState(): PrivateCameraPermissionState {
     const permission = 'ohos.permission.CAMERA' as Permissions;
     try {
-      const status = abilityAccessCtrl.createAtManager().getSelfPermissionStatus(permission);
-      if (status === abilityAccessCtrl.PermissionStatus.GRANTED) {
+      const context = AbilityContextHolder.getContext();
+      const status = abilityAccessCtrl.createAtManager()
+        .checkAccessTokenSync(context.applicationInfo.accessTokenId, permission);
+      if (status === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED) {
+        this.permissionRequested = false;
         return PrivateCameraPermissionState.GRANTED;
       }
-      if (status === abilityAccessCtrl.PermissionStatus.NOT_DETERMINED) {
-        return PrivateCameraPermissionState.REQUESTABLE;
-      }
-      return PrivateCameraPermissionState.SETTINGS_REQUIRED;
+      return this.permissionRequested ? PrivateCameraPermissionState.SETTINGS_REQUIRED :
+        PrivateCameraPermissionState.REQUESTABLE;
     } catch (error) {
       return PrivateCameraPermissionState.REQUESTABLE;
     }
@@ -60,15 +62,23 @@ export class PrivateCameraService {
     try {
       if (fromSettings) {
         const statuses = await manager.requestPermissionOnSetting(context, [permission]);
-        return statuses.length > 0 && statuses[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+        const granted = statuses.length > 0 && statuses[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+        this.permissionRequested = !granted;
+        return granted;
       }
       const result = await manager.requestPermissionsFromUser(context, [permission]);
-      return result.authResults.length > 0 && result.authResults[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+      const granted = result.authResults.length > 0 && result.authResults[0] ===
+        abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+      this.permissionRequested = !granted;
+      return granted;
     } catch (error) {
       try {
-        return manager.checkAccessTokenSync(context.applicationInfo.accessTokenId, permission) ===
+        const granted = manager.checkAccessTokenSync(context.applicationInfo.accessTokenId, permission) ===
           abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+        this.permissionRequested = !granted;
+        return granted;
       } catch (checkError) {
+        this.permissionRequested = true;
         return false;
       }
     }

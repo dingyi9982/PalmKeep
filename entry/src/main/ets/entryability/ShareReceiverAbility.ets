@@ -2,7 +2,7 @@ import ShareExtensionAbility from '@ohos.app.ability.ShareExtensionAbility';
 import UIExtensionContentSession from '@ohos.app.ability.UIExtensionContentSession';
 import Want from '@ohos.app.ability.Want';
 import { systemShare } from '@kit.ShareKit';
-import { normalizeError } from '../services/ErrorUtils';
+import { logRecoverableError, normalizeError } from '../services/ErrorUtils';
 import { shareImportService } from '../services/ShareImportService';
 
 export default class ShareReceiverAbility extends ShareExtensionAbility {
@@ -10,14 +10,14 @@ export default class ShareReceiverAbility extends ShareExtensionAbility {
     AppStorage.setOrCreate<string>('vaultShareReceiveError', '');
     try { session.loadContent('pages/ShareReceiver'); }
     catch (error) {
-      console.error(`Failed to load share receiver: ${normalizeError(error).message}`);
+      logRecoverableError('share-content-load', error as Object);
       session.terminateSelf().catch((terminateError: Error): void => {
-        console.warn(`Failed to close share receiver: ${terminateError.message}`);
+        logRecoverableError('share-session-close', terminateError);
       });
       return;
     }
     session.setWindowPrivacyMode(true).catch((error: Error): void => {
-      console.warn(`Share receiver privacy warning: ${error.message}`);
+      logRecoverableError('share-window-privacy', error);
     });
     this.receive(want, session);
   }
@@ -40,7 +40,7 @@ export default class ShareReceiverAbility extends ShareExtensionAbility {
         shareImportService.discardRequest(this.context, stagedRequestId);
       }
       const message = normalizeError(error).message;
-      console.error(`Failed to receive shared content: ${message}`);
+      logRecoverableError('share-receive', error as Object);
       AppStorage.setOrCreate<string>('vaultShareReceiveError', message);
     }
   }

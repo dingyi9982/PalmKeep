@@ -316,7 +316,7 @@ struct Index {
       return true;
     }
     if (this.selectedItem) {
-      if (!this.detailSaving) { this.closeSelectedItem(); }
+      if (!this.detailSaving) { this.requestCloseSelectedItem(); }
       return true;
     }
     if (this.selectedTrashEntry) {
@@ -747,6 +747,7 @@ struct Index {
     await this.refreshQuickUnlockStatus();
     this.unlockMode = this.preferredUnlockMode();
     this.screen = 'locked';
+    await AbilityContextHolder.setBackgroundPrivacyMode(!this.appForeground);
       } catch (error) {
       throw normalizeError(error);
     }
@@ -803,7 +804,10 @@ struct Index {
         }
       }
 
-      if (this.selectedItem) { await this.closeSelectedItem(false); }
+      if (this.selectedItem && !await this.requestCloseSelectedItem(false)) {
+        this.showToastSafely('已保留当前修改，分享内容未导入');
+        return;
+      }
       if (this.selectedTrashEntry) { this.closeTrashDetail(); }
       this.resetNewItem();
       this.newType = request.type;
@@ -949,7 +953,7 @@ struct Index {
     const item = this.selectedItem;
     if (!item || item.type !== VaultItemType.Audio) { return; }
     if (this.detailTitle.trim().length === 0) {
-      this.getUIContext().getPromptAction().showToast({ message: '在线录音前请先填写资料名称' });
+      this.showToastSafely('在线录音前请先填写资料名称');
       return;
     }
     const changed = item.title !== this.detailTitle.trim() || item.username !== this.detailUsername.trim() ||
@@ -979,14 +983,14 @@ struct Index {
         this.selectedAudioCount = this.pendingAudios.length;
         this.newType = VaultItemType.Audio;
         this.showNewItem = true;
-        this.getUIContext().getPromptAction().showToast({ message: '无法追加到原资料，录音已保留为新草稿' });
+        this.showToastSafely('无法追加到原资料，录音已保留为新草稿');
       }
       this.recordingTargetItemId = '';
       return;
     }
     if (this.pendingAudios.length >= MAX_AUDIO_ATTACHMENTS) {
       privateCaptureService.removeMedia([audio]);
-      this.getUIContext().getPromptAction().showToast({ message: '每项音频资料最多保存 50 段音频' });
+      this.showToastSafely('每项音频资料最多保存 50 段音频');
       return;
     }
     this.pendingAudios = this.pendingAudios.concat([audio]);
@@ -1185,6 +1189,40 @@ struct Index {
     }
   }
 
+  private hasUnsavedSelectedItemChanges(): boolean {
+    const item = this.selectedItem;
+    if (!item) { return false; }
+    return item.title !== this.detailTitle.trim() || item.username !== this.detailUsername.trim() ||
+      item.password !== this.detailPassword || item.website !== this.detailWebsite.trim() ||
+      item.notes !== this.detailNotes || item.groupId !== this.detailGroupId;
+  }
+
+  private async requestCloseSelectedItem(refresh: boolean = true): Promise<boolean> {
+    if (!this.selectedItem || this.detailSaving) { return false; }
+    if (this.hasUnsavedSelectedItemChanges()) {
+      try {
+        const choice = await this.getUIContext().getPromptAction().showDialog({
+          title: '保存对资料的修改？',
+          message: '当前修改尚未保存。',
+          buttons: [
+            { text: '继续编辑', color: COLOR_MUTED },
+            { text: '不保存', color: COLOR_DANGER },
+            { text: '保存', color: COLOR_PRIMARY }
+          ]
+        });
+        if (choice.index === 0 || choice.index < 0) { return false; }
+        if (choice.index === 2) {
+          await this.saveSelectedItem();
+          if (this.hasUnsavedSelectedItemChanges()) { return false; }
+        }
+      } catch (error) {
+        return false;
+      }
+    }
+    await this.closeSelectedItem(refresh);
+    return true;
+  }
+
   private closeGestureSetup(): void {
     this.showGestureSetup = false;
     this.firstGesture = [];
@@ -1380,7 +1418,7 @@ struct Index {
         });
       }
     } catch (error) {
-      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+      this.showToastSafely(this.describeError(error));
     }
       } catch (error) {
       throw normalizeError(error);
@@ -2068,6 +2106,9 @@ struct Index {
     if (value.length === 0) { return; }
     try {
       const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, value);
+      const property = data.getProperty();
+      property.shareOption = pasteboard.ShareOption.LOCALDEVICE;
+      data.setProperty(property);
       await pasteboard.getSystemPasteboard().setData(data);
       this.getUIContext().getPromptAction().showToast({ message: `${label}已复制` });
     } catch (error) {
@@ -2324,7 +2365,7 @@ struct Index {
           '音频已存在，未重复添加' : `已添加 ${accepted.length} 段音频，${duplicateCount} 段已存在` });
       }
     } catch (error) {
-      this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+      this.showToastSafely(this.describeError(error));
     }
   }
 
@@ -2760,6 +2801,11 @@ struct Index {
 
   private describeError(error: Object): string {
     return normalizeError(error).message;
+  }
+
+  private showToastSafely(message: string): void {
+    try { this.getUIContext().getPromptAction().showToast({ message: message }); }
+    catch (error) { logRecoverableError('could not show toast', error); }
   }
 
   private countGroup(groupId: number): number {
@@ -4110,7 +4156,7 @@ struct Index {
           createdAt: $detailCreatedAt,
           updatedAt: $detailUpdatedAt,
           busy: this.detailSaving,
-          onClose: (): void => { this.closeSelectedItem(); },
+          onClose: (): void => { this.requestCloseSelectedItem(); },
           onSave: async (): Promise<number> => await this.saveSelectedItem(),
           onRecordAudio: (): void => {
             this.beginDetailAudioRecording();

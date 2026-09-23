@@ -1,4 +1,5 @@
 import { BusinessError } from '@ohos.base';
+import { DEBUG } from 'BuildProfile';
 
 export function normalizeError(error: Object): Error {
   if (error instanceof Error) { return error; }
@@ -11,5 +12,6 @@ export function normalizeError(error: Object): Error {
 }
 
 export function logRecoverableError(operation: string, error: Object): void {
+  if (!DEBUG) { return; }
   console.warn(`PalmVault ${operation}: ${normalizeError(error).message}`);
 }

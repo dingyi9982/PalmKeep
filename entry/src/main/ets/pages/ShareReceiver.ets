@@ -1,4 +1,5 @@
 import common from '@ohos.app.ability.common';
+import { logRecoverableError } from '../services/ErrorUtils';
 
 @Entry
 @Component
@@ -8,7 +9,7 @@ struct ShareReceiver {
   private close(): void {
     const context = this.getUIContext().getHostContext() as common.UIExtensionContext;
     context.terminateSelf().catch((error: Error): void => {
-      console.warn(`Failed to close share page: ${error.message}`);
+      logRecoverableError('share-page-close', error);
     });
   }
 

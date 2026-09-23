@@ -253,7 +253,7 @@ export class VaultBackupService {
     } catch (error) {
       this.removeDirectory(workspace);
       const detail = normalizeError(error).message;
-      console.error(`PalmVault backup inspection failed at ${stage}: ${detail}`);
+      logRecoverableError('backup-inspection', error as Object);
       throw new Error(this.describeInspectionFailure(stage, detail));
     }
   }

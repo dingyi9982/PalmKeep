@@ -1,5 +1,5 @@
 import { abilityAccessCtrl, Permissions, wantAgent } from '@kit.AbilityKit';
-import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
+import backgroundTaskManager from '@ohos.resourceschedule.backgroundTaskManager';
 import fs from '@ohos.file.fs';
 import media from '@ohos.multimedia.media';
 import util from '@ohos.util';
@@ -40,16 +40,20 @@ class AudioRecordingService {
   private completed: PickedMedia[] = [];
   private finishing: boolean = false;
   private backgroundRunning: boolean = false;
+  private permissionRequested: boolean = false;
 
   getPermissionState(): AudioRecordingPermissionState {
     const permission = 'ohos.permission.MICROPHONE' as Permissions;
     try {
-      const status = abilityAccessCtrl.createAtManager().getSelfPermissionStatus(permission);
-      if (status === abilityAccessCtrl.PermissionStatus.GRANTED) { return AudioRecordingPermissionState.GRANTED; }
-      if (status === abilityAccessCtrl.PermissionStatus.NOT_DETERMINED) {
-        return AudioRecordingPermissionState.REQUESTABLE;
+      const context = AbilityContextHolder.getContext();
+      const status = abilityAccessCtrl.createAtManager()
+        .checkAccessTokenSync(context.applicationInfo.accessTokenId, permission);
+      if (status === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED) {
+        this.permissionRequested = false;
+        return AudioRecordingPermissionState.GRANTED;
       }
-      return AudioRecordingPermissionState.SETTINGS_REQUIRED;
+      return this.permissionRequested ? AudioRecordingPermissionState.SETTINGS_REQUIRED :
+        AudioRecordingPermissionState.REQUESTABLE;
     } catch (error) {
       return AudioRecordingPermissionState.REQUESTABLE;
     }
@@ -63,13 +67,25 @@ class AudioRecordingService {
     try {
       if (fromSettings) {
         const statuses = await manager.requestPermissionOnSetting(context, [permission]);
-        return statuses.length > 0 && statuses[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+        const granted = statuses.length > 0 && statuses[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+        this.permissionRequested = !granted;
+        return granted;
       }
       const result = await manager.requestPermissionsFromUser(context, [permission]);
-      return result.authResults.length > 0 && result.authResults[0] ===
+      const granted = result.authResults.length > 0 && result.authResults[0] ===
         abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+      this.permissionRequested = !granted;
+      return granted;
     } catch (error) {
-      return false;
+      try {
+        const granted = manager.checkAccessTokenSync(context.applicationInfo.accessTokenId, permission) ===
+          abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+        this.permissionRequested = !granted;
+        return granted;
+      } catch (checkError) {
+        this.permissionRequested = true;
+        return false;
+      }
     }
   }
 
@@ -126,8 +142,8 @@ class AudioRecordingService {
     this.message = '';
     this.notify();
     this.outputPath = `${AbilityContextHolder.getContext().cacheDir}/pv-record-${util.generateRandomUUID()}.m4a`;
-    this.output = fs.openSync(this.outputPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
     try {
+      this.output = fs.openSync(this.outputPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
       const recorder = await media.createAVRecorder();
       this.recorder = recorder;
       recorder.on('error', (): void => { this.finishAfterInterruption('录音被系统中断'); });
@@ -165,7 +181,11 @@ class AudioRecordingService {
 
   async pause(): Promise<void> {
     if (this.state !== 'recording' || !this.recorder) { return; }
-    await this.recorder.pause();
+    try {
+      await this.recorder.pause();
+    } catch (error) {
+      throw normalizeError(error);
+    }
     this.pausedAt = Date.now();
     this.state = 'paused';
     this.notify();
@@ -173,7 +193,11 @@ class AudioRecordingService {
 
   async resume(): Promise<void> {
     if (this.state !== 'paused' || !this.recorder) { return; }
-    await this.recorder.resume();
+    try {
+      await this.recorder.resume();
+    } catch (error) {
+      throw normalizeError(error);
+    }
     if (this.pausedAt > 0) { this.pausedTotal += Date.now() - this.pausedAt; }
     this.pausedAt = 0;
     this.state = 'recording';
@@ -208,6 +232,8 @@ class AudioRecordingService {
       this.notify();
       if (!this.listener && this.completionListener) { this.completionListener(result); }
       return result;
+    } catch (error) {
+      throw normalizeError(error);
     } finally {
       this.finishing = false;
     }
@@ -250,23 +276,52 @@ class AudioRecordingService {
   }
 
   private async startBackgroundTask(): Promise<void> {
-    const context = AbilityContextHolder.getContext();
-    const agent = await wantAgent.getWantAgent({
-      wants: [{ bundleName: context.abilityInfo.bundleName, abilityName: context.abilityInfo.name }],
-      actionType: wantAgent.OperationType.START_ABILITY,
-      requestCode: 7201,
-      actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
-    });
-    await backgroundTaskManager.startBackgroundRunning(context,
-      backgroundTaskManager.BackgroundMode.AUDIO_RECORDING, agent);
-    this.backgroundRunning = true;
+    if (canIUse('SystemCapability.ResourceSchedule.BackgroundTaskManager.ContinuousTask')) {
+      try {
+        const context = AbilityContextHolder.getContext();
+        const agent = await wantAgent.getWantAgent({
+          wants: [{ bundleName: context.abilityInfo.bundleName, abilityName: context.abilityInfo.name }],
+          actionType: wantAgent.OperationType.START_ABILITY,
+          requestCode: 7201,
+          actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+        });
+        // API 21 tags the namespace with Core while the concrete API uses ContinuousTask.
+        // API 12 devices may expose only the concrete capability, so fall back to it.
+        let backgroundTaskCapability =
+          'SystemCapability.ResourceSchedule.BackgroundTaskManager.Core';
+        if (!canIUse(backgroundTaskCapability)) {
+          backgroundTaskCapability =
+            'SystemCapability.ResourceSchedule.BackgroundTaskManager.ContinuousTask';
+        }
+        if (canIUse(backgroundTaskCapability)) {
+          await backgroundTaskManager.startBackgroundRunning(context,
+            backgroundTaskManager.BackgroundMode.AUDIO_RECORDING, agent);
+          this.backgroundRunning = true;
+          return;
+        }
+      } catch (error) {
+        throw normalizeError(error);
+      }
+    }
+    throw new Error('当前设备不支持后台录音');
   }
 
   private async stopBackgroundTask(): Promise<void> {
     if (!this.backgroundRunning) { return; }
     this.backgroundRunning = false;
-    try { await backgroundTaskManager.stopBackgroundRunning(AbilityContextHolder.getContext()); }
-    catch (error) {}
+    if (canIUse('SystemCapability.ResourceSchedule.BackgroundTaskManager.ContinuousTask')) {
+      try {
+        let backgroundTaskCapability =
+          'SystemCapability.ResourceSchedule.BackgroundTaskManager.Core';
+        if (!canIUse(backgroundTaskCapability)) {
+          backgroundTaskCapability =
+            'SystemCapability.ResourceSchedule.BackgroundTaskManager.ContinuousTask';
+        }
+        if (canIUse(backgroundTaskCapability)) {
+          await backgroundTaskManager.stopBackgroundRunning(AbilityContextHolder.getContext());
+        }
+      } catch (error) {}
+    }
   }
 
   private startTimer(): void {

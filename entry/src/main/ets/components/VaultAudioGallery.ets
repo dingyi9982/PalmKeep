@@ -42,6 +42,11 @@ export struct VaultAudioGallery {
     return `${mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)} MB`;
   }
 
+  private showToast(message: string): void {
+    try { this.getUIContext().getPromptAction().showToast({ message: message }); }
+    catch (error) {}
+  }
+
   private async addAudio(): Promise<void> {
     if (this.busy || this.readOnly) { return; }
     try {
@@ -55,7 +60,7 @@ export struct VaultAudioGallery {
       const accepted = unique.slice(0, available);
       const duplicateCount = picked.length - unique.length;
       if (accepted.length === 0) {
-        this.getUIContext().getPromptAction().showToast({ message: '音频已存在，未重复添加' });
+        this.showToast('音频已存在，未重复添加');
         return;
       }
       this.busy = true;
@@ -69,14 +74,12 @@ export struct VaultAudioGallery {
       let message = `已添加 ${accepted.length} 段音频`;
       if (duplicateCount > 0) { message += `，${duplicateCount} 段已存在`; }
       if (unique.length > accepted.length) { message += '，已达到 50 段上限'; }
-      this.getUIContext().getPromptAction().showToast({ message: message });
+      this.showToast(message);
       if (warning.length > 0) {
-        this.getUIContext().getPromptAction().showToast({ message: warning });
+        this.showToast(warning);
       }
     } catch (error) {
-      this.getUIContext().getPromptAction().showToast({
-        message: error instanceof Error ? error.message : '添加音频失败'
-      });
+      this.showToast(error instanceof Error ? error.message : '添加音频失败');
     } finally { this.busy = false; }
   }
 
@@ -93,13 +96,13 @@ export struct VaultAudioGallery {
       const size = await vaultRepository.writeAttachmentToFd(this.itemId, target.fd, attachment.index);
       fs.fsyncSync(target.fd);
       if (size <= 0) { throw new Error('音频内容不可用'); }
-      this.getUIContext().getPromptAction().showToast({ message: '音频已保存' });
+      this.showToast('音频已保存');
     } catch (error) {
-      this.getUIContext().getPromptAction().showToast({
-        message: error instanceof Error ? error.message : '音频下载失败'
-      });
+      this.showToast(error instanceof Error ? error.message : '音频下载失败');
     } finally {
-      if (target) { fs.closeSync(target); }
+      if (target) {
+        try { fs.closeSync(target); } catch (error) {}
+      }
       this.busy = false;
     }
   }
@@ -119,14 +122,19 @@ export struct VaultAudioGallery {
   private async deleteSelected(): Promise<void> {
     if (this.busy || this.readOnly || this.selectedIndexes.length === 0) { return; }
     if (this.selectedIndexes.length >= this.attachments.length) {
-      this.getUIContext().getPromptAction().showToast({ message: '音频资料至少需要保留一段音频' });
+      this.showToast('音频资料至少需要保留一段音频');
       return;
     }
-    const result = await this.getUIContext().getPromptAction().showDialog({
-      title: '删除所选音频？', message: `将永久删除 ${this.selectedIndexes.length} 段音频，此操作不可恢复。`,
-      buttons: [{ text: '取消', color: COLOR_MUTED_DARK }, { text: '删除', color: COLOR_DANGER }]
-    });
-    if (result.index !== 1) { return; }
+    try {
+      const result = await this.getUIContext().getPromptAction().showDialog({
+        title: '删除所选音频？', message: `将永久删除 ${this.selectedIndexes.length} 段音频，此操作不可恢复。`,
+        buttons: [{ text: '取消', color: COLOR_MUTED_DARK }, { text: '删除', color: COLOR_DANGER }]
+      });
+      if (result.index !== 1) { return; }
+    } catch (error) {
+      this.showToast('无法打开删除确认');
+      return;
+    }
     this.busy = true;
     try {
       await vaultRepository.deleteItemAttachments(this.itemId, this.selectedIndexes);
@@ -134,9 +142,9 @@ export struct VaultAudioGallery {
       this.selectedIndexes = [];
       await this.load();
       this.onChanged();
-      this.getUIContext().getPromptAction().showToast({ message: '所选音频已删除' });
+      this.showToast('所选音频已删除');
     } catch (error) {
-      this.getUIContext().getPromptAction().showToast({ message: '删除音频失败' });
+      this.showToast('删除音频失败');
     } finally { this.busy = false; }
   }
 

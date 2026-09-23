@@ -3,6 +3,7 @@ import UIAbility from '@ohos.app.ability.UIAbility';
 import Want from '@ohos.app.ability.Want';
 import window from '@ohos.window';
 import { AbilityContextHolder } from '../services/AbilityContextHolder';
+import { logRecoverableError } from '../services/ErrorUtils';
 import { vaultRepository } from '../services/VaultRepository';
 import { audioRecordingService } from '../services/AudioRecordingService';
 
@@ -21,7 +22,7 @@ export default class EntryAbility extends UIAbility {
   onDestroy(): void {
     if (audioRecordingService.isActive()) {
       audioRecordingService.finish().catch((error: Error): void => {
-        console.warn(`PalmVault recording finalization warning: ${error.message}`);
+        logRecoverableError('recording-finalize', error);
       });
     }
   }
@@ -37,17 +38,18 @@ export default class EntryAbility extends UIAbility {
         AbilityContextHolder.setMainWindow(mainWindow);
         AbilityContextHolder.setPrivacyMode(false);
       }).catch((error: Error): void => {
-        console.error(`Failed to obtain PalmVault window: ${error.message}`);
+        logRecoverableError('window-obtain', error);
       });
     } catch (error) {
-      console.error(`Failed to request PalmVault window: ${error}`);
+      logRecoverableError('window-request', error as Object);
     }
     windowStage.loadContent('pages/Index').catch((error: Error): void => {
-      console.error(`Failed to load PalmVault: ${error.message}`);
+      logRecoverableError('content-load', error);
     });
   }
 
   onBackground(): void {
+    AbilityContextHolder.setBackgroundPrivacyMode(true);
     AppStorage.setOrCreate<boolean>('vaultAppForeground', false);
     if (AppStorage.get<boolean>('vaultLifecycleSuppressed') ?? false) {
       this.backgroundAt = 0;
@@ -65,12 +67,14 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     AppStorage.setOrCreate<boolean>('vaultAppForeground', true);
     if (this.backgroundAt === 0) {
+      AbilityContextHolder.setBackgroundPrivacyMode(false);
       return;
     }
     const backgroundDuration = Date.now() - this.backgroundAt;
     this.backgroundAt = 0;
     const autoLockMinutes = AppStorage.get<number>('vaultAutoLockMinutes') ?? 10;
     if (autoLockMinutes < 0 || backgroundDuration < autoLockMinutes * 60 * 1000) {
+      AbilityContextHolder.setBackgroundPrivacyMode(false);
       return;
     }
     this.lockForLifecycle();
@@ -79,7 +83,7 @@ export default class EntryAbility extends UIAbility {
   private lockForLifecycle(): void {
     AppStorage.setOrCreate<boolean>('vaultLockedByLifecycle', true);
     vaultRepository.close().catch((error: Error): void => {
-      console.warn(`PalmVault close warning: ${error.message}`);
+      logRecoverableError('vault-close', error);
     });
   }
 
