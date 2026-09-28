@@ -16,6 +16,7 @@ Set-Location -LiteralPath $repoRoot
 $appProfilePath = Join-Path $repoRoot 'AppScope\app.json5'
 $versionScript = Join-Path $PSScriptRoot 'release-version.ps1'
 $preflightScript = Join-Path $PSScriptRoot 'preflight.ps1'
+$verifyReleaseAppScript = Join-Path $PSScriptRoot 'verify-release-app.ps1'
 $versionFiles = @('AppScope/app.json5', 'oh-package.json5', 'entry/oh-package.json5')
 $tagName = "v$VersionName"
 $releaseDirectory = Join-Path $repoRoot 'release'
@@ -108,34 +109,45 @@ try {
     Assert-CleanRepository
   }
 
-  Write-Host '3/6 Creating release tag...'
-  Invoke-CheckedScript -Path $versionScript -Arguments @('-Action', 'Tag')
-  $tagged = $true
-
-  Write-Host '4/6 Building signed Release HAP...'
+  Write-Host '3/6 Building signed Release APP...'
   $env:DEVECO_SDK_HOME = $DevEcoSdkHome
   $env:JAVA_HOME = $JavaHome
   $env:Path = (Join-Path $JavaHome 'bin') + ';' + $env:Path
-  & $NodePath $HvigorPath --no-daemon --mode module -p product=default -p buildMode=release assembleHap
+  $buildStartedAt = [DateTime]::UtcNow.AddSeconds(-2)
+  & $NodePath $HvigorPath --no-daemon --mode project -p product=default -p buildMode=release assembleApp
   if ($LASTEXITCODE -ne 0) {
-    throw 'Release build failed.'
+    throw 'Release APP build failed.'
   }
 
   $profile = Get-Content -Raw -Encoding UTF8 $appProfilePath | ConvertFrom-Json
   $actualVersionCode = [int]$profile.app.versionCode
-  $signedHap = Get-ChildItem -Path (Join-Path $repoRoot 'entry\build\default\outputs\default') -Filter '*-signed.hap' -File |
+  $signedApp = Get-ChildItem -Path (Join-Path $repoRoot 'build\outputs\default') -Filter '*-signed.app' -File |
+    Where-Object { $_.LastWriteTimeUtc -ge $buildStartedAt } |
     Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-  if ($null -eq $signedHap) {
-    throw 'The signed Release HAP was not found.'
+  if ($null -eq $signedApp) {
+    throw 'The newly built signed Release APP was not found.'
   }
+  Invoke-CheckedScript -Path $verifyReleaseAppScript -Arguments @(
+    '-AppPath', $signedApp.FullName,
+    '-ExpectedVersionName', $VersionName,
+    '-ExpectedVersionCode', [string]$actualVersionCode,
+    '-DevEcoSdkHome', $DevEcoSdkHome,
+    '-JavaHome', $JavaHome
+  )
+
+  Write-Host '4/6 Archiving verified Release APP...'
   New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
-  $artifactName = "PalmKeep-$VersionName-$actualVersionCode.hap"
+  $artifactName = "PalmKeep-$VersionName-$actualVersionCode.app"
   $artifactPath = Join-Path $releaseDirectory $artifactName
-  Copy-Item -LiteralPath $signedHap.FullName -Destination $artifactPath -Force
+  Copy-Item -LiteralPath $signedApp.FullName -Destination $artifactPath -Force
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifactPath).Hash.ToLowerInvariant()
   [System.IO.File]::WriteAllText("$artifactPath.sha256", "$hash  $artifactName`n", [System.Text.UTF8Encoding]::new($false))
-  Write-Host "5/6 Artifact: $artifactPath"
+  Write-Host "Artifact: $artifactPath"
   Write-Host "SHA-256: $hash"
+
+  Write-Host '5/6 Creating release tag after successful verification...'
+  Invoke-CheckedScript -Path $versionScript -Arguments @('-Action', 'Tag')
+  $tagged = $true
 
   $hasOrigin = $false
   & git -C $repoRoot remote get-url origin *> $null

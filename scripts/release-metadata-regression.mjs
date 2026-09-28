@@ -28,6 +28,8 @@ const sharedImport = read('entry/src/main/ets/services/ShareImportService.ets');
 const repository = read('entry/src/main/ets/services/VaultRepository.ets');
 const shareAbility = read('entry/src/main/ets/entryability/ShareReceiverAbility.ets');
 const preflight = read('scripts/preflight.ps1');
+const release = read('scripts/release.ps1');
+const releaseAppVerifier = read('scripts/verify-release-app.ps1');
 const testRunner = read('scripts/test-core.ps1');
 const preCommitHook = read('.githooks/pre-commit');
 const hookInstaller = read('scripts/install-git-hooks.ps1');
@@ -88,6 +90,19 @@ assert(hvigor.includes("postDependencies: ['assembleHap']") &&
   'every HAP build must execute and verify core unit tests');
 assert(preflight.includes('assembleHap') && preflight.includes('palmKeepCoreTest'),
   'release preflight must rely on the mandatory Hvigor core-test gate');
+assert(release.includes('--mode project') && release.includes('assembleApp') &&
+  release.includes("-Filter '*-signed.app'") && release.includes('.app"'),
+  'the release workflow must build and archive an AppGallery APP package');
+assert(!release.includes('Building signed Release HAP') && !release.includes('PalmKeep-$VersionName-$actualVersionCode.hap'),
+  'the release workflow must not publish a standalone HAP');
+assert(release.includes('verify-release-app.ps1') && releaseAppVerifier.includes('verify-app') &&
+  releaseAppVerifier.includes("'app-distribution-type' -ne 'app_gallery'") &&
+  releaseAppVerifier.includes("content.type -ne 'release'") &&
+  releaseAppVerifier.includes("'*palmkeep_demo*'"),
+  'the release APP must verify its signature, release Profile, distribution type, and Debug-asset exclusion');
+assert(release.indexOf('Building signed Release APP') <
+  release.indexOf('Creating release tag after successful verification'),
+  'the release tag must be created only after the APP build and verification succeed');
 assert(preCommitHook.includes('scripts/test-core.ps1') &&
   preCommitHook.includes('commit aborted') && hookInstaller.includes('core.hooksPath .githooks'),
   'Git commits must be protected by the repository core-test hook');

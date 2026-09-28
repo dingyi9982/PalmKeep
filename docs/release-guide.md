@@ -35,16 +35,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release.ps1 1.0.0
 2. 执行一次 Debug 预检构建；构建系统会先强制执行不涉及界面的核心本地单元测试。
 3. 首次发布直接使用已配置的 `1.0.0 / 1`；后续发布更新 `versionName` 并将 `versionCode` 自动增加 1。
 4. 同步 `AppScope/app.json5`、`oh-package.json5` 和 `entry/oh-package.json5`。
-5. 创建“发布 x.y.z 版本”提交和 `vx.y.z` Git 标签。
-6. 使用 `default + Release` 构建已签名 HAP。
-7. 将安装包和 SHA-256 校验值复制到 `release` 目录。
-8. 如果存在 `origin` 远程仓库，自动推送当前分支和标签。
+5. 创建“发布 x.y.z 版本”提交。
+6. 使用 `default + Release` 执行 `assembleApp`，生成应用市场使用的已签名 APP 聚合包。
+7. 自动校验 APP 签名、Release Profile、`app_gallery` 分发类型、包名、版本、API 版本，并确认未打入 Debug 示例素材。
+8. 将 APP 和 SHA-256 校验值复制到 `release` 目录；验证成功后才创建 `vx.y.z` Git 标签。
+9. 如果存在 `origin` 远程仓库，自动推送当前分支和标签。
 
 产物名称格式为：
 
 ```text
-release/PalmKeep-1.0.0-1.hap
-release/PalmKeep-1.0.0-1.hap.sha256
+release/PalmKeep-1.0.0-1.app
+release/PalmKeep-1.0.0-1.app.sha256
 ```
 
 如果只想在本地生成版本，不推送远程仓库：
@@ -88,7 +89,7 @@ git show <构建标识中的提交哈希>
 - 正式签名 Profile 中的包名必须是 `com.palmkeep.app`。
 - 不要提交 `.p12`、`.cer`、`.p7b`、签名密码或带本机绝对路径的签名配置。
 
-目前本机配置若仍是自动调试签名，脚本虽然可以产出已签名 HAP，但该 HAP 只能用于开发验证，不能代替应用市场正式签名。
+目前本机配置若仍是自动调试签名，脚本虽然可以产出已签名 APP，但验证阶段会因不是 `release/app_gallery` Profile 而终止，不能生成可提交的正式发布产物。
 
 脚本默认使用以下工具路径，可通过同名参数覆盖：
 
@@ -113,7 +114,8 @@ Hvigor: D:\DevEco Studio\tools\hvigor\bin\hvigorw.js
 
 - 在“准备版本”前失败：修复问题后直接重试。
 - 已更新版本文件但尚未提交：检查并提交或恢复这三个版本文件后再重试。
-- 已创建提交或标签：不要直接重复运行同一版本；先确认 Git 历史、标签和产物状态。
+- 已创建提交但未创建标签：修复构建或签名问题后，可以使用同一版本重新运行；脚本会复用当前干净提交。
+- 已创建标签：不要直接重复运行同一版本；先确认 Git 历史、标签和产物状态。
 - 已构建但推送失败：安装包仍在 `release` 目录，可在网络恢复后手动执行 `git push` 和 `git push origin vx.y.z`。
 
 ## 发布前检查清单
@@ -131,5 +133,5 @@ Hvigor: D:\DevEco Studio\tools\hvigor\bin\hvigorw.js
 - [ ] 一键发布脚本执行成功
 - [ ] 核心本地单元测试全部通过
 - [ ] 设置页中的版本和构建标识正确
-- [ ] `release` 中的 HAP 来自对应 Git 标签
+- [ ] `release` 中的 APP 已通过签名与 Profile 自动验证，并来自对应 Git 标签
 - [ ] 隐私声明、权限和核心功能已复核
