@@ -40,6 +40,8 @@ export struct VaultSettingsPanel {
   onCreateBackup: () => void = (): void => {};
   onRestoreBackup: () => void = (): void => {};
   onCheckDataHealth: () => void = (): void => {};
+  onOpenPrivacyPolicy: () => void = (): void => {};
+  onContactUs: () => void = (): void => {};
   onLockVault: () => void = (): void => {};
 
   build() {
@@ -232,6 +234,36 @@ export struct VaultSettingsPanel {
         }
         .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(17)
         .border({ width: 1, color: COLOR_BORDER })
+
+        Column() {
+          Text('关于与隐私').fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
+            .width('100%').padding(15)
+          Row({ space: 12 }) {
+            Stack() { Text('◈').fontSize(21).fontColor(COLOR_PRIMARY) }
+              .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
+            Column({ space: 3 }) {
+              Text('隐私政策').fontSize(14).fontColor(COLOR_TEXT)
+              Text('查看本地存储、相机、麦克风和文件访问说明').fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
+          }
+          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          .onClick((): void => { this.onOpenPrivacyPolicy(); })
+          Row({ space: 12 }) {
+            Stack() { Text('@').fontSize(20).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY) }
+              .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
+            Column({ space: 3 }) {
+              Text('联系我们').fontSize(14).fontColor(COLOR_TEXT)
+              Text('有问题或建议，欢迎发送邮件至 dingyi9982@qq.com').fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
+          }
+          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          .onClick((): void => { this.onContactUs(); })
+        }
+        .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
+        .border({ width: 1, color: COLOR_BORDER })
+
         Button('立即锁定密匣').width('100%').height(50).fontColor(COLOR_PRIMARY)
           .backgroundColor(COLOR_DARK_ACTION).borderRadius(14).onClick((): void => { this.onLockVault(); })
         Text('掌心密匣 PalmKeep').fontSize(12).fontColor(COLOR_PLACEHOLDER)

@@ -42,6 +42,7 @@ import { mediaCompressionService } from '../services/MediaCompressionService';
 import { mediaOcrService } from '../services/MediaOcrService';
 import { privateCaptureService } from '../services/PrivateCaptureService';
 import { audioRecordingService } from '../services/AudioRecordingService';
+import { hostedPrivacyPolicyService } from '../services/HostedPrivacyPolicyService';
 import { MAX_AUDIO_ATTACHMENTS } from '../services/VaultLimits';
 import { PendingShareRequest, shareImportService } from '../services/ShareImportService';
 import { vaultFilePreviewService, VaultFilePreviewResult } from '../services/VaultFilePreviewService';
@@ -2157,6 +2158,31 @@ struct Index {
     }
   }
 
+  private openHostedPrivacyPolicy(): void {
+    try {
+      hostedPrivacyPolicyService.open(AbilityContextHolder.getContext()).catch((error: Error): void => {
+        logRecoverableError('could not open privacy policy', error);
+        this.showToastSafely(this.describeError(error));
+      });
+    } catch (error) {
+      logRecoverableError('could not start privacy policy', error);
+      this.showToastSafely(this.describeError(error));
+    }
+  }
+
+  private openContactEmail(): void {
+    try {
+      AbilityContextHolder.getContext().openLink('mailto:dingyi9982@qq.com', { appLinkingOnly: false })
+        .catch((error: Error): void => {
+          logRecoverableError('could not open contact email', error);
+          this.showToastSafely('未找到可用的邮件应用');
+        });
+    } catch (error) {
+      logRecoverableError('could not start contact email', error);
+      this.showToastSafely('未找到可用的邮件应用');
+    }
+  }
+
   private async applySearch(text: string): Promise<void> {
     try {
     this.searchText = text;
@@ -4053,6 +4079,8 @@ struct Index {
       onCreateBackup: (): void => { this.openCreateBackup(); },
       onRestoreBackup: (): void => { this.openRestoreBackup(false); },
       onCheckDataHealth: (): void => { this.checkAndRepairData(); },
+      onOpenPrivacyPolicy: (): void => { this.openHostedPrivacyPolicy(); },
+      onContactUs: (): void => { this.openContactEmail(); },
       onLockVault: (): void => { this.lockVault(); }
     })
   }
