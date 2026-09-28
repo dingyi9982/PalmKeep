@@ -1,0 +1,80 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {},
+  "buildOptionSet": [
+    {
+      "name": "release",
+      "arkOptions": {
+        "obfuscation": {
+          "ruleOptions": {
+            "enable": true,
+            "files": [
+              "./obfuscation-rules.txt"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "debug",
+      "debuggable": true,
+      "arkOptions": {
+        "obfuscation": {
+          "ruleOptions": {
+            "enable": false
+          }
+        }
+      }
+    }
+  ],
+  "buildModeBinder": [
+    {
+      "buildModeName": "release",
+      "mappings": [
+        {
+          "targetName": "default",
+          "buildOptionName": "release"
+        },
+        {
+          "targetName": "debug",
+          "buildOptionName": "release"
+        }
+      ]
+    },
+    {
+      "buildModeName": "debug",
+      "mappings": [
+        {
+          "targetName": "default",
+          "buildOptionName": "debug"
+        },
+        {
+          "targetName": "debug",
+          "buildOptionName": "debug"
+        }
+      ]
+    }
+  ],
+  "targets": [
+    {
+      "name": "default"
+    },
+    {
+      "name": "debug",
+      "source": {
+        "sourceRoots": [
+          "./src/debug"
+        ]
+      },
+      "resource": {
+        "directories": [
+          "./src/debug/resources",
+          "./src/main/resources"
+        ]
+      }
+    },
+    {
+      "name": "ohosTest"
+    }
+  ]
+}

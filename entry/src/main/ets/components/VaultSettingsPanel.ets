@@ -30,6 +30,8 @@ export struct VaultSettingsPanel {
   @Prop storageUsageLabel: string = '尚未检查';
   @Prop healthStatusLabel: string = '检查数据库、附件与搜索索引';
   @Prop healthBusy: boolean = false;
+  @Prop debugToolsVisible: boolean = false;
+  @Prop debugDemoBusy: boolean = false;
   onToggleFace: () => void = (): void => {};
   onToggleFingerprint: () => void = (): void => {};
   onToggleGesture: () => void = (): void => {};
@@ -42,6 +44,7 @@ export struct VaultSettingsPanel {
   onCheckDataHealth: () => void = (): void => {};
   onOpenPrivacyPolicy: () => void = (): void => {};
   onContactUs: () => void = (): void => {};
+  onGenerateDebugDemoData: () => void = (): void => {};
   onLockVault: () => void = (): void => {};
 
   build() {
@@ -234,6 +237,36 @@ export struct VaultSettingsPanel {
         }
         .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(17)
         .border({ width: 1, color: COLOR_BORDER })
+
+        if (this.debugToolsVisible) {
+          Column() {
+            Row() {
+              Column({ space: 4 }) {
+                Text('Debug 截图工具').fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)
+                Text('仅调试版本可见，不会进入正式版设置界面').fontSize(12).fontColor(COLOR_MUTED)
+              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+              Text('DEBUG').fontSize(10).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY)
+                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                .backgroundColor(COLOR_DARK_TINT).borderRadius(8)
+            }.width('100%').padding(15)
+            Row({ space: 12 }) {
+              Stack() { Text('＋').fontSize(22).fontWeight(FontWeight.Bold).fontColor(COLOR_PRIMARY) }
+                .width(44).height(44).borderRadius(14).backgroundColor(COLOR_DARK_TINT)
+              Column({ space: 3 }) {
+                Text(this.debugDemoBusy ? '正在生成示例数据…' : '生成商店截图示例数据')
+                  .fontSize(14).fontColor(COLOR_TEXT)
+                Text('创建示例分组及账号、笔记、媒体、音频和文件资料')
+                  .fontSize(12).fontColor(COLOR_MUTED)
+              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+              Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
+            }
+            .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+            .enabled(!this.debugDemoBusy).opacity(this.debugDemoBusy ? 0.6 : 1)
+            .onClick((): void => { this.onGenerateDebugDemoData(); })
+          }
+          .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
+          .border({ width: 1, color: COLOR_BORDER })
+        }
 
         Column() {
           Text('关于与隐私').fontSize(15).fontWeight(FontWeight.Bold).fontColor(COLOR_TEXT)

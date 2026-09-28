@@ -11,6 +11,7 @@ node_modules/
 .idea/
 local.properties
 build-profile.json5
+!entry/build-profile.json5
 *.hap
 *.app
 *.tmp*

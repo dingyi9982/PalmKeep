@@ -1,6 +1,6 @@
 import promptAction from '@ohos.promptAction';
 import pasteboard from '@ohos.pasteboard';
-import { VERSION_CODE, VERSION_NAME } from 'BuildProfile';
+import { DEBUG, VERSION_CODE, VERSION_NAME } from 'BuildProfile';
 import { VaultLoadingScreen, VaultLockedScreen, VaultSetupScreen } from '../components/VaultAuthScreens';
 import { VaultSettingsPanel } from '../components/VaultSettingsPanel';
 import { VaultBackupDialog } from '../components/VaultBackupDialog';
@@ -43,6 +43,7 @@ import { mediaOcrService } from '../services/MediaOcrService';
 import { privateCaptureService } from '../services/PrivateCaptureService';
 import { audioRecordingService } from '../services/AudioRecordingService';
 import { hostedPrivacyPolicyService } from '../services/HostedPrivacyPolicyService';
+import { debugDemoDataService, DebugDemoDataResult } from '../services/DebugDemoDataService';
 import { MAX_AUDIO_ATTACHMENTS } from '../services/VaultLimits';
 import { PendingShareRequest, shareImportService } from '../services/ShareImportService';
 import { vaultFilePreviewService, VaultFilePreviewResult } from '../services/VaultFilePreviewService';
@@ -219,6 +220,7 @@ struct Index {
   @State private storageUsageLabel: string = '尚未检查';
   @State private healthStatusLabel: string = '检查数据库、附件与搜索索引';
   @State private healthBusy: boolean = false;
+  @State private debugDemoBusy: boolean = false;
   @State private pendingMedia: PickedMedia[] = [];
   @State private pendingFiles: PickedMedia[] = [];
   @State private pendingAudios: PickedMedia[] = [];
@@ -1877,6 +1879,29 @@ struct Index {
       catch (promptError) { logRecoverableError('could not show data health failure', promptError); }
     } finally {
       this.healthBusy = false;
+    }
+  }
+
+  private async generateDebugDemoData(): Promise<void> {
+    if (!DEBUG || this.debugDemoBusy) { return; }
+    this.debugDemoBusy = true;
+    try {
+      const result: DebugDemoDataResult = await debugDemoDataService.generate();
+      await this.refreshData();
+      if (result.createdGroupCount === 0 && result.createdItemCount === 0) {
+        this.showToastSafely('示例分组和资料已存在，无需重复生成');
+        return;
+      }
+      let message = `已生成 ${result.createdGroupCount} 个分组、${result.createdItemCount} 项资料`;
+      if (result.skippedGroupCount > 0 || result.skippedItemCount > 0) {
+        message += `，跳过 ${result.skippedGroupCount} 个同名分组和 ${result.skippedItemCount} 项已有资料`;
+      }
+      this.showToastSafely(message);
+    } catch (error) {
+      logRecoverableError('could not generate debug demo data', error);
+      this.showToastSafely(`生成示例数据失败：${this.describeError(error)}`);
+    } finally {
+      this.debugDemoBusy = false;
     }
   }
 
@@ -4067,6 +4092,8 @@ struct Index {
       storageUsageLabel: this.storageUsageLabel,
       healthStatusLabel: this.healthStatusLabel,
       healthBusy: this.healthBusy,
+      debugToolsVisible: DEBUG,
+      debugDemoBusy: this.debugDemoBusy,
       onToggleFace: (): void => { this.toggleFace(); },
       onToggleFingerprint: (): void => { this.toggleFingerprint(); },
       onToggleGesture: (): void => {
@@ -4081,6 +4108,7 @@ struct Index {
       onCheckDataHealth: (): void => { this.checkAndRepairData(); },
       onOpenPrivacyPolicy: (): void => { this.openHostedPrivacyPolicy(); },
       onContactUs: (): void => { this.openContactEmail(); },
+      onGenerateDebugDemoData: (): void => { this.generateDebugDemoData(); },
       onLockVault: (): void => { this.lockVault(); }
     })
   }
