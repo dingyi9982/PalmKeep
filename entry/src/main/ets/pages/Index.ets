@@ -67,6 +67,8 @@ import {
   BackupProgress, BackupRestoreResult, BackupStatusRecord, BackupSummary
 } from '../models/VaultBackupModels';
 
+const PAGE_TRANSITION_MS: number = 240;
+
 @Entry
 @Component
 struct Index {
@@ -82,6 +84,7 @@ struct Index {
   private shareRequestId: string = '';
   @State private screen: string = 'loading';
   @State private activeTab: number = 0;
+  @State private appEntranceOpacity: number = 0;
   @State private masterPassword: string = '';
   @State private confirmPassword: string = '';
   @State private busy: boolean = false;
@@ -259,6 +262,19 @@ struct Index {
   private suspendedAudioGroupId: number = 0;
   private detailCloseRefresh: boolean = true;
   private detailCloseResolver?: (closed: boolean) => void = undefined;
+  private appEntranceVersion: number = 0;
+
+  private animateAppEntrance(): void {
+    const version = ++this.appEntranceVersion;
+    this.appEntranceOpacity = 0;
+    setTimeout((): void => {
+      if (version !== this.appEntranceVersion || !this.appForeground ||
+        this.lifecycleLocked || this.lifecycleLockInProgress) { return; }
+      this.getUIContext().animateTo({ duration: PAGE_TRANSITION_MS, curve: Curve.EaseOut }, (): void => {
+        this.appEntranceOpacity = 1;
+      });
+    }, 16);
+  }
 
   private getSecurityService(): VaultSecurityService {
     if (!this.securityService) {
@@ -282,6 +298,7 @@ struct Index {
       }
     });
     this.initialize();
+    this.animateAppEntrance();
   }
 
   onBackPress(): boolean {
@@ -390,7 +407,10 @@ struct Index {
     this.lifecycleLocked = false;
     if (this.screen === 'vault') {
       this.lifecycleLockInProgress = true;
-      this.lockVault().finally((): void => { this.lifecycleLockInProgress = false; });
+      this.lockVault().finally((): void => {
+        this.lifecycleLockInProgress = false;
+        if (this.appForeground && this.screen === 'locked') { this.animateAppEntrance(); }
+      });
     }
   }
 
@@ -402,6 +422,7 @@ struct Index {
 
   private handleAppForeground(): void {
     if (!this.appForeground) { return; }
+    this.animateAppEntrance();
     if (this.screen === 'vault' && audioRecordingService.isActive()) { this.showAudioRecorder = true; }
     setTimeout((): void => { this.consumePendingShare(); }, 0);
   }
@@ -785,7 +806,9 @@ struct Index {
   private async showVaultScreen(): Promise<void> {
     try {
     await AbilityContextHolder.setPrivacyMode(false);
-    this.screen = 'vault';
+    this.getUIContext().animateTo({ duration: PAGE_TRANSITION_MS, curve: Curve.EaseInOut }, (): void => {
+      this.screen = 'vault';
+    });
     await this.resumeAudioAfterUnlock();
     await this.consumePendingShare();
       } catch (error) {
@@ -4107,7 +4130,11 @@ struct Index {
     VaultGroupManager({
       groups: this.groups,
       countGroup: (groupId: number): number => this.countGroup(groupId),
-      onBack: (): void => { this.showGroupManager = false; },
+      onBack: (): void => {
+        this.getUIContext().animateTo({ duration: PAGE_TRANSITION_MS, curve: Curve.EaseInOut }, (): void => {
+          this.showGroupManager = false;
+        });
+      },
       onRename: (group: VaultGroup): void => { this.requestRenameGroup(group); },
       onDelete: (group: VaultGroup): void => { this.requestDeleteGroup(group); }
     })
@@ -4141,7 +4168,11 @@ struct Index {
       onChoosePreferredUnlock: (): void => { this.choosePreferredUnlock(); },
       onChangePassword: (): void => { this.openChangePassword(); },
       onChooseAutoLock: (): void => { this.chooseAutoLockTime(); },
-      onOpenGroupManager: (): void => { this.showGroupManager = true; },
+      onOpenGroupManager: (): void => {
+        this.getUIContext().animateTo({ duration: PAGE_TRANSITION_MS, curve: Curve.EaseInOut }, (): void => {
+          this.showGroupManager = true;
+        });
+      },
       onCreateBackup: (): void => { this.openCreateBackup(); },
       onRestoreBackup: (): void => { this.openRestoreBackup(false); },
       onCheckDataHealth: (): void => { this.checkAndRepairData(); },
@@ -4183,7 +4214,18 @@ struct Index {
     VaultBottomNavigation({
       activeTab: this.activeTab,
       onSelectTab: (index: number): void => {
-        this.activeTab = index;
+        if (index === this.activeTab) {
+          if (index === 3 && this.showGroupManager) {
+            this.getUIContext().animateTo({ duration: PAGE_TRANSITION_MS, curve: Curve.EaseInOut }, (): void => {
+              this.showGroupManager = false;
+            });
+          }
+          return;
+        }
+        this.getUIContext().animateTo({ duration: PAGE_TRANSITION_MS, curve: Curve.EaseInOut }, (): void => {
+          this.activeTab = index;
+          if (index === 3) { this.showGroupManager = false; }
+        });
         if (index !== 0) { this.closeHomeManagement(); }
         if (index !== 1) { this.closeCategoryManagement(); }
         if (index !== 2) {
@@ -4191,7 +4233,6 @@ struct Index {
           this.showTrashMore = false;
         }
         if (index === 2) { this.refreshTrash(); }
-        if (index === 3) { this.showGroupManager = false; }
       },
       onNewItem: (): void => {
         if (this.homeManaging || this.categoryManaging) { return; }
@@ -4205,21 +4246,31 @@ struct Index {
   private vaultScreen(): void {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
-        if (this.activeTab === 0) {
-          this.topBar()
-        }
         Stack() {
           if (this.activeTab === 0) {
-            this.homeTab()
+            Column() {
+              this.topBar()
+              Stack() { this.homeTab() }.layoutWeight(1).width('100%')
+            }
+            .width('100%').height('100%')
+            .transition(TransitionEffect.OPACITY.animation({ duration: PAGE_TRANSITION_MS }))
           } else if (this.activeTab === 1) {
-            this.categoryTab()
+            Stack() { this.categoryTab() }
+              .width('100%').height('100%')
+              .transition(TransitionEffect.OPACITY.animation({ duration: PAGE_TRANSITION_MS }))
           } else if (this.activeTab === 2) {
-            this.trashTab()
+            Stack() { this.trashTab() }
+              .width('100%').height('100%')
+              .transition(TransitionEffect.OPACITY.animation({ duration: PAGE_TRANSITION_MS }))
           } else {
             if (this.showGroupManager) {
-              this.groupManagerTab()
+              Stack() { this.groupManagerTab() }
+                .width('100%').height('100%')
+                .transition(TransitionEffect.OPACITY.animation({ duration: PAGE_TRANSITION_MS }))
             } else {
-              this.settingsTab()
+              Stack() { this.settingsTab() }
+                .width('100%').height('100%')
+                .transition(TransitionEffect.OPACITY.animation({ duration: PAGE_TRANSITION_MS }))
             }
           }
         }
@@ -4825,66 +4876,76 @@ struct Index {
   }
 
   build() {
-    if (this.screen === 'loading') {
-      VaultLoadingScreen()
-    } else if (this.screen === 'setup') {
-      Stack() {
-        VaultSetupScreen({
-          masterPassword: $masterPassword,
-          confirmPassword: $confirmPassword,
-          busy: this.busy,
-          errorMessage: this.errorMessage,
-          onCreateVault: (): void => { this.createVault(); },
-          onRestoreBackup: (): void => { this.openRestoreBackup(true); }
-        })
-        if (this.showBackupDialog) {
-          this.backupDialogOverlay()
-        }
-      }.width('100%').height('100%')
-    } else if (this.screen === 'locked') {
-      Stack() {
-        VaultLockedScreen({
-          masterPassword: $masterPassword,
-          unlockMode: this.unlockMode,
-          busy: this.busy,
-          errorMessage: this.errorMessage,
-          faceEnabled: this.faceEnabled,
-          fingerprintEnabled: this.fingerprintEnabled,
-          gestureEnabled: this.gestureEnabled,
-          onSelectMode: (mode: string): void => { this.selectUnlockMode(mode); },
-          onUnlockPassword: (): void => { this.unlockVault(); },
-          onUnlockFingerprint: (): void => { this.unlockWithFingerprint(); },
-          onUnlockFace: (): void => { this.unlockWithFace(); },
-          onUnlockGesture: (pattern: number[]): void => { this.unlockWithGesture(pattern); },
-          onOpenRecovery: (): void => { this.openRecoveryCenter(); }
-        })
-        if (this.showRecoveryCenter) {
-          RecoveryCenterDialog({
-            newPassword: $recoveryNewPassword,
-            confirmPassword: $recoveryPasswordConfirm,
+    Stack() {
+      if (this.screen === 'loading') {
+        VaultLoadingScreen()
+      } else if (this.screen === 'setup') {
+        Stack() {
+          VaultSetupScreen({
+            masterPassword: $masterPassword,
+            confirmPassword: $confirmPassword,
+            busy: this.busy,
+            errorMessage: this.errorMessage,
+            onCreateVault: (): void => { this.createVault(); },
+            onRestoreBackup: (): void => { this.openRestoreBackup(true); }
+          })
+          if (this.showBackupDialog) {
+            this.backupDialogOverlay()
+          }
+        }.width('100%').height('100%')
+          .transition(TransitionEffect.OPACITY.animation({ duration: PAGE_TRANSITION_MS }))
+      } else if (this.screen === 'locked') {
+        Stack() {
+          VaultLockedScreen({
+            masterPassword: $masterPassword,
+            unlockMode: this.unlockMode,
+            busy: this.busy,
+            errorMessage: this.errorMessage,
             faceEnabled: this.faceEnabled,
             fingerprintEnabled: this.fingerprintEnabled,
-            authenticated: this.recoveryAuthenticated,
-            authLabel: this.recoveryAuthLabel,
-            busy: this.recoveryBusy,
-            onClose: (): void => { this.closeRecoveryCenter(); },
-            onAuthenticateFace: (): void => { this.authenticateRecovery('face'); },
-            onAuthenticateFingerprint: (): void => { this.authenticateRecovery('fingerprint'); },
-            onResetPassword: (): void => { this.resetRecoveredPassword(); },
-            onClearVault: (): void => { this.openResetVault(); }
+            gestureEnabled: this.gestureEnabled,
+            onSelectMode: (mode: string): void => { this.selectUnlockMode(mode); },
+            onUnlockPassword: (): void => { this.unlockVault(); },
+            onUnlockFingerprint: (): void => { this.unlockWithFingerprint(); },
+            onUnlockFace: (): void => { this.unlockWithFace(); },
+            onUnlockGesture: (pattern: number[]): void => { this.unlockWithGesture(pattern); },
+            onOpenRecovery: (): void => { this.openRecoveryCenter(); }
           })
-        }
-        if (this.showResetVault) {
-          ResetVaultDialog({
-            confirmation: $resetVaultConfirmText,
-            busy: this.resetVaultBusy,
-            onClose: (): void => { this.closeResetVault(); },
-            onConfirm: (): void => { this.resetVault(); }
-          })
-        }
-      }.width('100%').height('100%')
-    } else {
-      this.vaultScreen()
+          if (this.showRecoveryCenter) {
+            RecoveryCenterDialog({
+              newPassword: $recoveryNewPassword,
+              confirmPassword: $recoveryPasswordConfirm,
+              faceEnabled: this.faceEnabled,
+              fingerprintEnabled: this.fingerprintEnabled,
+              authenticated: this.recoveryAuthenticated,
+              authLabel: this.recoveryAuthLabel,
+              busy: this.recoveryBusy,
+              onClose: (): void => { this.closeRecoveryCenter(); },
+              onAuthenticateFace: (): void => { this.authenticateRecovery('face'); },
+              onAuthenticateFingerprint: (): void => { this.authenticateRecovery('fingerprint'); },
+              onResetPassword: (): void => { this.resetRecoveredPassword(); },
+              onClearVault: (): void => { this.openResetVault(); }
+            })
+          }
+          if (this.showResetVault) {
+            ResetVaultDialog({
+              confirmation: $resetVaultConfirmText,
+              busy: this.resetVaultBusy,
+              onClose: (): void => { this.closeResetVault(); },
+              onConfirm: (): void => { this.resetVault(); }
+            })
+          }
+        }.width('100%').height('100%')
+          .transition(TransitionEffect.OPACITY.animation({ duration: PAGE_TRANSITION_MS }))
+      } else {
+        Stack() { this.vaultScreen() }
+          .width('100%').height('100%')
+          .transition(TransitionEffect.OPACITY.animation({ duration: PAGE_TRANSITION_MS }))
+      }
     }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(COLOR_BG)
+    .opacity(this.appEntranceOpacity)
   }
 }
