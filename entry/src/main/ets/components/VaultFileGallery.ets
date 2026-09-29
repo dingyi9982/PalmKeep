@@ -27,9 +27,15 @@ export struct VaultFileGallery {
   @State private busy: boolean = false;
   @State private progress: number = 0;
   @State private progressText: string = '';
+  @State private previewableIndexes: number[] = [];
+  private previewSupportVersion: number = 0;
 
   aboutToAppear(): void {
     this.load();
+  }
+
+  aboutToDisappear(): void {
+    this.previewSupportVersion += 1;
   }
 
   private async load(): Promise<void> {
@@ -37,9 +43,29 @@ export struct VaultFileGallery {
     this.attachments = await vaultRepository.listItemAttachments(this.itemId);
     this.selectedIndexes = this.selectedIndexes.filter((index: number): boolean =>
       this.attachments.some((attachment: VaultAttachmentSummary): boolean => attachment.index === index));
+    this.refreshPreviewSupport(this.attachments.slice());
       } catch (error) {
       throw normalizeError(error);
     }
+  }
+
+  private async refreshPreviewSupport(attachments: VaultAttachmentSummary[]): Promise<void> {
+    const version = ++this.previewSupportVersion;
+    const supportedIndexes: number[] = [];
+    this.previewableIndexes = [];
+    for (let index = 0; index < attachments.length; index += 1) {
+      const attachment = attachments[index];
+      const supported = await vaultFilePreviewService.canPreviewStored(this.itemId, attachment);
+      if (version !== this.previewSupportVersion) { return; }
+      if (supported) {
+        supportedIndexes.push(attachment.index);
+        this.previewableIndexes = supportedIndexes.slice();
+      }
+    }
+  }
+
+  private isPreviewable(index: number): boolean {
+    return this.previewableIndexes.indexOf(index) >= 0;
   }
 
   private isSelected(index: number): boolean {
@@ -156,6 +182,8 @@ export struct VaultFileGallery {
     try {
       const result = await vaultFilePreviewService.open(this.itemId, attachment);
       if (result === VaultFilePreviewResult.Unsupported) {
+        this.previewableIndexes = this.previewableIndexes.filter((index: number): boolean =>
+          index !== attachment.index);
         this.getUIContext().getPromptAction().showToast({ message: '该文件暂不支持预览，可下载后用其他应用打开' });
       }
     } catch (error) {
@@ -221,7 +249,7 @@ export struct VaultFileGallery {
       }
       .layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (!this.managing) {
-        if (vaultFilePreviewService.canAttempt(attachment.name)) {
+        if (this.isPreviewable(attachment.index)) {
           Button(ACTION_PREVIEW).height(32).fontSize(11).fontColor(COLOR_PRIMARY_DARK)
             .backgroundColor(COLOR_TRANSPARENT).borderRadius(10)
             .enabled(!this.busy).onClick((): void => { this.preview(attachment); })

@@ -41,6 +41,7 @@ export interface DebugDemoDataResult {
   createdGroupCount: number;
   skippedGroupCount: number;
   createdItemCount: number;
+  updatedItemCount: number;
   skippedItemCount: number;
 }
 
@@ -82,11 +83,11 @@ const DEMO_ITEMS: DemoItemSpec[] = [
     notes: '适合放进年度相册的照片。',
     attachments: [
       { resourceName: 'home-office.png', fileName: '清晨书桌.png', type: VaultItemType.Image,
-        ocrText: '清晨 书桌 绿植 工作记录' },
+        ocrText: '清晨工作记录' },
       { resourceName: 'home-renovation.png', fileName: '装修选材.png', type: VaultItemType.Image,
-        ocrText: '新家装修 材料色卡 尺寸测量' },
+        ocrText: '新家装修\n材料色卡\n尺寸测量' },
       { resourceName: 'mountain-trip.png', fileName: '湖畔日出.png', type: VaultItemType.Image,
-        ocrText: '旅行 湖畔 日出 雪山 相机' }
+        ocrText: '旅行计划\n湖畔日出\n雪山摄影' }
     ]
   },
   {
@@ -154,31 +155,76 @@ class DebugDemoDataService {
     }
 
     const existingItems = await vaultRepository.listItems();
-    const existingKeys = new Set<string>();
+    const existingByKey = new Map<string, VaultItem>();
     existingItems.forEach((item: VaultItem): void => {
-      existingKeys.add(this.itemKey(item.type, item.title));
+      existingByKey.set(this.itemKey(item.type, item.title), item);
     });
     let createdItemCount = 0;
+    let updatedItemCount = 0;
     let skippedItemCount = 0;
     for (let index = 0; index < DEMO_ITEMS.length; index += 1) {
       const spec = DEMO_ITEMS[index];
       const key = this.itemKey(spec.type, spec.title);
-      if (existingKeys.has(key)) {
+      const existing = existingByKey.get(key);
+      if (existing) {
+        if (await this.refreshLegacyImageDemo(existing, spec)) {
+          updatedItemCount += 1;
+          continue;
+        }
         skippedItemCount += 1;
         continue;
       }
       const group = groupByName.get(spec.groupName);
       if (!group) { throw new Error(`无法创建示例资料：缺少分组 ${spec.groupName}`); }
       await this.createItem(spec, group.id);
-      existingKeys.add(key);
       createdItemCount += 1;
     }
     return {
       createdGroupCount: createdGroupCount,
       skippedGroupCount: skippedGroupCount,
       createdItemCount: createdItemCount,
+      updatedItemCount: updatedItemCount,
       skippedItemCount: skippedItemCount
     };
+  }
+
+  private async refreshLegacyImageDemo(existing: VaultItem, spec: DemoItemSpec): Promise<boolean> {
+    if (spec.type !== VaultItemType.Image || spec.title !== '旅途与生活照片' ||
+      existing.notes !== spec.notes || spec.attachments.length === 0) {
+      return false;
+    }
+    const current = await vaultRepository.listItemAttachments(existing.id);
+    if (current.length !== spec.attachments.length) { return false; }
+    let needsRefresh = false;
+    for (let index = 0; index < spec.attachments.length; index += 1) {
+      if (current[index].name !== spec.attachments[index].fileName) { return false; }
+      if (current[index].ocrText !== spec.attachments[index].ocrText) { needsRefresh = true; }
+    }
+    if (!needsRefresh) { return false; }
+    await this.replaceAttachments(existing.id, spec.attachments);
+    return true;
+  }
+
+  private async replaceAttachments(itemId: string, specs: DemoAttachmentSpec[]): Promise<void> {
+    const paths: string[] = [];
+    const attachments: VaultAttachmentInput[] = [];
+    try {
+      for (let index = 0; index < specs.length; index += 1) {
+        const spec = specs[index];
+        const path = await this.copyRawFileToCache(spec.resourceName);
+        paths.push(path);
+        attachments.push({
+          type: spec.type,
+          uri: path,
+          sourceUri: '',
+          name: spec.fileName,
+          ocrText: spec.ocrText
+        });
+      }
+      await vaultRepository.replaceItemAttachments(itemId, attachments);
+    } finally {
+      paths.forEach((path: string): void => { this.removeTemporary(path); });
+    }
   }
 
   private async createItem(spec: DemoItemSpec, groupId: number): Promise<void> {

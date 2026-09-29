@@ -14,32 +14,64 @@ export enum VaultFilePreviewResult {
 
 class VaultFilePreviewService {
   canAttempt(name: string): boolean {
-    switch (this.extension(name)) {
-      case '.pdf':
-      case '.txt':
-      case '.md':
-      case '.csv':
-      case '.json':
-      case '.xml':
-      case '.html':
-      case '.htm':
-      case '.doc':
-      case '.docx':
-      case '.xls':
-      case '.xlsx':
-      case '.ppt':
-      case '.pptx':
-      case '.rtf':
-      case '.jpg':
-      case '.jpeg':
-      case '.png':
-      case '.gif':
-      case '.webp':
-      case '.svg':
-      case '.mp3':
-      case '.wav':
-      case '.mp4': return true;
-      default: return false;
+    return this.extension(name).length > 0;
+  }
+
+  async canPreviewStored(itemId: string, attachment: VaultAttachmentSummary): Promise<boolean> {
+    if (!this.canAttempt(attachment.name)) { return false; }
+    const path = this.previewPath(attachment.name);
+    let target: fs.File | undefined = undefined;
+    try {
+      target = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      const size = await vaultRepository.writeAttachmentToFd(itemId, target.fd, attachment.index);
+      fs.fsyncSync(target.fd);
+      fs.closeSync(target);
+      target = undefined;
+      if (size <= 0) { return false; }
+      return await this.canPreviewPath(path);
+    } catch (error) {
+      logRecoverableError('could not detect stored file preview support', error);
+      return false;
+    } finally {
+      if (target) {
+        try { fs.closeSync(target); }
+        catch (closeError) { logRecoverableError('could not close preview support copy', closeError); }
+      }
+      this.remove(path);
+    }
+  }
+
+  async canPreviewUri(sourceUri: string, name: string): Promise<boolean> {
+    if (!this.canAttempt(name)) { return false; }
+    const path = this.previewPath(name);
+    let source: fs.File | undefined = undefined;
+    let target: fs.File | undefined = undefined;
+    try {
+      source = fs.openSync(sourceUri, fs.OpenMode.READ_ONLY);
+      const size = fs.statSync(source.fd).size;
+      if (size <= 0) { return false; }
+      target = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      await fs.copyFile(source.fd, target.fd);
+      fs.fsyncSync(target.fd);
+      if (fs.statSync(target.fd).size !== size) { return false; }
+      fs.closeSync(target);
+      target = undefined;
+      fs.closeSync(source);
+      source = undefined;
+      return await this.canPreviewPath(path);
+    } catch (error) {
+      logRecoverableError('could not detect pending file preview support', error);
+      return false;
+    } finally {
+      if (target) {
+        try { fs.closeSync(target); }
+        catch (closeError) { logRecoverableError('could not close pending preview support target', closeError); }
+      }
+      if (source) {
+        try { fs.closeSync(source); }
+        catch (closeError) { logRecoverableError('could not close pending preview support source', closeError); }
+      }
+      this.remove(path);
     }
   }
 
@@ -96,12 +128,12 @@ class VaultFilePreviewService {
   }
 
   private async openCopiedPath(path: string, name: string): Promise<VaultFilePreviewResult> {
-    const uri = fileUri.getUriFromPath(path);
     const context = AbilityContextHolder.getContext();
-    if (!await filePreview.canPreview(context, uri)) {
+    if (!await this.canPreviewPath(path)) {
       this.remove(path);
       return VaultFilePreviewResult.Unsupported;
     }
+    const uri = fileUri.getUriFromPath(path);
     await filePreview.openPreview(context, {
       title: name.length > 0 ? name : '未命名文件',
       uri: uri,
@@ -110,6 +142,10 @@ class VaultFilePreviewService {
     // Preview Kit may keep reading the file after openPreview returns. The copy stays in
     // cache so the system can finish rendering it, and the OS can reclaim it safely later.
     return VaultFilePreviewResult.Opened;
+  }
+
+  private async canPreviewPath(path: string): Promise<boolean> {
+    return await filePreview.canPreview(AbilityContextHolder.getContext(), fileUri.getUriFromPath(path));
   }
 
   private previewPath(name: string): string {

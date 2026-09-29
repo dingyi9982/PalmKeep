@@ -174,6 +174,7 @@ struct Index {
   @State private recognitionProgressText: string = '';
   @State private selectedFileCount: number = 0;
   @State private pendingFilePreviewIndex: number = -1;
+  @State private pendingFilePreviewableUris: string[] = [];
   @State private selectedAudioCount: number = 0;
   @State private selectedAudioPreviewIndex: number = 0;
   @State private savingNewItem: boolean = false;
@@ -225,6 +226,7 @@ struct Index {
   @State private pendingFiles: PickedMedia[] = [];
   @State private pendingAudios: PickedMedia[] = [];
   private mediaRecognitionVersion: number = 0;
+  private filePreviewSupportVersion: number = 0;
   private searchVersion: number = 0;
   private vaultRefreshVersion: number = 0;
   private trashRefreshVersion: number = 0;
@@ -832,6 +834,7 @@ struct Index {
       } else if (request.type === VaultItemType.File) {
         this.pendingFiles = request.items;
         this.selectedFileCount = request.items.length;
+        this.refreshPendingFilePreviewSupport();
       } else if (request.type === VaultItemType.Audio) {
         this.pendingAudios = request.items;
         this.selectedAudioCount = request.items.length;
@@ -1888,11 +1891,14 @@ struct Index {
     try {
       const result: DebugDemoDataResult = await debugDemoDataService.generate();
       await this.refreshData();
-      if (result.createdGroupCount === 0 && result.createdItemCount === 0) {
+      if (result.createdGroupCount === 0 && result.createdItemCount === 0 && result.updatedItemCount === 0) {
         this.showToastSafely('示例分组和资料已存在，无需重复生成');
         return;
       }
       let message = `已生成 ${result.createdGroupCount} 个分组、${result.createdItemCount} 项资料`;
+      if (result.updatedItemCount > 0) {
+        message += `，更新 ${result.updatedItemCount} 项旧版示例资料`;
+      }
       if (result.skippedGroupCount > 0 || result.skippedItemCount > 0) {
         message += `，跳过 ${result.skippedGroupCount} 个同名分组和 ${result.skippedItemCount} 项已有资料`;
       }
@@ -2401,6 +2407,7 @@ struct Index {
       if (newFiles.length > 0) {
         this.pendingFiles = this.pendingFiles.concat(newFiles);
         this.selectedFileCount = this.pendingFiles.length;
+        this.refreshPendingFilePreviewSupport();
       }
       if (duplicateCount > 0) {
         const message = newFiles.length === 0 ?
@@ -2544,6 +2551,27 @@ struct Index {
     this.pendingFiles = this.pendingFiles.filter((file: PickedMedia, fileIndex: number): boolean =>
       fileIndex !== index);
     this.selectedFileCount = this.pendingFiles.length;
+    this.refreshPendingFilePreviewSupport();
+  }
+
+  private async refreshPendingFilePreviewSupport(): Promise<void> {
+    const version = ++this.filePreviewSupportVersion;
+    const files = this.pendingFiles.slice();
+    const supportedUris: string[] = [];
+    this.pendingFilePreviewableUris = [];
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const supported = await vaultFilePreviewService.canPreviewUri(file.uri, file.name);
+      if (version !== this.filePreviewSupportVersion) { return; }
+      if (supported) {
+        supportedUris.push(file.uri);
+        this.pendingFilePreviewableUris = supportedUris.slice();
+      }
+    }
+  }
+
+  private isPendingFilePreviewable(uri: string): boolean {
+    return this.pendingFilePreviewableUris.indexOf(uri) >= 0;
   }
 
   private removePendingAudio(index: number): void {
@@ -2561,10 +2589,13 @@ struct Index {
       return;
     }
     const file = this.pendingFiles[index];
+    if (!this.isPendingFilePreviewable(file.uri)) { return; }
     this.pendingFilePreviewIndex = index;
     try {
       const result = await vaultFilePreviewService.openUri(file.uri, file.name);
       if (result === VaultFilePreviewResult.Unsupported) {
+        this.pendingFilePreviewableUris = this.pendingFilePreviewableUris.filter((uri: string): boolean =>
+          uri !== file.uri);
         this.getUIContext().getPromptAction().showToast({ message: '该文件暂不支持预览，可保存后下载查看' });
       }
     } catch (error) {
@@ -2865,10 +2896,12 @@ struct Index {
   }
 
   private clearPendingFiles(): void {
+    this.filePreviewSupportVersion += 1;
     privateCaptureService.removeMedia(this.pendingFiles);
     this.pendingFiles = [];
     this.selectedFileCount = 0;
     this.pendingFilePreviewIndex = -1;
+    this.pendingFilePreviewableUris = [];
   }
 
   private clearPendingAudios(): void {
@@ -4496,7 +4529,7 @@ struct Index {
               Text(file.name)
                 .fontSize(12).fontColor(COLOR_TEXT).maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-              if (vaultFilePreviewService.canAttempt(file.name)) {
+              if (this.isPendingFilePreviewable(file.uri)) {
                 Button(this.pendingFilePreviewIndex === index ? '打开中' : ACTION_PREVIEW)
                   .height(30).fontSize(11).fontColor(COLOR_PRIMARY)
                   .backgroundColor(Color.Transparent).borderRadius(9)
