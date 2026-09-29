@@ -21,7 +21,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-git-hooks.
 
 ## 一键发布
 
-发布前先提交本次所有代码，确保 `git status` 显示工作区干净，然后双击项目根目录的 `release.cmd`。首次发布输入已配置的 `1.0.0`；后续发布输入新的三段式版本号。
+发布前先提交本次所有代码，确保 `git status` 显示工作区干净，然后双击项目根目录的 `release.cmd`。PowerShell 出现 `Release version (first release: 1.0.0)` 提示后，首次发布输入已配置的 `1.0.0`；后续发布输入新的三段式版本号。根批处理保持纯 ASCII，以避免 Windows `cmd.exe` 在 LF 换行下错误解析 UTF-8 中文。
 
 也可以在 PowerShell 中执行：
 

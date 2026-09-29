@@ -36,6 +36,9 @@ $profileResultPath = Join-Path $temporaryDirectory 'profile-result.json'
 New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
 
 try {
+  # Windows PowerShell 5.1 does not load the assembly that defines ZipArchive
+  # when only System.IO.Compression.FileSystem is requested.
+  Add-Type -AssemblyName System.IO.Compression
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   $appStream = [IO.File]::OpenRead($resolvedAppPath)
   $appArchive = [IO.Compression.ZipArchive]::new($appStream, [IO.Compression.ZipArchiveMode]::Read)
@@ -95,15 +98,28 @@ try {
     $appStream.Dispose()
   }
 
-  $signatureOutput = @(& $javaPath -jar $signToolPath verify-app -inFile $resolvedAppPath -inForm zip `
-    -outCertChain $certificatePath -outProfile $profilePath 2>&1)
-  if ($LASTEXITCODE -ne 0) {
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $signatureOutput = @(& $javaPath -jar $signToolPath verify-app -inFile $resolvedAppPath -inForm zip `
+      -outCertChain $certificatePath -outProfile $profilePath 2>&1)
+    $signatureExitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+  if ($signatureExitCode -ne 0) {
     $signatureOutput | ForEach-Object { Write-Host $_ }
     throw 'Release APP signature verification failed.'
   }
-  $profileOutput = @(& $javaPath -jar $signToolPath verify-profile -inFile $profilePath `
-    -outFile $profileResultPath 2>&1)
-  if ($LASTEXITCODE -ne 0) {
+  $ErrorActionPreference = 'Continue'
+  try {
+    $profileOutput = @(& $javaPath -jar $signToolPath verify-profile -inFile $profilePath `
+      -outFile $profileResultPath 2>&1)
+    $profileExitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+  if ($profileExitCode -ne 0) {
     $profileOutput | ForEach-Object { Write-Host $_ }
     throw 'Release APP Profile verification failed.'
   }

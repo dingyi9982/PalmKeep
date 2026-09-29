@@ -1,6 +1,6 @@
 param(
-  [Parameter(Mandatory = $true, Position = 0)]
-  [string]$VersionName,
+  [Parameter(Position = 0)]
+  [string]$VersionName = '',
   [int]$VersionCode = 0,
   [switch]$NoPush,
   [string]$DevEcoSdkHome = 'D:\DevEco Studio\sdk',
@@ -13,6 +13,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -LiteralPath $repoRoot
+if ([string]::IsNullOrWhiteSpace($VersionName)) {
+  $VersionName = Read-Host 'Release version (first release: 1.0.0)'
+}
+$VersionName = $VersionName.Trim()
 $appProfilePath = Join-Path $repoRoot 'AppScope\app.json5'
 $versionScript = Join-Path $PSScriptRoot 'release-version.ps1'
 $preflightScript = Join-Path $PSScriptRoot 'preflight.ps1'
@@ -104,7 +108,7 @@ try {
     Invoke-Git @('diff', '--check') | Out-Null
 
     Invoke-Git (@('add', '--') + $versionFiles) | Out-Null
-    Invoke-Git @('commit', '-m', "发布 $VersionName 版本") | Out-Null
+    Invoke-Git @('commit', '-m', "Release $VersionName") | Out-Null
     $committed = $true
     Assert-CleanRepository
   }

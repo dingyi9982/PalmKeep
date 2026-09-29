@@ -29,6 +29,7 @@ const repository = read('entry/src/main/ets/services/VaultRepository.ets');
 const shareAbility = read('entry/src/main/ets/entryability/ShareReceiverAbility.ets');
 const preflight = read('scripts/preflight.ps1');
 const release = read('scripts/release.ps1');
+const releaseBatch = read('release.cmd');
 const releaseAppVerifier = read('scripts/verify-release-app.ps1');
 const testRunner = read('scripts/test-core.ps1');
 const preCommitHook = read('.githooks/pre-commit');
@@ -93,9 +94,17 @@ assert(preflight.includes('assembleHap') && preflight.includes('palmKeepCoreTest
 assert(release.includes('--mode project') && release.includes('assembleApp') &&
   release.includes("-Filter '*-signed.app'") && release.includes('.app"'),
   'the release workflow must build and archive an AppGallery APP package');
+assert(release.includes("Read-Host 'Release version (first release: 1.0.0)'") &&
+  releaseBatch.includes('scripts\\release.ps1') && !releaseBatch.includes('-VersionName') &&
+  /^[\x00-\x7F]*$/.test(releaseBatch),
+  'the double-click release launcher must remain ASCII-only and delegate interactive input to PowerShell');
 assert(!release.includes('Building signed Release HAP') && !release.includes('PalmKeep-$VersionName-$actualVersionCode.hap'),
   'the release workflow must not publish a standalone HAP');
 assert(release.includes('verify-release-app.ps1') && releaseAppVerifier.includes('verify-app') &&
+  releaseAppVerifier.includes('Add-Type -AssemblyName System.IO.Compression') &&
+  releaseAppVerifier.includes('Add-Type -AssemblyName System.IO.Compression.FileSystem') &&
+  releaseAppVerifier.includes('$signatureExitCode = $LASTEXITCODE') &&
+  releaseAppVerifier.includes('$profileExitCode = $LASTEXITCODE') &&
   releaseAppVerifier.includes("'app-distribution-type' -ne 'app_gallery'") &&
   releaseAppVerifier.includes("content.type -ne 'release'") &&
   releaseAppVerifier.includes("'*palmkeep_demo*'"),
