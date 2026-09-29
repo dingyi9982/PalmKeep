@@ -27,6 +27,8 @@ export struct VaultSettingsPanel {
   @Prop backupStatusLabel: string = '尚未创建备份';
   @Prop backupChangeLabel: string = '当前资料尚未备份';
   @Prop backupNeedsUpdate: boolean = true;
+  @Prop backupReminderLabel: string = '每 7 天';
+  @Prop backupReminderStatusLabel: string = '';
   @Prop storageUsageLabel: string = '尚未检查';
   @Prop healthStatusLabel: string = '检查数据库、附件与搜索索引';
   @Prop healthBusy: boolean = false;
@@ -41,6 +43,7 @@ export struct VaultSettingsPanel {
   onOpenGroupManager: () => void = (): void => {};
   onCreateBackup: () => void = (): void => {};
   onRestoreBackup: () => void = (): void => {};
+  onChooseBackupReminder: () => void = (): void => {};
   onCheckDataHealth: () => void = (): void => {};
   onOpenPrivacyPolicy: () => void = (): void => {};
   onContactUs: () => void = (): void => {};
@@ -194,6 +197,16 @@ export struct VaultSettingsPanel {
             Text('›').fontSize(22).fontColor(COLOR_CHEVRON)
           }.width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
           .onClick((): void => { this.onRestoreBackup(); })
+          Row() {
+            Column({ space: 3 }) {
+              Text('定期备份提醒').fontSize(14).fontColor(COLOR_TEXT)
+              Text(this.backupReminderStatusLabel).fontSize(12).fontColor(COLOR_MUTED)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Text(this.backupReminderLabel).fontSize(12).fontColor(COLOR_PRIMARY)
+            Text('›').fontSize(22).fontColor(COLOR_CHEVRON).margin({ left: 8 })
+          }
+          .width('100%').padding(15).border({ width: { top: 1 }, color: COLOR_BORDER })
+          .onClick((): void => { this.onChooseBackupReminder(); })
         }
         .width('100%').backgroundColor(COLOR_SURFACE).borderRadius(18)
         .border({ width: 1, color: COLOR_BORDER })

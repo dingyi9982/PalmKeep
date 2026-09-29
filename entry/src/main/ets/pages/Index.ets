@@ -4,6 +4,7 @@ import { DEBUG, VERSION_CODE, VERSION_NAME } from 'BuildProfile';
 import { VaultLoadingScreen, VaultLockedScreen, VaultSetupScreen } from '../components/VaultAuthScreens';
 import { VaultSettingsPanel } from '../components/VaultSettingsPanel';
 import { VaultBackupDialog } from '../components/VaultBackupDialog';
+import { VaultBackupReminderDialog } from '../components/VaultBackupReminderDialog';
 import { VaultBottomNavigation } from '../components/VaultBottomNavigation';
 import { VaultGroupManager } from '../components/VaultGroupManager';
 import { VaultCategoryPanel } from '../components/VaultCategoryPanel';
@@ -50,6 +51,9 @@ import { vaultFilePreviewService, VaultFilePreviewResult } from '../services/Vau
 import { vaultRepository } from '../services/VaultRepository';
 import { PreparedVaultBackup, VaultBackupService } from '../services/VaultBackupService';
 import { vaultUiPreferences } from '../services/VaultUiPreferences';
+import {
+  backupReminderDue, localBackupReminderDay, shouldPresentBackupReminder
+} from '../services/VaultBackupReminderPolicy';
 import { BUILD_GIT_LABEL } from '../generated/BuildMetadata';
 import {
   itemDisplayTitle,
@@ -221,6 +225,11 @@ struct Index {
   @State private backupStatusLabel: string = '尚未创建备份';
   @State private backupChangeLabel: string = '当前资料尚未备份';
   @State private backupNeedsUpdate: boolean = true;
+  @State private backupReminderDays: number = 7;
+  @State private backupReminderDue: boolean = false;
+  @State private backupReminderStatusLabel: string = '当前资料已备份';
+  @State private showBackupReminder: boolean = false;
+  @State private backupReminderHasPreviousBackup: boolean = false;
   @State private storageUsageLabel: string = '尚未检查';
   @State private healthStatusLabel: string = '检查数据库、附件与搜索索引';
   @State private healthBusy: boolean = false;
@@ -263,6 +272,8 @@ struct Index {
   private detailCloseRefresh: boolean = true;
   private detailCloseResolver?: (closed: boolean) => void = undefined;
   private appEntranceVersion: number = 0;
+  private backupReminderChecking: boolean = false;
+  private backupReminderLastShownDay: string = '';
 
   private animateAppEntrance(): void {
     const version = ++this.appEntranceVersion;
@@ -302,6 +313,10 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (this.showBackupReminder) {
+      this.showBackupReminder = false;
+      return true;
+    }
     if (this.showDetailCloseConfirm) {
       this.cancelDetailCloseConfirm();
       return true;
@@ -425,6 +440,9 @@ struct Index {
     this.animateAppEntrance();
     if (this.screen === 'vault' && audioRecordingService.isActive()) { this.showAudioRecorder = true; }
     setTimeout((): void => { this.consumePendingShare(); }, 0);
+    if (this.screen === 'vault') {
+      setTimeout((): void => { this.tryShowBackupReminder(); }, PAGE_TRANSITION_MS);
+    }
   }
 
   private async createVault(): Promise<void> {
@@ -741,6 +759,7 @@ struct Index {
     this.categoryBusy = false;
     this.showBatchMoveDialog = false;
     this.categoryGroupId = -1;
+    this.showBackupReminder = false;
     this.categorySort = 'updated';
     this.masterPassword = '';
     this.confirmPassword = '';
@@ -811,6 +830,7 @@ struct Index {
     });
     await this.resumeAudioAfterUnlock();
     await this.consumePendingShare();
+    setTimeout((): void => { this.tryShowBackupReminder(); }, PAGE_TRANSITION_MS);
       } catch (error) {
       throw normalizeError(error);
     }
@@ -1603,6 +1623,39 @@ struct Index {
     }
   }
 
+  private async chooseBackupReminderDays(): Promise<void> {
+    const values: number[] = [7, 30, 0];
+    const labels: string[] = ['每 7 天', '每 30 天', '关闭提醒'];
+    const buttons: [promptAction.Button, promptAction.Button, promptAction.Button] = [
+      { text: `${this.backupReminderDays === 7 ? '✓  ' : ''}${labels[0]}`, color: COLOR_TEXT },
+      { text: `${this.backupReminderDays === 30 ? '✓  ' : ''}${labels[1]}`, color: COLOR_TEXT },
+      { text: `${this.backupReminderDays === 0 ? '✓  ' : ''}${labels[2]}`, color: COLOR_TEXT }
+    ];
+    let selectedIndex = -1;
+    try {
+      const result = await this.getUIContext().getPromptAction().showActionMenu({
+        title: '定期备份提醒', buttons: buttons
+      });
+      selectedIndex = result.index;
+    } catch (_) {
+      return;
+    }
+    if (selectedIndex < 0 || selectedIndex >= values.length) { return; }
+    try {
+      const days = values[selectedIndex];
+      await vaultUiPreferences.setBackupReminderDays(days);
+      this.backupReminderDays = days;
+      await this.refreshBackupTrustStatus();
+      if (days === 0) { this.showBackupReminder = false; }
+    } catch (error) {
+      try {
+        this.getUIContext().getPromptAction().showToast({ message: this.describeError(error) });
+      } catch (toastError) {
+        logRecoverableError('could not show backup reminder setting error', toastError);
+      }
+    }
+  }
+
   private openChangePassword(): void {
     this.currentPassword = '';
     this.changedPassword = '';
@@ -1857,13 +1910,16 @@ struct Index {
 
   private async refreshBackupTrustStatus(knownStatus?: BackupStatusRecord): Promise<void> {
     try {
+      this.backupReminderDays = await vaultUiPreferences.getBackupReminderDays();
+      const status = knownStatus ?? await vaultUiPreferences.getBackupStatus();
+      const revision = this.totalItemCount > 0 && status ? await vaultRepository.getDataRevision() : 0;
+      this.updateBackupReminderState(status, revision);
       if (this.totalItemCount === 0) {
         this.backupStatusLabel = '尚无资料可备份';
         this.backupChangeLabel = '添加资料后即可创建备份';
         this.backupNeedsUpdate = false;
         return;
       }
-      const status = knownStatus ?? await vaultUiPreferences.getBackupStatus();
       if (!status) {
         this.backupStatusLabel = '尚未创建备份';
         this.backupChangeLabel = `${this.totalItemCount} 项资料尚未备份`;
@@ -1872,7 +1928,6 @@ struct Index {
       }
       this.backupStatusLabel = `${this.formatBackupDate(status.createdAt)} · ${status.itemCount} 项资料 · ` +
         `${status.attachmentCount} 个附件 · ${this.formatBackupSize(status.attachmentBytes)}`;
-      const revision = await vaultRepository.getDataRevision();
       this.backupNeedsUpdate = revision !== status.dataRevision;
       if (!this.backupNeedsUpdate) {
         this.backupChangeLabel = '当前资料与上次成功备份一致';
@@ -1882,7 +1937,64 @@ struct Index {
       this.backupChangeLabel = changedCount > 0 ? `${changedCount} 项资料有未备份更改` :
         '分组或附件有未备份更改';
     } catch (error) {
+      this.backupReminderDue = false;
+      this.backupReminderStatusLabel = '暂无法检查备份提醒';
       logRecoverableError('could not refresh backup trust status', error);
+    }
+  }
+
+  private updateBackupReminderState(status: BackupStatusRecord | undefined, revision: number): void {
+    this.backupReminderDue = backupReminderDue(this.backupReminderDays, this.totalItemCount,
+      status, revision, Date.now());
+    if (this.backupReminderDays === 0) {
+      this.backupReminderStatusLabel = '已关闭应用内提醒';
+    } else if (this.totalItemCount === 0) {
+      this.backupReminderStatusLabel = '添加资料后开始检查';
+    } else if (!status) {
+      this.backupReminderStatusLabel = '资料尚未备份';
+    } else if (this.backupReminderDue) {
+      this.backupReminderStatusLabel = '已到期，存在未备份的更改';
+    } else if (revision === status.dataRevision) {
+      this.backupReminderStatusLabel = '当前资料与上次备份一致';
+    } else {
+      this.backupReminderStatusLabel = '有未备份更改，尚未到提醒时间';
+    }
+  }
+
+  private canShowBackupReminder(): boolean {
+    return this.screen === 'vault' && this.appForeground && !this.lifecycleLocked &&
+      !this.lifecycleLockInProgress && !this.busy && !this.backupBusy &&
+      !this.showBackupReminder && !this.showBackupDialog && !this.showNewItem &&
+      !this.showNewGroup && !this.showBatchMoveDialog && !this.showGestureSetup &&
+      !this.showChangePassword && !this.showResetVault && !this.showDetailCloseConfirm &&
+      !this.showAudioRecorder && !this.showTrashMore && !this.selectedItem && !this.selectedTrashEntry &&
+      !this.groupPendingRename && !this.groupPendingDelete && this.captureMode === 'none' &&
+      this.pendingMediaFullScreenIndex < 0 && this.shareRequestId.length === 0;
+  }
+
+  private async tryShowBackupReminder(): Promise<void> {
+    if (this.backupReminderChecking || !this.canShowBackupReminder()) { return; }
+    this.backupReminderChecking = true;
+    try {
+      await this.refreshBackupTrustStatus();
+      if (!this.canShowBackupReminder()) { return; }
+      const now = Date.now();
+      const lastDay = this.backupReminderLastShownDay ||
+        await vaultUiPreferences.getBackupReminderLastDay();
+      if (!this.canShowBackupReminder() ||
+        !shouldPresentBackupReminder(this.backupReminderDue, lastDay, now)) { return; }
+      this.backupReminderHasPreviousBackup = (await vaultUiPreferences.getBackupStatus()) !== undefined;
+      if (!this.canShowBackupReminder()) { return; }
+      const today = localBackupReminderDay(now);
+      this.backupReminderLastShownDay = today;
+      this.showBackupReminder = true;
+      try {
+        await vaultUiPreferences.setBackupReminderLastDay(today);
+      } catch (error) {
+        logRecoverableError('could not save backup reminder day', error);
+      }
+    } finally {
+      this.backupReminderChecking = false;
     }
   }
 
@@ -4155,6 +4267,8 @@ struct Index {
       backupStatusLabel: this.backupStatusLabel,
       backupChangeLabel: this.backupChangeLabel,
       backupNeedsUpdate: this.backupNeedsUpdate,
+      backupReminderLabel: this.backupReminderDays === 0 ? '已关闭' : `每 ${this.backupReminderDays} 天`,
+      backupReminderStatusLabel: this.backupReminderStatusLabel,
       storageUsageLabel: this.storageUsageLabel,
       healthStatusLabel: this.healthStatusLabel,
       healthBusy: this.healthBusy,
@@ -4175,6 +4289,7 @@ struct Index {
       },
       onCreateBackup: (): void => { this.openCreateBackup(); },
       onRestoreBackup: (): void => { this.openRestoreBackup(false); },
+      onChooseBackupReminder: (): void => { this.chooseBackupReminderDays(); },
       onCheckDataHealth: (): void => { this.checkAndRepairData(); },
       onOpenPrivacyPolicy: (): void => { this.openHostedPrivacyPolicy(); },
       onContactUs: (): void => { this.openContactEmail(); },
@@ -4377,6 +4492,16 @@ struct Index {
       }
       if (this.showBackupDialog) {
         this.backupDialogOverlay()
+      }
+      if (this.showBackupReminder) {
+        VaultBackupReminderDialog({
+          hasPreviousBackup: this.backupReminderHasPreviousBackup,
+          onLater: (): void => { this.showBackupReminder = false; },
+          onBackupNow: (): void => {
+            this.showBackupReminder = false;
+            this.openCreateBackup();
+          }
+        })
       }
       if (this.pendingMediaFullScreenIndex >= 0 &&
         this.pendingMediaFullScreenIndex < this.pendingMedia.length) {
