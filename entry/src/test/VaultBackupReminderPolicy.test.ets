@@ -44,5 +44,12 @@ export default function vaultBackupReminderPolicyTest(): void {
       expect(backupReminderDue(7, 1, oldBackup, 2, now + DAY_MS)).assertEqual(true);
       expect(backupReminderDue(7, 1, status(now, 2), 2, now + DAY_MS)).assertEqual(false);
     });
+
+    it('treats a freshly restored old backup as current until data changes', 0, (): void => {
+      const now = new Date(2026, 0, 20, 12).getTime();
+      const restoredBackup = status(now - 90 * DAY_MS, 42);
+      expect(backupReminderDue(7, 1, restoredBackup, 42, now)).assertEqual(false);
+      expect(backupReminderDue(7, 1, restoredBackup, 43, now)).assertEqual(true);
+    });
   });
 }

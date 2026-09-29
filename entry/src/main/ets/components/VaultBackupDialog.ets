@@ -15,6 +15,7 @@ import {
 export struct VaultBackupDialog {
   @Link password: string;
   @Prop action: string = 'create';
+  @Prop freshInstall: boolean = false;
   @Prop stage: string = 'password';
   @Prop busy: boolean = false;
   @Prop errorMessage: string = '';
@@ -59,7 +60,9 @@ export struct VaultBackupDialog {
         }.width('100%')
 
         if (this.stage === 'password') {
-          Text(this.action === 'create' ? '使用当前密匣密码加密备份。' : '请输入创建该备份时使用的密匣密码。')
+          Text(this.action === 'create' ? '使用当前密匣密码加密备份。' :
+            (this.freshInstall ? '请输入备份文件密码。恢复成功后，今后打开应用也使用这个密码登录。' :
+              '请输入创建该备份时使用的密匣密码。'))
             .fontSize(13).fontColor(COLOR_MUTED).width('100%')
           TextInput({ placeholder: '密码', text: this.password })
             .type(InputType.Password).height(48).fontColor(COLOR_TEXT).placeholderColor(COLOR_PLACEHOLDER)
@@ -80,6 +83,10 @@ export struct VaultBackupDialog {
             .backgroundColor(COLOR_PRIMARY_TINT).borderRadius(10)
           Text(this.restorePreviewText())
             .fontSize(12).fontColor(COLOR_MUTED).width('100%')
+          if (this.freshInstall) {
+            Text('恢复后，本机密匣的登录密码就是这份备份文件的密码。')
+              .fontSize(12).fontColor(COLOR_PRIMARY).width('100%')
+          }
         } else {
           Column({ space: 10 }) {
             LoadingProgress().width(32).height(32).color(COLOR_PRIMARY)

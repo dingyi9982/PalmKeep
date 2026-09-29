@@ -5,6 +5,7 @@ import { VaultLoadingScreen, VaultLockedScreen, VaultSetupScreen } from '../comp
 import { VaultSettingsPanel } from '../components/VaultSettingsPanel';
 import { VaultBackupDialog } from '../components/VaultBackupDialog';
 import { VaultBackupReminderDialog } from '../components/VaultBackupReminderDialog';
+import { VaultRestoreLoginNotice } from '../components/VaultRestoreLoginNotice';
 import { VaultBottomNavigation } from '../components/VaultBottomNavigation';
 import { VaultGroupManager } from '../components/VaultGroupManager';
 import { VaultCategoryPanel } from '../components/VaultCategoryPanel';
@@ -229,6 +230,7 @@ struct Index {
   @State private backupReminderDue: boolean = false;
   @State private backupReminderStatusLabel: string = '当前资料已备份';
   @State private showBackupReminder: boolean = false;
+  @State private showRestoreLoginNotice: boolean = false;
   @State private backupReminderHasPreviousBackup: boolean = false;
   @State private storageUsageLabel: string = '尚未检查';
   @State private healthStatusLabel: string = '检查数据库、附件与搜索索引';
@@ -313,6 +315,10 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (this.showRestoreLoginNotice) {
+      this.showRestoreLoginNotice = false;
+      return true;
+    }
     if (this.showBackupReminder) {
       this.showBackupReminder = false;
       return true;
@@ -624,8 +630,9 @@ struct Index {
     this.backupStage = 'running';
     this.backupError = '';
     let securityCreated = false;
+    const freshInstall = this.restoringFreshInstall;
     try {
-      if (this.restoringFreshInstall) {
+      if (freshInstall) {
         const security = this.getSecurityService();
         const key = await security.createMasterPassword(this.backupPassword);
         securityCreated = true;
@@ -636,15 +643,23 @@ struct Index {
         (progress: BackupProgress): void => { this.updateBackupProgress(progress); });
       this.preparedBackup = undefined;
       await this.refreshData(true);
-      if (this.restoringFreshInstall) {
+      if (freshInstall) {
+        await this.rememberSuccessfulBackup(service.summary(prepared.manifest));
         await this.refreshQuickUnlockStatus();
         await this.showVaultScreen();
       }
       this.backupBusy = false;
       this.closeBackupDialog();
-      this.getUIContext().getPromptAction().showToast({
-        message: this.restoreResultText(result)
-      });
+      this.restoringFreshInstall = false;
+      if (freshInstall) {
+        this.masterPassword = '';
+        this.confirmPassword = '';
+        this.showRestoreLoginNotice = true;
+      } else {
+        this.getUIContext().getPromptAction().showToast({
+          message: this.restoreResultText(result)
+        });
+      }
     } catch (error) {
       this.preparedBackup = undefined;
       if (securityCreated) {
@@ -760,6 +775,7 @@ struct Index {
     this.showBatchMoveDialog = false;
     this.categoryGroupId = -1;
     this.showBackupReminder = false;
+    this.showRestoreLoginNotice = false;
     this.categorySort = 'updated';
     this.masterPassword = '';
     this.confirmPassword = '';
@@ -1964,7 +1980,7 @@ struct Index {
   private canShowBackupReminder(): boolean {
     return this.screen === 'vault' && this.appForeground && !this.lifecycleLocked &&
       !this.lifecycleLockInProgress && !this.busy && !this.backupBusy &&
-      !this.showBackupReminder && !this.showBackupDialog && !this.showNewItem &&
+      !this.showBackupReminder && !this.showRestoreLoginNotice && !this.showBackupDialog && !this.showNewItem &&
       !this.showNewGroup && !this.showBatchMoveDialog && !this.showGestureSetup &&
       !this.showChangePassword && !this.showResetVault && !this.showDetailCloseConfirm &&
       !this.showAudioRecorder && !this.showTrashMore && !this.selectedItem && !this.selectedTrashEntry &&
@@ -4303,6 +4319,7 @@ struct Index {
     VaultBackupDialog({
       password: $backupPassword,
       action: this.backupAction,
+      freshInstall: this.restoringFreshInstall,
       stage: this.backupStage,
       busy: this.backupBusy,
       errorMessage: this.backupError,
@@ -4502,6 +4519,9 @@ struct Index {
             this.openCreateBackup();
           }
         })
+      }
+      if (this.showRestoreLoginNotice) {
+        VaultRestoreLoginNotice({ onConfirm: (): void => { this.showRestoreLoginNotice = false; } })
       }
       if (this.pendingMediaFullScreenIndex >= 0 &&
         this.pendingMediaFullScreenIndex < this.pendingMedia.length) {
