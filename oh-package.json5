@@ -1,7 +1,7 @@
 {
   "modelVersion": "6.0.1",
   "name": "palmkeep",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "掌心密匣：本地管理账号、笔记、媒体、音频和文件",
   "main": "",
   "author": "PalmKeep",
