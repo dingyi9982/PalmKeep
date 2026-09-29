@@ -12,6 +12,7 @@ $appProfilePath = Join-Path $repoRoot 'AppScope\app.json5'
 $rootPackagePath = Join-Path $repoRoot 'oh-package.json5'
 $entryPackagePath = Join-Path $repoRoot 'entry\oh-package.json5'
 $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
+. (Join-Path $PSScriptRoot 'release-version-policy.ps1')
 
 function Invoke-Git {
   param([string[]]$Arguments)
@@ -31,14 +32,6 @@ function Assert-CleanRepository {
 
 function Read-AppProfile {
   return Get-Content -Raw -Encoding UTF8 $appProfilePath | ConvertFrom-Json
-}
-
-function ConvertTo-ReleaseVersion {
-  param([string]$Value, [string]$Label)
-  if ($Value -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
-    throw "$Label '$Value' is invalid. Expected x.y.z, for example 1.0.1."
-  }
-  return [System.Version]::Parse($Value)
 }
 
 function Replace-JsonString {
@@ -65,13 +58,11 @@ if ($Action -eq 'Tag') {
   exit 0
 }
 
-$newVersion = ConvertTo-ReleaseVersion -Value $VersionName -Label 'VersionName'
 $profile = Read-AppProfile
 $currentVersionName = [string]$profile.app.versionName
-$currentVersion = ConvertTo-ReleaseVersion -Value $currentVersionName -Label 'Current versionName'
-if ($newVersion -le $currentVersion) {
-  throw "The new versionName $VersionName must be greater than $currentVersionName."
-}
+$releaseTags = @(Invoke-Git @('tag', '--list', 'v*'))
+[void](Assert-PalmKeepReleaseVersion -RequestedVersionName $VersionName `
+  -CurrentVersionName $currentVersionName -CurrentVersionCode ([int]$profile.app.versionCode) -Tags $releaseTags)
 
 $currentVersionCode = [int]$profile.app.versionCode
 $nextVersionCode = if ($VersionCode -gt 0) { $VersionCode } else { $currentVersionCode + 1 }

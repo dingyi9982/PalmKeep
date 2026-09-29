@@ -13,16 +13,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location -LiteralPath $repoRoot
-if ([string]::IsNullOrWhiteSpace($VersionName)) {
-  $VersionName = Read-Host 'Release version (first release: 1.0.0)'
-}
-$VersionName = $VersionName.Trim()
+. (Join-Path $PSScriptRoot 'release-version-policy.ps1')
 $appProfilePath = Join-Path $repoRoot 'AppScope\app.json5'
 $versionScript = Join-Path $PSScriptRoot 'release-version.ps1'
 $preflightScript = Join-Path $PSScriptRoot 'preflight.ps1'
 $verifyReleaseAppScript = Join-Path $PSScriptRoot 'verify-release-app.ps1'
 $versionFiles = @('AppScope/app.json5', 'oh-package.json5', 'entry/oh-package.json5')
-$tagName = "v$VersionName"
+$tagName = ''
 $releaseDirectory = Join-Path $repoRoot 'release'
 $powerShellPath = (Get-Process -Id $PID).Path
 $prepared = $false
@@ -54,9 +51,25 @@ function Invoke-CheckedScript {
 }
 
 try {
-  if ($VersionName -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
-    throw "VersionName '$VersionName' is invalid. Expected x.y.z."
+  $profileBeforeRelease = Get-Content -Raw -Encoding UTF8 $appProfilePath | ConvertFrom-Json
+  $releaseTags = @(Invoke-Git @('tag', '--list', 'v*'))
+  $latestVersion = Get-PalmKeepReleaseBaseline `
+    -CurrentVersionName ([string]$profileBeforeRelease.app.versionName) -Tags $releaseTags
+  if ([string]::IsNullOrWhiteSpace($VersionName)) {
+    $VersionName = Read-Host "Release version (latest: $latestVersion)"
   }
+  $VersionName = $VersionName.Trim()
+  $tagName = "v$VersionName"
+  $versionsBeforeRelease = @(
+    [string]$profileBeforeRelease.app.versionName,
+    [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'oh-package.json5') | ConvertFrom-Json).version),
+    [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'entry\oh-package.json5') | ConvertFrom-Json).version)
+  )
+  $versionAlreadyPrepared = @($versionsBeforeRelease | Where-Object { $_ -ne $VersionName }).Count -eq 0
+  [void](Assert-PalmKeepReleaseVersion -RequestedVersionName $VersionName `
+    -CurrentVersionName ([string]$profileBeforeRelease.app.versionName) `
+    -CurrentVersionCode ([int]$profileBeforeRelease.app.versionCode) -Tags $releaseTags `
+    -AllowInitialConfiguredVersion)
   Assert-CleanRepository
   $branch = [string](Invoke-Git @('symbolic-ref', '--quiet', '--short', 'HEAD'))
   if ([string]::IsNullOrWhiteSpace($branch)) {
@@ -66,13 +79,6 @@ try {
   if ($LASTEXITCODE -eq 0) {
     throw "Tag $tagName already exists."
   }
-  $profileBeforeRelease = Get-Content -Raw -Encoding UTF8 $appProfilePath | ConvertFrom-Json
-  $versionsBeforeRelease = @(
-    [string]$profileBeforeRelease.app.versionName,
-    [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'oh-package.json5') | ConvertFrom-Json).version),
-    [string]((Get-Content -Raw -Encoding UTF8 (Join-Path $repoRoot 'entry\oh-package.json5') | ConvertFrom-Json).version)
-  )
-  $versionAlreadyPrepared = @($versionsBeforeRelease | Where-Object { $_ -ne $VersionName }).Count -eq 0
 
   Write-Host '1/6 Running preflight...'
   Invoke-CheckedScript -Path $preflightScript -Arguments @(

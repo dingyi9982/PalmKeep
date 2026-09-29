@@ -30,6 +30,9 @@ const shareAbility = read('entry/src/main/ets/entryability/ShareReceiverAbility.
 const preflight = read('scripts/preflight.ps1');
 const release = read('scripts/release.ps1');
 const releaseBatch = read('release.cmd');
+const releaseVersion = read('scripts/release-version.ps1');
+const releaseVersionPolicy = read('scripts/release-version-policy.ps1');
+const releaseVersionPolicyTest = read('scripts/test-release-version-policy.ps1');
 const releaseAppVerifier = read('scripts/verify-release-app.ps1');
 const testRunner = read('scripts/test-core.ps1');
 const preCommitHook = read('.githooks/pre-commit');
@@ -94,10 +97,19 @@ assert(preflight.includes('assembleHap') && preflight.includes('palmKeepCoreTest
 assert(release.includes('--mode project') && release.includes('assembleApp') &&
   release.includes("-Filter '*-signed.app'") && release.includes('.app"'),
   'the release workflow must build and archive an AppGallery APP package');
-assert(release.includes("Read-Host 'Release version (first release: 1.0.0)'") &&
+assert(release.includes('Get-PalmKeepReleaseBaseline') &&
+  release.includes('Read-Host "Release version (latest: $latestVersion)"') &&
   releaseBatch.includes('scripts\\release.ps1') && !releaseBatch.includes('-VersionName') &&
   /^[\x00-\x7F]*$/.test(releaseBatch),
   'the double-click release launcher must remain ASCII-only and delegate interactive input to PowerShell');
+assert(release.includes('Assert-PalmKeepReleaseVersion') &&
+  releaseVersion.includes('Assert-PalmKeepReleaseVersion') &&
+  releaseVersionPolicy.includes("must be greater than latest version") &&
+  releaseVersionPolicy.includes('Get-PalmKeepReleaseBaseline') &&
+  releaseVersionPolicyTest.includes("Assert-Rejected -Requested '1.0.1'") &&
+  releaseVersionPolicyTest.includes("Assert-Rejected -Requested '1.0.0'") &&
+  preflight.includes('test-release-version-policy.ps1'),
+  'release scripts must enforce and test strict x.y.z version progression');
 assert(!release.includes('Building signed Release HAP') && !release.includes('PalmKeep-$VersionName-$actualVersionCode.hap'),
   'the release workflow must not publish a standalone HAP');
 assert(release.includes('verify-release-app.ps1') && releaseAppVerifier.includes('verify-app') &&

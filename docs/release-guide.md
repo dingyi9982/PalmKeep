@@ -21,7 +21,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-git-hooks.
 
 ## 一键发布
 
-发布前先提交本次所有代码，确保 `git status` 显示工作区干净，然后双击项目根目录的 `release.cmd`。PowerShell 出现 `Release version (first release: 1.0.0)` 提示后，首次发布输入已配置的 `1.0.0`；后续发布输入新的三段式版本号。根批处理保持纯 ASCII，以避免 Windows `cmd.exe` 在 LF 换行下错误解析 UTF-8 中文。
+发布前先提交本次所有代码，确保 `git status` 显示工作区干净，然后双击项目根目录的 `release.cmd`。PowerShell 会显示当前配置版本与本地发布标签中的最高版本，例如 `Release version (latest: 1.0.1)`；请输入一个更高的三段式版本号。根批处理保持纯 ASCII，以避免 Windows `cmd.exe` 在 LF 换行下错误解析 UTF-8 中文。
 
 也可以在 PowerShell 中执行：
 
@@ -102,7 +102,8 @@ Hvigor: D:\DevEco Studio\tools\hvigor\bin\hvigorw.js
 
 ## 版本规则
 
-- `versionName` 必须是 `x.y.z`。首次发布允许使用当前已配置且尚未创建标签的 `1.0.0`；之后必须高于当前版本。
+- `versionName` 必须是无前导零的 `x.y.z`，例如 `1.0.1`；`1.0`、`01.0.0`、`v1.0.0` 和带预发布后缀的版本均会被拒绝。
+- 除尚无发布标签且 `versionCode` 为 `1` 的首次预置版本外，新版本必须严格大于当前配置版本以及全部本地 `vX.Y.Z` 发布标签中的最高版本。例如当前最高版本为 `1.0.1` 时，`1.0.0` 和 `1.0.1` 都会被拒绝。
 - 修复问题：`1.0.0 → 1.0.1`。
 - 增加一般功能：`1.0.1 → 1.1.0`。
 - 重大不兼容改版：`1.1.0 → 2.0.0`。
@@ -114,7 +115,7 @@ Hvigor: D:\DevEco Studio\tools\hvigor\bin\hvigorw.js
 
 - 在“准备版本”前失败：修复问题后直接重试。
 - 已更新版本文件但尚未提交：检查并提交或恢复这三个版本文件后再重试。
-- 已创建提交但未创建标签：修复构建或签名问题后，可以使用同一版本重新运行；脚本会复用当前干净提交。
+- 已创建版本提交但未创建标签：在严格递增规则下，不再重复使用同一版本；修复问题后使用更高版本重新发布。
 - 已创建标签：不要直接重复运行同一版本；先确认 Git 历史、标签和产物状态。
 - 已构建但推送失败：安装包仍在 `release` 目录，可在网络恢复后手动执行 `git push` 和 `git push origin vx.y.z`。
 

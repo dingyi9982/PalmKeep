@@ -25,6 +25,8 @@ foreach ($path in @($JavaHome, $NodePath, $HvigorPath)) {
 if ($LASTEXITCODE -ne 0) { throw 'Text encoding check failed.' }
 & $NodePath (Join-Path $PSScriptRoot 'release-metadata-regression.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Release metadata regression check failed.' }
+& (Join-Path $PSScriptRoot 'test-release-version-policy.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Release version policy tests failed.' }
 
 $jsonFiles = @(
   'AppScope\app.json5',
