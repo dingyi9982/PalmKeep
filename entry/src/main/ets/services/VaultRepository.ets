@@ -4,6 +4,9 @@ import fs from '@ohos.file.fs';
 import cryptoFramework from '@ohos.security.cryptoFramework';
 import { logRecoverableError, normalizeError } from './ErrorUtils';
 import { migrateVaultDatabase } from './VaultDatabaseMigrations';
+import {
+  BackupComparisonContext, BackupMergeDecision, BackupMergePlan, planBackupItemMerge
+} from './VaultBackupMergePolicy';
 import { validateStoredAttachmentSize, validateVaultItemFields } from './VaultCorePolicy';
 import {
   createVaultId,
@@ -33,25 +36,9 @@ import {
 const DATABASE_NAME: string = 'palmkeep.db';
 const ATTACHMENT_DIRECTORY_NAME: string = 'palmkeep-attachments';
 
-enum BackupMergeDecision {
-  Add = 'add',
-  Update = 'update',
-  RestoreBesideTrash = 'restore_beside_trash',
-  RetainNewer = 'retain_newer',
-  Conflict = 'conflict',
-  Unchanged = 'unchanged'
-}
-
 interface StoredAttachment {
   storageName: string;
   sizeBytes: number;
-}
-
-interface BackupComparisonContext {
-  currentItems: Map<string, BackupItemRecord>;
-  currentSignatures: Map<string, string>;
-  incomingSignatures: Map<string, string>;
-  conflictSignatures: Map<string, string>;
 }
 
 class VaultRepositoryImpl {
@@ -193,11 +180,6 @@ class VaultRepositoryImpl {
   async deleteGroup(id: number): Promise<void> {
     try {
     const store = this.requireStore();
-    const groupCountResult = await store.querySql('SELECT COUNT(*) FROM vault_groups');
-    let groupCount = 0;
-    try { if (groupCountResult.goToFirstRow()) { groupCount = groupCountResult.getLong(0); } }
-    finally { groupCountResult.close(); }
-    if (groupCount <= 1) { throw new Error('至少需要保留一个分组'); }
     store.beginTransaction();
     try {
       const deletedAt = Date.now();
@@ -1006,11 +988,30 @@ class VaultRepositoryImpl {
 
   async previewBackupRestore(dataset: VaultBackupDataset): Promise<BackupRestorePreview> {
     const comparison = await this.buildBackupComparisonContext(dataset);
-    return this.backupRestorePreview(dataset, comparison);
+    const plans = this.backupMergePlans(dataset, comparison);
+    return this.backupRestorePreview(dataset, comparison, plans);
+  }
+
+  private backupMergePlans(dataset: VaultBackupDataset,
+    comparison: BackupComparisonContext): Map<string, BackupMergePlan> {
+    const plans = new Map<string, BackupMergePlan>();
+    const reservedIds = new Set<string>();
+    const allocatedIds = new Set<string>();
+    dataset.items.forEach((item: BackupItemRecord): void => { reservedIds.add(item.id); });
+    dataset.items.forEach((item: BackupItemRecord): void => {
+      const plan = planBackupItemMerge(item, comparison, reservedIds);
+      if (plan.targetId !== undefined) {
+        if (allocatedIds.has(plan.targetId)) { throw new Error('备份资料编号冲突'); }
+        allocatedIds.add(plan.targetId);
+        reservedIds.add(plan.targetId);
+      }
+      plans.set(item.id, plan);
+    });
+    return plans;
   }
 
   private backupRestorePreview(dataset: VaultBackupDataset,
-    comparison: BackupComparisonContext): BackupRestorePreview {
+    comparison: BackupComparisonContext, plans: Map<string, BackupMergePlan>): BackupRestorePreview {
     const currentItems = comparison.currentItems;
     let addedCount = 0;
     let updatedCount = 0;
@@ -1021,8 +1022,7 @@ class VaultRepositoryImpl {
     let deletedCount = 0;
     for (let index = 0; index < dataset.items.length; index += 1) {
       const incoming = dataset.items[index];
-      const current = currentItems.get(incoming.id);
-      const decision = this.backupMergeDecision(current, incoming, comparison);
+      const decision = plans.get(incoming.id)?.decision;
       if (decision === BackupMergeDecision.Add) { addedCount += 1; }
       else if (decision === BackupMergeDecision.Update || decision === BackupMergeDecision.RestoreBesideTrash) {
         updatedCount += 1;
@@ -1033,8 +1033,16 @@ class VaultRepositoryImpl {
     }
     const incomingItemIds = new Set<string>();
     dataset.items.forEach((item: BackupItemRecord): void => { incomingItemIds.add(item.id); });
+    const unchangedCopyIds = new Set<string>();
+    plans.forEach((plan: BackupMergePlan): void => {
+      if (plan.decision === BackupMergeDecision.Unchanged && plan.targetId !== undefined) {
+        unchangedCopyIds.add(plan.targetId);
+      }
+    });
     currentItems.forEach((item: BackupItemRecord, id: string): void => {
-      if (item.deletedAt === 0 && !incomingItemIds.has(id)) { retainedCount += 1; }
+      if (item.deletedAt === 0 && !incomingItemIds.has(id) && !unchangedCopyIds.has(id)) {
+        retainedCount += 1;
+      }
     });
     for (let index = 0; index < dataset.itemTombstones.length; index += 1) {
       const tombstone = dataset.itemTombstones[index];
@@ -1057,31 +1065,26 @@ class VaultRepositoryImpl {
   }
 
   async applyBackupDataset(dataset: VaultBackupDataset, extractedRoot: string): Promise<BackupRestoreResult> {
+    let stage = '准备恢复数据';
     try {
       const store = this.requireStore();
+      stage = '比对现有资料';
       const comparison = await this.buildBackupComparisonContext(dataset);
-      const preview = this.backupRestorePreview(dataset, comparison);
+      const plans = this.backupMergePlans(dataset, comparison);
+      const preview = this.backupRestorePreview(dataset, comparison, plans);
       const currentItems = comparison.currentItems;
-      const decisions = new Map<string, BackupMergeDecision>();
       const restoredTargets = new Map<string, string>();
       dataset.items.forEach((incoming: BackupItemRecord): void => {
-        const current = currentItems.get(incoming.id);
-        const decision = this.backupMergeDecision(current, incoming, comparison);
-        decisions.set(incoming.id, decision);
-        if (decision === BackupMergeDecision.Add || decision === BackupMergeDecision.Update) {
-          restoredTargets.set(incoming.id, incoming.id);
-        } else if (decision === BackupMergeDecision.RestoreBesideTrash) {
-          restoredTargets.set(incoming.id, this.restoredItemId(incoming,
-            comparison.incomingSignatures.get(incoming.id) ?? ''));
-        } else if (decision === BackupMergeDecision.Conflict) {
-          restoredTargets.set(incoming.id, this.conflictItemId(incoming,
-            comparison.incomingSignatures.get(incoming.id) ?? ''));
+        const plan = plans.get(incoming.id);
+        if (plan && plan.targetId !== undefined && plan.decision !== BackupMergeDecision.Unchanged) {
+          restoredTargets.set(incoming.id, plan.targetId);
         }
       });
 
       const copiedNames: string[] = [];
       const importedAttachmentsByItem = new Map<string, BackupAttachmentRecord[]>();
       try {
+        stage = '复制备份附件';
         for (let index = 0; index < dataset.attachments.length; index += 1) {
           const attachment = dataset.attachments[index];
           const targetItemId = restoredTargets.get(attachment.itemId);
@@ -1109,12 +1112,14 @@ class VaultRepositoryImpl {
       const oldStorageNames: string[] = [];
       store.beginTransaction();
       try {
+        stage = '合并备份分组';
         const groupMap = await this.mergeBackupGroups(store, dataset);
         for (let index = 0; index < dataset.items.length; index += 1) {
           const item = dataset.items[index];
           const targetItemId = restoredTargets.get(item.id);
           if (targetItemId === undefined) { continue; }
-          const decision = decisions.get(item.id);
+          const decision = plans.get(item.id)?.decision;
+          stage = `写入资料 ${index + 1}/${dataset.items.length}`;
           if (decision === BackupMergeDecision.Update && currentItems.has(item.id)) {
             const oldResult = await store.querySql(
               'SELECT storage_name FROM vault_item_attachments WHERE item_id = ?', [item.id]);
@@ -1136,6 +1141,7 @@ class VaultRepositoryImpl {
             ocr_text: item.ocrText, created_at: item.createdAt, updated_at: item.updatedAt, deleted_at: item.deletedAt });
           const itemAttachments = importedAttachmentsByItem.get(targetItemId) ?? [];
           for (let attachmentIndex = 0; attachmentIndex < itemAttachments.length; attachmentIndex += 1) {
+            stage = `写入附件 ${attachmentIndex + 1}/${itemAttachments.length}`;
             const attachment = itemAttachments[attachmentIndex];
             await store.insert('vault_item_attachments', { item_id: targetItemId,
               attachment_index: attachment.attachmentIndex, type: attachment.type, name: attachment.name,
@@ -1145,6 +1151,7 @@ class VaultRepositoryImpl {
         }
         // Restore is deliberately non-destructive. Deletion tombstones from old
         // test backups must never remove current active or trash data.
+        stage = '提交恢复事务';
         store.commit();
       } catch (error) {
         store.rollBack();
@@ -1165,7 +1172,7 @@ class VaultRepositoryImpl {
         conflictCount: preview.conflictCount, unchangedCount: preview.unchangedCount,
         deletedCount: preview.deletedCount };
     } catch (error) {
-      throw new Error(`恢复失败，原有资料未被修改：${normalizeError(error).message}`);
+      throw new Error(`恢复失败，原有资料未被修改（${stage}）：${normalizeError(error).message}`);
     }
   }
 
@@ -1468,6 +1475,9 @@ class VaultRepositoryImpl {
 
   private async seedGroups(): Promise<void> {
     try {
+    const seededResult = await this.requireStore().querySql(
+      'SELECT value FROM vault_metadata WHERE key = ?', ['initial_groups_seeded']);
+    try { if (seededResult.goToFirstRow()) { return; } } finally { seededResult.close(); }
     const result = await this.requireStore().querySql('SELECT COUNT(*) AS count_value FROM vault_groups');
     let count: number = 0;
     try {
@@ -1477,12 +1487,13 @@ class VaultRepositoryImpl {
     } finally {
       result.close();
     }
-    if (count > 0) {
-      return;
+    if (count === 0) {
+      await this.createGroup('账号密码', '#67E8C5');
+      await this.createGroup('个人信息', '#75D7FF');
+      await this.createGroup('家庭资料', '#F3C969');
     }
-    await this.createGroup('账号密码', '#67E8C5');
-    await this.createGroup('个人信息', '#75D7FF');
-    await this.createGroup('家庭资料', '#F3C969');
+    await this.requireStore().executeSql(
+      'INSERT OR REPLACE INTO vault_metadata (key, value) VALUES (?, ?)', ['initial_groups_seeded', 1]);
       } catch (error) {
       throw normalizeError(error);
     }
@@ -1515,7 +1526,9 @@ class VaultRepositoryImpl {
 
   private async assignUngroupedItems(): Promise<void> {
     try {
-    const groupId = await this.firstGroupId();
+    const groups = await this.listGroups();
+    if (groups.length === 0) { return; }
+    const groupId = groups[0].id;
     await this.requireStore().executeSql(
       'UPDATE vault_items SET group_id = ? WHERE deleted_at = 0 AND ' +
       '(group_id <= 0 OR group_id NOT IN (SELECT id FROM vault_groups))', [groupId]);
@@ -1549,50 +1562,8 @@ class VaultRepositoryImpl {
     }
   }
 
-  private backupMergeDecision(current: BackupItemRecord | undefined, incoming: BackupItemRecord,
-    comparison: BackupComparisonContext): BackupMergeDecision {
-    if (!current) { return BackupMergeDecision.Add; }
-    const incomingSignature = comparison.incomingSignatures.get(incoming.id) ?? '';
-    if (incoming.deletedAt === 0 && current.deletedAt > 0) {
-      const restoredId = this.restoredItemId(incoming, incomingSignature);
-      const restored = comparison.currentItems.get(restoredId);
-      return restored && comparison.currentSignatures.get(restoredId) === incomingSignature ?
-        BackupMergeDecision.Unchanged : BackupMergeDecision.RestoreBesideTrash;
-    }
-    if (incoming.deletedAt > 0 && current.deletedAt === 0) { return BackupMergeDecision.RetainNewer; }
-    if (comparison.currentSignatures.get(current.id) === incomingSignature) {
-      return BackupMergeDecision.Unchanged;
-    }
-    if (incoming.updatedAt > current.updatedAt) { return BackupMergeDecision.Update; }
-    if (current.updatedAt > incoming.updatedAt) { return BackupMergeDecision.RetainNewer; }
-    const conflictId = this.conflictItemId(incoming, incomingSignature);
-    const existingConflict = comparison.currentItems.get(conflictId);
-    if (existingConflict && comparison.currentSignatures.get(conflictId) ===
-      comparison.conflictSignatures.get(incoming.id)) {
-      return BackupMergeDecision.Unchanged;
-    }
-    return BackupMergeDecision.Conflict;
-  }
-
   private conflictTitle(title: string): string {
     return title.length > 0 ? `${title}（备份）` : '（备份）';
-  }
-
-  private conflictItemId(item: BackupItemRecord, signature: string): string {
-    return `backup-${item.id}-${item.updatedAt}-${this.contentHash(signature)}`;
-  }
-
-  private restoredItemId(item: BackupItemRecord, signature: string): string {
-    return `restored-${item.id}-${item.updatedAt}-${this.contentHash(signature)}`;
-  }
-
-  private contentHash(value: string): string {
-    let hash = 2166136261;
-    for (let index = 0; index < value.length; index += 1) {
-      hash ^= value.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-    return (hash >>> 0).toString(16);
   }
 
   private async buildBackupComparisonContext(dataset: VaultBackupDataset): Promise<BackupComparisonContext> {

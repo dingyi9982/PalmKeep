@@ -805,6 +805,7 @@ struct Index {
     let adopted = false;
     try {
       request = shareImportService.takeRequest(AbilityContextHolder.getContext(), requestId);
+      if (!this.hasGroupsForNewItem()) { return; }
       if (this.showNewItem && this.hasUnsavedNewItem()) {
         const choice = await this.getUIContext().getPromptAction().showDialog({
           title: '打开分享内容？',
@@ -896,7 +897,14 @@ struct Index {
     }, delay);
   }
 
+  private hasGroupsForNewItem(): boolean {
+    if (this.groups.length > 0) { return true; }
+    this.showToastSafely('请先新建分组，再新建资料');
+    return false;
+  }
+
   private openNewItem(type?: VaultItemType, groupId: number = 0): void {
+    if (!this.hasGroupsForNewItem()) { return; }
     this.newType = type ?? this.lastNewItemType;
     this.revealNewPassword = false;
     if (groupId > 0) {
@@ -1781,7 +1789,8 @@ struct Index {
     if (version !== this.vaultRefreshVersion) { return; }
     this.groups = groups;
     this.applyActiveItems(activeItems);
-    if (this.groups.length > 0 && this.newGroupId === 0) {
+    if (this.groups.length === 0) { this.newGroupId = 0; }
+    else if (!this.groups.some((group: VaultGroup): boolean => group.id === this.newGroupId)) {
       this.newGroupId = this.groups[0].id;
     }
     if (searchVersion !== this.searchVersion || searchText !== this.searchText.trim()) { return; }
@@ -2307,10 +2316,6 @@ struct Index {
   private async requestDeleteGroup(group: VaultGroup): Promise<void> {
     try {
     try {
-      if (this.groups.length <= 1) {
-        this.getUIContext().getPromptAction().showToast({ message: '至少需要保留一个分组' });
-        return;
-      }
       const itemCount = this.countGroup(group.id);
       if (itemCount > 0) {
         this.groupPendingDelete = group;
@@ -2608,6 +2613,7 @@ struct Index {
 
   private async createItem(): Promise<void> {
     try {
+    if (!this.hasGroupsForNewItem()) { return; }
     if (this.savingNewItem) { return; }
     this.savingNewItem = true;
     this.saveProgress = 0;
